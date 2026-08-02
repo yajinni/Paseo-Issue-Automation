@@ -87,12 +87,13 @@ function launch(root, issue, branchAction) {
   if (previous?.status === LABELS.running) throw new Error(`Issue #${issue.number} already has a running attempt.`);
 
   const base = branchName(issue, 1);
+  const nextAttempt = previous ? Number(previous.attempt || 1) + 1 : 1;
   let selection;
-  if (!branchExists(root, base)) selection = { branch: base, attempt: Number(previous?.attempt || 0) + 1 || 1 };
-  else if (branchAction === 'keep') selection = nextBranch(root, issue, Number(previous?.attempt || 1) + 1);
+  if (!previous && !branchExists(root, base)) selection = { branch: base, attempt: 1 };
+  else if (branchAction === 'keep') selection = nextBranch(root, issue, nextAttempt);
   else if (branchAction === 'delete') {
     deleteRecordedBranch(root, previous);
-    selection = { branch: base, attempt: Number(previous?.attempt || 0) + 1 };
+    selection = nextBranch(root, issue, nextAttempt);
   } else throw new Error(`Branch ${base} already exists. Choose keep or delete.`);
 
   const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
