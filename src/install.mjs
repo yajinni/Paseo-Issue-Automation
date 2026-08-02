@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commandAvailable, findFirstKey, run, runJson } from './process.mjs';
@@ -6,13 +7,21 @@ import {
   LABELS,
   WORKSPACE_TITLE,
   loadConfig,
+  loadIntegration,
   loadRuntime,
   saveConfig,
+  saveIntegration,
   statePaths,
 } from './state.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const templateFile = path.join(packageRoot, 'templates', 'automated-coding-task.md');
+
+export const PASEO_SERVICE_NAME = 'issue-coding-automation';
+export const PASEO_SERVICE = Object.freeze({
+  type: 'service',
+  command: 'npx --no-install paseo-issue-automation start',
+});
 
 const LABEL_DETAILS = Object.freeze({
   [LABELS.ready]: ['0e8a16', 'Ready for autonomous coding'],
@@ -21,6 +30,14 @@ const LABEL_DETAILS = Object.freeze({
   [LABELS.failed]: ['b60205', 'Automation failed and needs attention'],
   [LABELS.humanReview]: ['fbca04', 'Pull request is ready for human review'],
 });
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 export function repositoryIdentity(root) {
   const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root, allowFailure: true });
@@ -76,24 +93,78 @@ function writeJsonFile(file, value) {
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-export function installRepositoryIntegration(root) {
-  const targetTemplate = issueTemplatePath(root);
-  mkdirSync(path.dirname(targetTemplate), { recursive: true });
-  writeFileSync(targetTemplate, readFileSync(templateFile, 'utf8'), 'utf8');
+export function installIssueTemplate(root) {
+  const target = issueTemplatePath(root);
+  const expected = readFileSync(templateFile, 'utf8');
+  const integration = loadIntegration(root);
+  const existed = existsSync(target);
 
+  if (existed) {
+    const current = readFileSync(target, 'utf8');
+    if (current !== expected) {
+      throw new Error(`${path.relative(root, target)} already exists with different content. It was not overwritten.`);
+    }
+  } else {
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, expected, 'utf8');
+  }
+
+  const previouslyManaged = integration.issueTemplate?.createdByPackage === true;
+  saveIntegration(root, {
+    ...integration,
+    issueTemplate: {
+      path: path.relative(root, target),
+      createdByPackage: previouslyManaged || !existed,
+      expectedSha256: sha256(expected),
+    },
+  });
+
+  return { path: target, created: !existed, managed: previouslyManaged || !existed };
+}
+
+export function installPaseoService(root) {
   const file = paseoJsonPath(root);
+  const integration = loadIntegration(root);
+  const existed = existsSync(file);
   const existing = readJsonFile(file, {});
+  const currentService = existing.scripts?.[PASEO_SERVICE_NAME];
+
+  if (currentService && !sameJson(currentService, PASEO_SERVICE)) {
+    throw new Error(`paseo.json already contains a conflicting ${PASEO_SERVICE_NAME} service. It was not changed.`);
+  }
+
+  const serviceAddedNow = !currentService;
   const next = {
     ...existing,
     scripts: {
       ...(existing.scripts || {}),
-      'issue-coding-automation': {
-        type: 'service',
-        command: 'npx --no-install paseo-issue-automation start',
-      },
+      [PASEO_SERVICE_NAME]: PASEO_SERVICE,
     },
   };
   writeJsonFile(file, next);
+
+  const prior = integration.paseoJson || {};
+  saveIntegration(root, {
+    ...integration,
+    paseoJson: {
+      path: path.relative(root, file),
+      createdByPackage: prior.createdByPackage === true || !existed,
+      serviceAddedByPackage: prior.serviceAddedByPackage === true || serviceAddedNow,
+      serviceName: PASEO_SERVICE_NAME,
+    },
+  });
+
+  return {
+    path: file,
+    created: !existed,
+    modified: existed && serviceAddedNow,
+    managed: prior.serviceAddedByPackage === true || serviceAddedNow,
+  };
+}
+
+export function installRepositoryIntegration(root) {
+  const issueTemplate = installIssueTemplate(root);
+  const paseoJson = installPaseoService(root);
 
   for (const [label, [color, description]] of Object.entries(LABEL_DETAILS)) {
     run('gh', ['label', 'create', label, '--color', color, '--description', description, '--force'], {
@@ -102,10 +173,61 @@ export function installRepositoryIntegration(root) {
   }
 
   return {
-    template: targetTemplate,
-    paseoJson: file,
+    template: issueTemplate,
+    paseoJson,
     labels: Object.keys(LABEL_DETAILS),
   };
+}
+
+export function removeIssueTemplate(root) {
+  const integration = loadIntegration(root);
+  const managed = integration.issueTemplate;
+  const target = issueTemplatePath(root);
+  if (!managed?.createdByPackage) {
+    throw new Error('The issue template is not recorded as a file created by this package, so it will not be deleted.');
+  }
+
+  if (existsSync(target)) {
+    const current = readFileSync(target, 'utf8');
+    if (sha256(current) !== managed.expectedSha256) {
+      throw new Error('The installed issue template has been changed since installation. It was not deleted.');
+    }
+    rmSync(target);
+  }
+
+  saveIntegration(root, { ...integration, issueTemplate: null });
+  return { removed: true, path: target };
+}
+
+export function removePaseoIntegration(root) {
+  const integration = loadIntegration(root);
+  const managed = integration.paseoJson;
+  const file = paseoJsonPath(root);
+  if (!managed?.serviceAddedByPackage) {
+    throw new Error('The Paseo service is not recorded as an addition made by this package, so it will not be removed.');
+  }
+
+  if (!existsSync(file)) {
+    saveIntegration(root, { ...integration, paseoJson: null });
+    return { removed: true, removedFile: false, path: file };
+  }
+
+  const existing = readJsonFile(file, {});
+  const currentService = existing.scripts?.[PASEO_SERVICE_NAME];
+  if (currentService && !sameJson(currentService, PASEO_SERVICE)) {
+    throw new Error(`The ${PASEO_SERVICE_NAME} entry has been changed since installation. It was not removed.`);
+  }
+
+  const next = { ...existing, scripts: { ...(existing.scripts || {}) } };
+  delete next.scripts[PASEO_SERVICE_NAME];
+  if (Object.keys(next.scripts).length === 0) delete next.scripts;
+
+  const removeWholeFile = managed.createdByPackage === true && Object.keys(next).length === 0;
+  if (removeWholeFile) rmSync(file);
+  else writeJsonFile(file, next);
+
+  saveIntegration(root, { ...integration, paseoJson: null });
+  return { removed: true, removedFile: removeWholeFile, path: file };
 }
 
 function workspaceList(root) {
@@ -174,25 +296,73 @@ function branchExists(root, branch) {
   }).ok;
 }
 
+function issueTemplateManagement(root, integrationState) {
+  const target = issueTemplatePath(root);
+  const present = existsSync(target);
+  const managed = integrationState.issueTemplate;
+  let unchanged = false;
+  if (present && managed?.expectedSha256) {
+    unchanged = sha256(readFileSync(target, 'utf8')) === managed.expectedSha256;
+  }
+  return {
+    path: path.relative(root, target),
+    present,
+    createdByPackage: managed?.createdByPackage === true,
+    canRemove: managed?.createdByPackage === true && (!present || unchanged),
+    changedSinceInstall: managed?.createdByPackage === true && present && !unchanged,
+  };
+}
+
+function paseoManagement(root, integrationState) {
+  const file = paseoJsonPath(root);
+  const present = existsSync(file);
+  const managed = integrationState.paseoJson;
+  let servicePresent = false;
+  let serviceUnchanged = false;
+  let onlyManagedContent = false;
+  if (present) {
+    try {
+      const parsed = readJsonFile(file, {});
+      const service = parsed.scripts?.[PASEO_SERVICE_NAME];
+      servicePresent = Boolean(service);
+      serviceUnchanged = sameJson(service, PASEO_SERVICE);
+      const remainder = { ...parsed, scripts: { ...(parsed.scripts || {}) } };
+      delete remainder.scripts[PASEO_SERVICE_NAME];
+      if (Object.keys(remainder.scripts).length === 0) delete remainder.scripts;
+      onlyManagedContent = Object.keys(remainder).length === 0;
+    } catch {
+      servicePresent = false;
+    }
+  }
+  const canRemove = managed?.serviceAddedByPackage === true && (!servicePresent || serviceUnchanged);
+  return {
+    path: path.relative(root, file),
+    present,
+    servicePresent,
+    createdByPackage: managed?.createdByPackage === true,
+    serviceAddedByPackage: managed?.serviceAddedByPackage === true,
+    removalMode: canRemove && managed?.createdByPackage === true && onlyManagedContent
+      ? 'file'
+      : managed?.serviceAddedByPackage === true ? 'managed-section' : null,
+    canRemove,
+    changedSinceInstall: managed?.serviceAddedByPackage === true && servicePresent && !serviceUnchanged,
+  };
+}
+
 export function setupSnapshot(root) {
   const config = loadConfig(root);
   const runtime = loadRuntime(root);
   const req = requirements(root);
   const workspace = detectAutomationWorkspace(root);
+  const integrationState = loadIntegration(root);
+  const issueTemplate = issueTemplateManagement(root, integrationState);
+  const paseoJson = paseoManagement(root, integrationState);
   const integration = {
-    issueTemplate: existsSync(issueTemplatePath(root)),
-    paseoJson: existsSync(paseoJsonPath(root)),
+    issueTemplate: issueTemplate.present,
+    paseoJson: paseoJson.present,
+    paseoService: paseoJson.servicePresent && !paseoJson.changedSinceInstall,
+    management: { issueTemplate, paseoJson },
   };
-  if (integration.paseoJson) {
-    try {
-      const scripts = readJsonFile(paseoJsonPath(root), {}).scripts || {};
-      integration.paseoService = scripts['issue-coding-automation']?.type === 'service';
-    } catch {
-      integration.paseoService = false;
-    }
-  } else {
-    integration.paseoService = false;
-  }
 
   const modelsConfigured = Boolean(
     config.models.orchestrator && config.models.coder && config.models.reviewer,
