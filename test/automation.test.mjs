@@ -33,6 +33,8 @@ Block on ambiguity`;
   assert.equal(validateIssueBody(body).ok, true);
   assert.equal(sectionContent(body, 'Validation and checks'), '- [ ] Run focused test');
   assert.equal(validateIssueBody(body.replace('- [ ] Run focused test', '')).ok, false);
+  const placeholdersOnly = body.replace('- [ ] Run focused test', '<!-- Add a check. -->\n- [ ]');
+  assert.equal(validateIssueBody(placeholdersOnly).ok, false);
 });
 
 test('dependencies and branch slug are deterministic', () => {
