@@ -37,6 +37,12 @@ export const DEFAULT_RUNTIME = Object.freeze({
   lastDispatchResult: null,
 });
 
+export const DEFAULT_INTEGRATION = Object.freeze({
+  version: 1,
+  issueTemplate: null,
+  paseoJson: null,
+});
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -56,6 +62,7 @@ export function statePaths(root) {
     root: stateRoot,
     config: path.join(stateRoot, 'config.json'),
     runtime: path.join(stateRoot, 'runtime.json'),
+    integration: path.join(stateRoot, 'integration.json'),
     runs,
   };
 }
@@ -146,6 +153,20 @@ export function saveRuntime(root, runtime) {
     lastDispatchResult: runtime.lastDispatchResult || null,
   };
   atomicWrite(statePaths(root).runtime, `${JSON.stringify(normalized, null, 2)}\n`);
+  return normalized;
+}
+
+export function loadIntegration(root) {
+  return { ...clone(DEFAULT_INTEGRATION), ...readJson(statePaths(root).integration, DEFAULT_INTEGRATION) };
+}
+
+export function saveIntegration(root, integration) {
+  const normalized = {
+    version: 1,
+    issueTemplate: integration.issueTemplate || null,
+    paseoJson: integration.paseoJson || null,
+  };
+  atomicWrite(statePaths(root).integration, `${JSON.stringify(normalized, null, 2)}\n`);
   return normalized;
 }
 
