@@ -4,57 +4,37 @@ A repository-independent npm package that turns automation-ready GitHub issues i
 
 ## Guided setup
 
-The package opens a local setup dashboard before the operating dashboard. The setup flow can:
-
-- preview every repository file, GitHub label, Paseo workspace, and local-state location before installation
-- add the automated coding issue template
-- merge the `issue-coding-automation` service into `paseo.json`
-- create or reuse the GitHub lifecycle labels
-- create or reconnect to the permanent local Paseo workspace named **Issue Coding Automation**
-- configure the base branch and Orchestrator, Coder, and Reviewer models
-- run a non-destructive setup self-test
-- verify setup and keep issue claims paused until explicitly resumed
+The package opens a local setup dashboard before the operating dashboard. It previews and manages the issue template, `paseo.json` service, GitHub labels, permanent **Issue Coding Automation** workspace, model configuration, self-test, repairs, and guided uninstall.
 
 The package does not configure Paseo worktree setup or teardown, create repository coding instructions, require `AGENTS.md`, select validation commands, or assume a CI workflow name.
 
+## Operating dashboard
+
+The operating dashboard supports both automatic polling and direct issue control:
+
+- start a specific `agent-ready` issue immediately
+- skip or unskip an issue for automatic claiming
+- see phase, branch, attempt number, timestamps, heartbeat, review round, workspace, and PR
+- abandon an interrupted attempt without trying to recover it
+- restart as a completely fresh attempt
+- keep an old branch and use `-attempt-N`, or explicitly delete the package-recorded branch after safety checks
+- copy the activity timeline or download its JSON
+
+Coder and Reviewer may use the same model. Reviewer independence means a fresh session with no shared Coder chat history or working context.
+
+## Interruption policy
+
+There is no reconciliation, resume, or automatic recovery. Interrupted work is abandoned and restarted from the issue as a fresh attempt. Old branches are never deleted automatically.
+
 ## Reversible installation
 
-The dashboard records package ownership under the repository's Git common directory and provides separate controls for every managed component:
-
-- remove or restore the package-created issue-template file
-- remove or repair only the package-owned service in `paseo.json`, preserving unrelated settings
-- remove each package-created GitHub label separately or remove all managed labels
-- archive only a Paseo workspace recorded as package-created
-- clear local automation configuration, run records, logs, and ownership state
-- run a guided uninstall with selectable cleanup steps
-
-Pre-existing matching files, labels, services, and workspaces are reused but are not treated as package-owned. Changed package-created files or sections are preserved until the user explicitly restores the package version. Destructive cleanup is blocked while automation issues are running. Forced label removal requires a separate confirmation because GitHub removes that label from open issues using it.
-
-After guided cleanup, close the dashboard and run the displayed package-manager command, such as:
-
-```bash
-npm uninstall paseo-issue-automation
-```
-
-That final command removes the dependency from `package.json`, the lockfile, and `node_modules`.
+The dashboard records package ownership under the repository's Git common directory and provides separate controls for every managed component. Pre-existing matching components are reused but never treated as package-owned.
 
 ## Development installation
-
-Until the package is published to npm, install it from GitHub inside a target repository:
 
 ```bash
 npm install --save-dev github:yajinni/Paseo-Issue-Automation
 npx paseo-issue-automation setup
-```
-
-After setup, open the permanent **Issue Coding Automation** workspace in Paseo and start the `issue-coding-automation` service.
-
-## Lifecycle labels
-
-```text
-agent-ready → agent-running → human-review
-                         ↘ agent-blocked
-                         ↘ agent-failed
 ```
 
 ## Commands
@@ -65,12 +45,15 @@ npx paseo-issue-automation start
 npx paseo-issue-automation status
 npx paseo-issue-automation enable
 npx paseo-issue-automation disable
+npx paseo-issue-automation start-issue --issue 123 --branch-action keep
+npx paseo-issue-automation skip-issue --issue 123
+npx paseo-issue-automation unskip-issue --issue 123
+npx paseo-issue-automation abandon --issue 123 --reason "Interrupted"
+npx paseo-issue-automation restart --issue 123 --branch-action keep
 ```
 
-Agent-facing transition and evidence commands are documented by `paseo-issue-automation help` and injected into the Orchestrator prompt.
+## Release preparation
 
-## Repository responsibilities
+CI tests Node 20, 22, and 24, runs syntax checks, validates the npm package contents, installs the produced `.tgz` archive in a clean project, and invokes the packaged CLI. Tagged `v*` releases can publish through the included npm-provenance workflow after `NPM_TOKEN` is configured.
 
-The repository's coding harness supplies and enforces its own coding instructions. The person or AI creating an automation-ready issue must include its requirements, acceptance criteria, validation and checks, dependencies, privacy constraints, and stop conditions.
-
-See [Design decisions](docs/DESIGN_DECISIONS.md) and [Automation protocol](docs/AUTOMATION_PROTOCOL.md).
+See [Design decisions](docs/DESIGN_DECISIONS.md), [Automation protocol](docs/AUTOMATION_PROTOCOL.md), and [Publishing](docs/PUBLISHING.md).
