@@ -27,10 +27,17 @@ export function sectionContent(body, heading) {
   return text.slice(start, end).trim();
 }
 
+function meaningfulSectionContent(content) {
+  return String(content || '')
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/^\s*- \[ \]\s*$/gm, '')
+    .trim();
+}
+
 export function validateIssueBody(body) {
   const missing = REQUIRED_SECTIONS.filter((heading) => {
-    const content = sectionContent(body, heading);
-    return !content || /^(?:none|n\/a|todo|tbd|<!--.*-->)$/is.test(content);
+    const content = meaningfulSectionContent(sectionContent(body, heading));
+    return !content || /^(?:none|n\/a|todo|tbd)$/i.test(content);
   });
   return {
     ok: missing.length === 0,
@@ -253,6 +260,11 @@ function requireRun(root, issueNumber) {
 
 export function recordEvent(root, issueNumber, event) {
   const state = requireRun(root, issueNumber);
+  if (event.event === 'review') {
+    const completedRounds = (state.events || []).filter((item) => item.event === 'review').length;
+    const maximum = loadConfig(root).maxReviewRounds;
+    if (completedRounds >= maximum) throw new Error(`Maximum review rounds (${maximum}) reached.`);
+  }
   const next = {
     ...state,
     events: [...(state.events || []), { ...event, at: new Date().toISOString() }],
