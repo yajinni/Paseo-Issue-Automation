@@ -1,0 +1,168 @@
+import http from 'node:http';
+import { spawn } from 'node:child_process';
+import { dashboardHtml } from './ui.mjs';
+import { enhanceDashboardHtml } from './operations-ui.mjs';
+import { automationStatus, setClaimsEnabled } from './automation.mjs';
+import {
+  abandonAttempt,
+  dispatchNextIssue,
+  dispatchSpecificIssue,
+  openAttemptWorkspace,
+  operationalStatus,
+  restartIssue,
+  skipIssue,
+  unskipIssue,
+  updateManagedDispatch,
+} from './attempts.mjs';
+import {
+  clearLocalAutomationState,
+  createAutomationWorkspace,
+  finishSetup,
+  guidedUninstall,
+  installIssueTemplate,
+  installLabels,
+  installPaseoService,
+  installRepositoryIntegration,
+  installationPreview,
+  removeAllManagedLabels,
+  removeAutomationWorkspace,
+  removeIssueTemplate,
+  removeLabel,
+  removePaseoIntegration,
+  repairLabel,
+  runSetupSelfTest,
+  setupSnapshot,
+} from './install.mjs';
+import { loadConfig, repositoryRoot, saveConfig } from './state.mjs';
+
+function json(response, status, body) {
+  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  response.end(JSON.stringify(body));
+}
+
+async function readBody(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  if (!chunks.length) return {};
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+function openBrowser(url) {
+  const command = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+  child.on('error', () => {});
+  child.unref();
+}
+
+function combinedSnapshot(root) {
+  const snapshot = setupSnapshot(root);
+  let automation = null;
+  if (snapshot.requirements.githubAuthenticated) {
+    try { automation = { ...automationStatus(root), ...operationalStatus(root) }; } catch { automation = null; }
+  }
+  return { ...snapshot, automation };
+}
+
+export async function startServer({ cwd = process.cwd(), open = false } = {}) {
+  const root = repositoryRoot(cwd);
+  let timer = null;
+
+  const dispatch = () => {
+    try {
+      const result = dispatchNextIssue(root);
+      updateManagedDispatch(root, result);
+      return result;
+    } catch (error) {
+      const result = { claimed: false, error: error.message };
+      updateManagedDispatch(root, result);
+      throw error;
+    }
+  };
+
+  const resetTimer = () => {
+    if (timer) clearInterval(timer);
+    const config = loadConfig(root);
+    timer = setInterval(() => {
+      try { dispatch(); } catch (error) { console.error(`[dispatch] ${error.message}`); }
+    }, config.pollIntervalSeconds * 1000);
+    timer.unref();
+  };
+
+  const server = http.createServer(async (request, response) => {
+    try {
+      const url = new URL(request.url, 'http://localhost');
+      if (request.method === 'GET' && url.pathname === '/') {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end(enhanceDashboardHtml(dashboardHtml()));
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/status') {
+        json(response, 200, combinedSnapshot(root));
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/preview') {
+        json(response, 200, installationPreview(root));
+        return;
+      }
+      if (request.method !== 'POST') {
+        json(response, 404, { error: 'Not found' });
+        return;
+      }
+
+      const body = await readBody(request);
+      let result = null;
+      if (url.pathname === '/api/install') result = installRepositoryIntegration(root);
+      else if (url.pathname === '/api/install/issue-template') result = installIssueTemplate(root);
+      else if (url.pathname === '/api/repair/issue-template') result = installIssueTemplate(root, { overwriteManaged: true });
+      else if (url.pathname === '/api/install/paseo-service') result = installPaseoService(root);
+      else if (url.pathname === '/api/repair/paseo-service') result = installPaseoService(root, { overwriteManaged: true });
+      else if (url.pathname === '/api/install/labels') result = installLabels(root);
+      else if (url.pathname === '/api/repair/label') result = repairLabel(root, body.label);
+      else if (url.pathname === '/api/remove/issue-template') result = removeIssueTemplate(root);
+      else if (url.pathname === '/api/remove/paseo-integration') result = removePaseoIntegration(root);
+      else if (url.pathname === '/api/remove/label') result = removeLabel(root, body.label, { force: body.force === true });
+      else if (url.pathname === '/api/remove/labels') result = removeAllManagedLabels(root, { force: body.force === true });
+      else if (url.pathname === '/api/workspace') result = createAutomationWorkspace(root);
+      else if (url.pathname === '/api/remove/workspace') result = removeAutomationWorkspace(root);
+      else if (url.pathname === '/api/self-test') result = runSetupSelfTest(root);
+      else if (url.pathname === '/api/clear-state') result = clearLocalAutomationState(root, { force: body.force === true });
+      else if (url.pathname === '/api/uninstall') result = guidedUninstall(root, body);
+      else if (url.pathname === '/api/start-issue') result = dispatchSpecificIssue(root, Number(body.issueNumber), { branchAction: body.branchAction || 'keep' });
+      else if (url.pathname === '/api/skip-issue') result = skipIssue(root, Number(body.issueNumber));
+      else if (url.pathname === '/api/unskip-issue') result = unskipIssue(root, Number(body.issueNumber));
+      else if (url.pathname === '/api/abandon-issue') result = abandonAttempt(root, Number(body.issueNumber), body.reason || 'Abandoned by user');
+      else if (url.pathname === '/api/restart-issue') result = restartIssue(root, Number(body.issueNumber), { branchAction: body.branchAction || 'keep' });
+      else if (url.pathname === '/api/open-attempt-workspace') result = openAttemptWorkspace(root, Number(body.issueNumber));
+      else if (url.pathname === '/api/config') {
+        const current = loadConfig(root);
+        result = saveConfig(root, { ...current, ...body, models: { ...current.models, ...(body.models || {}) } });
+        resetTimer();
+      } else if (url.pathname === '/api/finish') {
+        result = finishSetup(root);
+        setClaimsEnabled(root, false);
+      } else if (url.pathname === '/api/resume') result = setClaimsEnabled(root, true);
+      else if (url.pathname === '/api/pause') result = setClaimsEnabled(root, false);
+      else if (url.pathname === '/api/run-now') result = dispatch();
+      else {
+        json(response, 404, { error: 'Not found' });
+        return;
+      }
+      json(response, 200, { result, snapshot: combinedSnapshot(root) });
+    } catch (error) {
+      json(response, 400, { error: error.message });
+    }
+  });
+
+  const requestedPort = Number(process.env.PASEO_PORT || 4317);
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(requestedPort, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  const url = `http://127.0.0.1:${address.port}`;
+  console.log(`Issue Coding Automation dashboard: ${url}`);
+  resetTimer();
+  if (open) openBrowser(url);
+  return { server, root, url };
+}
