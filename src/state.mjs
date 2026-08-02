@@ -38,9 +38,11 @@ export const DEFAULT_RUNTIME = Object.freeze({
 });
 
 export const DEFAULT_INTEGRATION = Object.freeze({
-  version: 1,
+  version: 2,
   issueTemplate: null,
   paseoJson: null,
+  labels: {},
+  workspace: null,
 });
 
 function clone(value) {
@@ -157,14 +159,23 @@ export function saveRuntime(root, runtime) {
 }
 
 export function loadIntegration(root) {
-  return { ...clone(DEFAULT_INTEGRATION), ...readJson(statePaths(root).integration, DEFAULT_INTEGRATION) };
+  const stored = readJson(statePaths(root).integration, DEFAULT_INTEGRATION);
+  return {
+    version: 2,
+    issueTemplate: stored.issueTemplate || null,
+    paseoJson: stored.paseoJson || null,
+    labels: stored.labels && typeof stored.labels === 'object' ? stored.labels : {},
+    workspace: stored.workspace || null,
+  };
 }
 
 export function saveIntegration(root, integration) {
   const normalized = {
-    version: 1,
+    version: 2,
     issueTemplate: integration.issueTemplate || null,
     paseoJson: integration.paseoJson || null,
+    labels: integration.labels && typeof integration.labels === 'object' ? integration.labels : {},
+    workspace: integration.workspace || null,
   };
   atomicWrite(statePaths(root).integration, `${JSON.stringify(normalized, null, 2)}\n`);
   return normalized;
