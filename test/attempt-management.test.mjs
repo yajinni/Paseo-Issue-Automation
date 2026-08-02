@@ -30,7 +30,7 @@ test('skipped issues persist and can be unskipped', (t) => {
   assert.deepEqual(loadRuntime(root).skippedIssueNumbers, []);
 });
 
-test('activity history records phase changes and evidence', (t) => {
+test('attempt state records heartbeat phase and review evidence', (t) => {
   const root = temporaryRepository();
   t.after(() => rmSync(root, { recursive: true, force: true }));
   saveConfig(root, { baseBranch: 'main', models: { orchestrator: 'x/a', coder: 'x/b', reviewer: 'x/b' } });
@@ -38,9 +38,10 @@ test('activity history records phase changes and evidence', (t) => {
   heartbeat(root, 4, 'reviewing');
   recordEvent(root, 4, { event: 'review', result: 'CHANGES_REQUIRED', commit: 'abc', details: 'Fix edge case' });
   const state = loadRun(root, 4);
-  assert.equal(state.activity[0].type, 'phase-changed');
-  assert.equal(state.activity[1].type, 'review');
-  assert.equal(state.activity[1].details, 'Fix edge case');
+  assert.equal(state.phase, 'reviewing');
+  assert.ok(state.heartbeatAt);
+  assert.equal(state.events[0].event, 'review');
+  assert.equal(state.events[0].details, 'Fix edge case');
 });
 
 test('reviewer independence is fresh context, not a different model', () => {
@@ -50,9 +51,10 @@ test('reviewer independence is fresh context, not a different model', () => {
     'ai/issue-1-test',
     { baseBranch: 'main', maxReviewRounds: 3, models: { orchestrator: 'x/a', coder: 'x/same', reviewer: 'x/same' } },
   );
-  assert.match(prompt, /may use the same model/i);
-  assert.match(prompt, /must not share the Coder's chat history or working context/i);
-  assert.match(prompt, /does not resume interrupted runs/i);
+  assert.match(prompt, /- Coder: x\/same/);
+  assert.match(prompt, /- Independent Reviewer: x\/same/);
+  assert.match(prompt, /fresh independent Reviewer session with no shared Coder chat history or working context/i);
+  assert.match(prompt, /cannot be resumed or recovered/i);
 });
 
 test('operations UI injects manual controls without replacing setup UI', () => {
