@@ -18,13 +18,20 @@ p { color: #9da7b3; line-height: 1.5; }
 button { background: #238636; color: white; border: 0; border-radius: 7px; padding: 10px 14px; cursor: pointer; font-weight: 700; }
 button.secondary { background: #30363d; }
 button.danger { background: #da3633; }
+button:disabled { cursor: not-allowed; opacity: .45; }
 input { width: 100%; box-sizing: border-box; background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 7px; padding: 10px; margin: 5px 0 12px; }
 label { display: block; font-size: 13px; color: #b1bac4; }
 .ok { color: #3fb950; }
 .bad { color: #f85149; }
+.muted { color: #8b949e; }
 pre { white-space: pre-wrap; background: #0d1117; padding: 12px; border-radius: 7px; overflow: auto; }
-.hidden { display: none; }
+code { overflow-wrap: anywhere; }
+.hidden { display: none !important; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.file-list { display: grid; gap: 10px; margin-top: 14px; }
+.file-item { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; }
+.file-item p { margin: 5px 0 0; font-size: 13px; }
+.file-item button { flex: 0 0 auto; }
 </style>
 </head>
 <body><main>
@@ -32,6 +39,9 @@ pre { white-space: pre-wrap; background: #0d1117; padding: 12px; border-radius: 
 <p id="subtitle">Loading setup status…</p>
 <div id="message"></div>
 <section id="setup" class="hidden">
+  <div class="actions" style="margin-bottom:16px">
+    <button id="return-dashboard" class="secondary hidden" onclick="showDashboardAgain()">Return to dashboard</button>
+  </div>
   <div class="grid">
     <article class="card" id="requirements-card">
       <h2>1. Check requirements</h2>
@@ -41,9 +51,25 @@ pre { white-space: pre-wrap; background: #0d1117; padding: 12px; border-radius: 
     </article>
     <article class="card" id="integration-card">
       <h2>2. Install repository integration</h2>
-      <p>Adds the automation-ready GitHub issue template, merges one service into <code>paseo.json</code>, and creates the five lifecycle labels. Existing <code>paseo.json</code> settings are preserved.</p>
-      <button onclick="post('/api/install')">Install repository files</button>
-      <pre>.github/ISSUE_TEMPLATE/automated-coding-task.md\npaseo.json\nGitHub lifecycle labels</pre>
+      <p>Adds the automation-ready GitHub issue template, merges one service into <code>paseo.json</code>, and creates the lifecycle labels. Existing files are preserved, and every package-owned file or addition has its own safe removal control.</p>
+      <button onclick="post('/api/install')">Install repository integration</button>
+      <div class="file-list">
+        <div class="file-item">
+          <div>
+            <code>.github/ISSUE_TEMPLATE/automated-coding-task.md</code>
+            <p id="issue-template-status">Checking…</p>
+          </div>
+          <button id="remove-issue-template" class="danger hidden" onclick="removeManaged('/api/remove/issue-template', 'Remove the issue template file installed by this package?')">Remove installed file</button>
+        </div>
+        <div class="file-item">
+          <div>
+            <code>paseo.json</code>
+            <p id="paseo-json-status">Checking…</p>
+          </div>
+          <button id="remove-paseo-integration" class="danger hidden" onclick="removeManaged('/api/remove/paseo-integration', 'Remove the package-owned Paseo integration? Unrelated paseo.json content will be preserved.')">Remove package addition</button>
+        </div>
+      </div>
+      <p class="muted">GitHub labels are external repository settings, not files, so they are not included in this file-removal list.</p>
     </article>
     <article class="card" id="workspace-card">
       <h2>3. Create the permanent workspace</h2>
@@ -91,10 +117,11 @@ pre { white-space: pre-wrap; background: #0d1117; padding: 12px; border-radius: 
   <article class="card" style="margin-top:16px">
     <h2>Configuration</h2>
     <pre id="final-config"></pre>
-    <button class="secondary" onclick="showSetupAgain()">Setup and configuration</button>
+    <button class="secondary" onclick="showSetupAgain()">Setup, files, and configuration</button>
   </article>
 </section>
 <script>
+let forceSetup = false;
 function showMessage(text, bad=false) {
   document.getElementById('message').innerHTML = text ? '<p class="'+(bad?'bad':'ok')+'">'+escapeHtml(text)+'</p>' : '';
 }
@@ -108,6 +135,10 @@ async function api(path, options={}) {
 async function post(path, body={}) {
   try { showMessage('Working…'); await api(path, {method:'POST', body:JSON.stringify(body)}); showMessage('Completed.'); await refresh(); }
   catch (error) { showMessage(error.message, true); }
+}
+async function removeManaged(path, question) {
+  if (!window.confirm(question)) return;
+  await post(path);
 }
 async function saveConfig() {
   await post('/api/config', {
@@ -123,15 +154,43 @@ async function saveConfig() {
   });
 }
 function showSetupAgain() {
-  document.getElementById('dashboard').classList.add('hidden');
-  document.getElementById('setup').classList.remove('hidden');
-  document.getElementById('subtitle').textContent = 'Setup and configuration';
+  forceSetup = true;
+  refresh();
+}
+function showDashboardAgain() {
+  forceSetup = false;
+  refresh();
+}
+function renderFileControls(data) {
+  const issue = data.integration.management.issueTemplate;
+  const paseo = data.integration.management.paseoJson;
+  const issueStatus = document.getElementById('issue-template-status');
+  const issueButton = document.getElementById('remove-issue-template');
+  if (!issue.present) issueStatus.textContent = 'Not installed.';
+  else if (issue.changedSinceInstall) issueStatus.textContent = 'Installed by the package, but changed afterward. It will not be deleted automatically.';
+  else if (issue.createdByPackage) issueStatus.textContent = 'Installed by this package. The button deletes this file only if it is still unchanged.';
+  else issueStatus.textContent = 'Already present, but not recorded as a file created by this package.';
+  issueButton.classList.toggle('hidden', !issue.createdByPackage);
+  issueButton.disabled = !issue.canRemove;
+
+  const paseoStatus = document.getElementById('paseo-json-status');
+  const paseoButton = document.getElementById('remove-paseo-integration');
+  if (!paseo.servicePresent) paseoStatus.textContent = paseo.present ? 'File exists, but the automation service is not installed.' : 'File does not exist.';
+  else if (paseo.changedSinceInstall) paseoStatus.textContent = 'The package-owned service was changed afterward. It will not be removed automatically.';
+  else if (paseo.removalMode === 'file') paseoStatus.textContent = 'This file was created by the package and contains only the package-owned service.';
+  else if (paseo.serviceAddedByPackage) paseoStatus.textContent = 'The package added one service. Removing it preserves every unrelated paseo.json setting.';
+  else paseoStatus.textContent = 'The service already existed and is not recorded as a package-owned addition.';
+  paseoButton.classList.toggle('hidden', !paseo.serviceAddedByPackage);
+  paseoButton.disabled = !paseo.canRemove;
+  paseoButton.textContent = paseo.removalMode === 'file' ? 'Remove installed file' : 'Remove added service';
 }
 function render(data) {
-  const setupDone = data.config.setupComplete;
-  document.getElementById('setup').classList.toggle('hidden', setupDone);
-  document.getElementById('dashboard').classList.toggle('hidden', !setupDone);
-  document.getElementById('subtitle').textContent = setupDone ? 'Autonomous GitHub issue coding through Paseo' : 'Guided setup';
+  const operational = data.config.setupComplete && data.checks.ready;
+  const showSetup = forceSetup || !operational;
+  document.getElementById('setup').classList.toggle('hidden', !showSetup);
+  document.getElementById('dashboard').classList.toggle('hidden', showSetup);
+  document.getElementById('return-dashboard').classList.toggle('hidden', !forceSetup || !operational);
+  document.getElementById('subtitle').textContent = showSetup ? 'Guided setup and repository integration management' : 'Autonomous GitHub issue coding through Paseo';
   const req = data.requirements;
   document.getElementById('requirements').textContent = [
     'Git: '+req.git,
@@ -141,6 +200,7 @@ function render(data) {
     'Paseo reachable: '+req.paseoReachable,
     'Remote: '+(req.remote || 'missing')
   ].join('\n');
+  renderFileControls(data);
   document.getElementById('workspace').textContent = data.workspace?.id ? data.workspace.title+'\n'+data.workspace.id : 'Not created';
   document.getElementById('baseBranch').value = data.config.baseBranch || req.defaultBranch || '';
   document.getElementById('orchestrator').value = data.config.models.orchestrator || '';
