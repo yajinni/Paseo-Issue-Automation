@@ -301,7 +301,8 @@ export function removeLabel(root, label, { force = false } = {}) {
   if (usage.length && !force) {
     throw new Error(`${label} is used by ${usage.length} open issue(s). Confirm forced removal to continue.`);
   }
-  run('gh', ['label', 'delete', label, '--yes'], { cwd: root, allowFailure: true });
+  const present = githubLabels(root).some((item) => item.name === label);
+  if (present) run('gh', ['label', 'delete', label, '--yes'], { cwd: root });
   const labels = { ...(integration.labels || {}) };
   delete labels[label];
   saveIntegration(root, { ...integration, labels });
