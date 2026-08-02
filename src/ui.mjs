@@ -8,18 +8,20 @@ export function dashboardHtml() {
 <style>
 :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
 body { margin: 0; background: #0d1117; color: #e6edf3; }
-main { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+main { max-width: 1060px; margin: 0 auto; padding: 32px 20px 80px; }
 h1 { margin-bottom: 6px; }
-h2 { margin-top: 0; }
+h2, h3 { margin-top: 0; }
 p { color: #9da7b3; line-height: 1.5; }
-.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 18px; }
 .card.done { border-color: #238636; }
 button { background: #238636; color: white; border: 0; border-radius: 7px; padding: 10px 14px; cursor: pointer; font-weight: 700; }
 button.secondary { background: #30363d; }
+button.warning { background: #9e6a03; }
 button.danger { background: #da3633; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 input { width: 100%; box-sizing: border-box; background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 7px; padding: 10px; margin: 5px 0 12px; }
+input[type=checkbox] { width: auto; margin: 0 8px 0 0; }
 label { display: block; font-size: 13px; color: #b1bac4; }
 .ok { color: #3fb950; }
 .bad { color: #f85149; }
@@ -28,10 +30,12 @@ pre { white-space: pre-wrap; background: #0d1117; padding: 12px; border-radius: 
 code { overflow-wrap: anywhere; }
 .hidden { display: none !important; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-.file-list { display: grid; gap: 10px; margin-top: 14px; }
-.file-item { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; }
-.file-item p { margin: 5px 0 0; font-size: 13px; }
-.file-item button { flex: 0 0 auto; }
+.component-list { display: grid; gap: 10px; margin-top: 14px; }
+.component { padding: 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; }
+.component-head { display: flex; gap: 14px; align-items: start; justify-content: space-between; }
+.component p { margin: 6px 0 10px; font-size: 13px; }
+.checkline { display: flex; align-items: center; margin: 8px 0; font-size: 14px; }
+hr { border: 0; border-top: 1px solid #30363d; margin: 18px 0; }
 </style>
 </head>
 <body><main>
@@ -42,44 +46,74 @@ code { overflow-wrap: anywhere; }
   <div class="actions" style="margin-bottom:16px">
     <button id="return-dashboard" class="secondary hidden" onclick="showDashboardAgain()">Return to dashboard</button>
   </div>
+
   <div class="grid">
     <article class="card" id="requirements-card">
       <h2>1. Check requirements</h2>
-      <p>Checks Git, the GitHub CLI and authentication, the repository remote, and Paseo. This changes nothing.</p>
+      <p>Checks Git, GitHub authentication, the repository remote, and Paseo. This changes nothing.</p>
       <button onclick="refresh()">Check requirements</button>
       <pre id="requirements"></pre>
     </article>
-    <article class="card" id="integration-card">
-      <h2>2. Install repository integration</h2>
-      <p>Adds the automation-ready GitHub issue template, merges one service into <code>paseo.json</code>, and creates the lifecycle labels. Existing files are preserved, and every package-owned file or addition has its own safe removal control.</p>
-      <button onclick="post('/api/install')">Install repository integration</button>
-      <div class="file-list">
-        <div class="file-item">
-          <div>
-            <code>.github/ISSUE_TEMPLATE/automated-coding-task.md</code>
-            <p id="issue-template-status">Checking…</p>
-          </div>
-          <button id="remove-issue-template" class="danger hidden" onclick="removeManaged('/api/remove/issue-template', 'Remove the issue template file installed by this package?')">Remove installed file</button>
-        </div>
-        <div class="file-item">
-          <div>
-            <code>paseo.json</code>
-            <p id="paseo-json-status">Checking…</p>
-          </div>
-          <button id="remove-paseo-integration" class="danger hidden" onclick="removeManaged('/api/remove/paseo-integration', 'Remove the package-owned Paseo integration? Unrelated paseo.json content will be preserved.')">Remove package addition</button>
+
+    <article class="card" id="preview-card">
+      <h2>2. Preview and install</h2>
+      <p>Shows every file, GitHub label, workspace, and local-state location before anything is installed.</p>
+      <pre id="install-preview">Loading preview…</pre>
+      <div class="actions">
+        <button class="secondary" onclick="loadPreview()">Refresh preview</button>
+        <button onclick="installAll()">Install shown components</button>
+      </div>
+    </article>
+  </div>
+
+  <article class="card" id="integration-card" style="margin-top:16px">
+    <h2>3. Installed components and repairs</h2>
+    <p>Every package-created file has its own removal button. For modified files, cleanup removes only the package-owned addition.</p>
+    <div class="component-list">
+      <div class="component">
+        <div class="component-head"><code>.github/ISSUE_TEMPLATE/automated-coding-task.md</code><span id="issue-template-badge"></span></div>
+        <p id="issue-template-status">Checking…</p>
+        <div class="actions">
+          <button id="install-issue-template" class="secondary" onclick="post('/api/install/issue-template')">Install</button>
+          <button id="repair-issue-template" class="warning hidden" onclick="confirmedPost('/api/repair/issue-template', 'Replace this package-managed template with the package version?')">Restore package version</button>
+          <button id="remove-issue-template" class="danger hidden" onclick="confirmedPost('/api/remove/issue-template', 'Remove the unchanged issue template file created by this package?')">Remove installed file</button>
         </div>
       </div>
-      <p class="muted">GitHub labels are external repository settings, not files, so they are not included in this file-removal list.</p>
-    </article>
-    <article class="card" id="workspace-card">
-      <h2>3. Create the permanent workspace</h2>
-      <p>Creates one local Paseo workspace rooted at this repository. Its permanent name is <strong>Issue Coding Automation</strong>.</p>
-      <button onclick="post('/api/workspace')">Create Automation Workspace</button>
-      <pre id="workspace"></pre>
-    </article>
+      <div class="component">
+        <div class="component-head"><code>paseo.json → scripts.issue-coding-automation</code><span id="paseo-json-badge"></span></div>
+        <p id="paseo-json-status">Checking…</p>
+        <div class="actions">
+          <button id="install-paseo-service" class="secondary" onclick="post('/api/install/paseo-service')">Install service</button>
+          <button id="repair-paseo-service" class="warning hidden" onclick="confirmedPost('/api/repair/paseo-service', 'Restore only the package-owned service entry while preserving other paseo.json content?')">Repair added service</button>
+          <button id="remove-paseo-integration" class="danger hidden" onclick="confirmedPost('/api/remove/paseo-integration', 'Remove the package-owned Paseo integration? Unrelated paseo.json content is preserved.')">Remove package addition</button>
+        </div>
+      </div>
+      <div class="component">
+        <div class="component-head"><strong>GitHub lifecycle labels</strong><span id="labels-badge"></span></div>
+        <p>Labels that already existed are reused and are never considered package-owned. Each label created by the package can be removed separately.</p>
+        <div id="label-list" class="component-list"></div>
+        <div class="actions" style="margin-top:10px">
+          <button class="secondary" onclick="post('/api/install/labels')">Install or repair missing labels</button>
+          <button class="danger" onclick="removeAllLabels(false)">Remove all package-created labels</button>
+          <button class="danger" onclick="removeAllLabels(true)">Force remove all</button>
+        </div>
+      </div>
+      <div class="component">
+        <div class="component-head"><strong>Permanent Paseo workspace</strong><span id="workspace-badge"></span></div>
+        <p>Creates or reconnects to <strong>Issue Coding Automation</strong>. Removal archives only a workspace recorded as package-created.</p>
+        <pre id="workspace"></pre>
+        <div class="actions">
+          <button class="secondary" onclick="post('/api/workspace')">Create or reconnect</button>
+          <button id="remove-workspace" class="danger hidden" onclick="confirmedPost('/api/remove/workspace', 'Archive the package-created Issue Coding Automation workspace? This is blocked while issues are running.')">Archive workspace</button>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <div class="grid" style="margin-top:16px">
     <article class="card" id="config-card">
-      <h2>4. Configure the automation</h2>
-      <p>The base branch is used both to create issue branches and as their pull-request target. Validation commands come from each issue, not this setup.</p>
+      <h2>4. Configure automation</h2>
+      <p>The base branch creates issue branches and is also their PR target. Task-specific checks come from each issue.</p>
       <label>Base branch<input id="baseBranch"></label>
       <label>Orchestrator model<input id="orchestrator" placeholder="provider/model"></label>
       <label>Coder model<input id="coder" placeholder="provider/model"></label>
@@ -89,14 +123,44 @@ code { overflow-wrap: anywhere; }
       <label>Maximum review rounds<input id="maxReviewRounds" type="number" min="1" max="10"></label>
       <button onclick="saveConfig()">Save configuration</button>
     </article>
+
     <article class="card" id="finish-card">
-      <h2>5. Verify and finish</h2>
-      <p>Confirms every automation requirement is present. Claims remain paused after setup so no issue starts unexpectedly.</p>
-      <button onclick="post('/api/finish')">Finish setup</button>
+      <h2>5. Self-test and finish</h2>
+      <p>The self-test is non-destructive. It reads configuration and connectivity but does not create an issue, branch, agent, or PR.</p>
+      <div class="actions">
+        <button class="secondary" onclick="runSelfTest()">Run setup self-test</button>
+        <button onclick="post('/api/finish')">Finish setup</button>
+      </div>
+      <pre id="self-test">Not run.</pre>
       <pre id="verification"></pre>
     </article>
   </div>
+
+  <article class="card" style="margin-top:16px">
+    <h2>Maintenance and uninstall</h2>
+    <p>Destructive actions pause new claims and refuse to continue while automation issues are running.</p>
+    <div class="component">
+      <strong>Local automation state</strong>
+      <p id="state-path"></p>
+      <div class="actions">
+        <button class="danger" onclick="clearState(false)">Clear local state</button>
+        <button class="danger" onclick="clearState(true)">Force clear ownership records</button>
+      </div>
+    </div>
+    <hr>
+    <h3>Guided uninstall</h3>
+    <label class="checkline"><input id="uninstall-template" type="checkbox" checked>Remove package-created issue template</label>
+    <label class="checkline"><input id="uninstall-paseo" type="checkbox" checked>Remove package-owned paseo.json service</label>
+    <label class="checkline"><input id="uninstall-labels" type="checkbox" checked>Remove package-created GitHub labels</label>
+    <label class="checkline"><input id="uninstall-workspace" type="checkbox" checked>Archive package-created Paseo workspace</label>
+    <label class="checkline"><input id="uninstall-state" type="checkbox" checked>Clear local automation state last</label>
+    <label class="checkline"><input id="uninstall-force-labels" type="checkbox">Force label removal even when open issues use them</label>
+    <div class="actions"><button class="danger" onclick="guidedUninstall()">Run selected uninstall steps</button></div>
+    <p>After the dashboard cleanup finishes, close this dashboard and run:</p>
+    <pre id="npm-uninstall-command"></pre>
+  </article>
 </section>
+
 <section id="dashboard" class="hidden">
   <article class="card">
     <h2>Controller</h2>
@@ -117,7 +181,7 @@ code { overflow-wrap: anywhere; }
   <article class="card" style="margin-top:16px">
     <h2>Configuration</h2>
     <pre id="final-config"></pre>
-    <button class="secondary" onclick="showSetupAgain()">Setup, files, and configuration</button>
+    <button class="secondary" onclick="showSetupAgain()">Setup, repair, and uninstall</button>
   </article>
 </section>
 <script>
@@ -133,12 +197,27 @@ async function api(path, options={}) {
   return data;
 }
 async function post(path, body={}) {
-  try { showMessage('Working…'); await api(path, {method:'POST', body:JSON.stringify(body)}); showMessage('Completed.'); await refresh(); }
+  try {
+    showMessage('Working…');
+    const data = await api(path, {method:'POST', body:JSON.stringify(body)});
+    showMessage('Completed.');
+    if (data.result) document.getElementById('self-test').textContent = JSON.stringify(data.result, null, 2);
+    await refresh();
+    return data;
+  } catch (error) { showMessage(error.message, true); return null; }
+}
+async function confirmedPost(path, question, body={}) {
+  if (!window.confirm(question)) return;
+  await post(path, body);
+}
+async function loadPreview() {
+  try { document.getElementById('install-preview').textContent = JSON.stringify(await api('/api/preview'), null, 2); }
   catch (error) { showMessage(error.message, true); }
 }
-async function removeManaged(path, question) {
-  if (!window.confirm(question)) return;
-  await post(path);
+async function installAll() {
+  const preview = document.getElementById('install-preview').textContent;
+  if (!window.confirm('Install the components shown in the preview?\n\n'+preview)) return;
+  await post('/api/install');
 }
 async function saveConfig() {
   await post('/api/config', {
@@ -153,36 +232,91 @@ async function saveConfig() {
     maxReviewRounds: Number(document.getElementById('maxReviewRounds').value)
   });
 }
-function showSetupAgain() {
-  forceSetup = true;
-  refresh();
+async function runSelfTest() {
+  const data = await post('/api/self-test');
+  if (data?.result) document.getElementById('self-test').textContent = JSON.stringify(data.result, null, 2);
 }
-function showDashboardAgain() {
-  forceSetup = false;
-  refresh();
+async function removeLabel(name, force) {
+  const warning = force
+    ? 'Force-delete '+name+'? GitHub removes it from every issue that currently uses it.'
+    : 'Remove the package-created label '+name+'? Removal is refused if an open issue uses it.';
+  if (!window.confirm(warning)) return;
+  await post('/api/remove/label', {label:name, force});
+}
+async function removeAllLabels(force) {
+  const warning = force
+    ? 'Force-delete every package-created lifecycle label, including labels used by open issues?'
+    : 'Remove all package-created lifecycle labels that are not used by open issues?';
+  if (!window.confirm(warning)) return;
+  await post('/api/remove/labels', {force});
+}
+async function clearState(force) {
+  const warning = force
+    ? 'Force-clear local state? This permanently loses ownership records used for safe cleanup.'
+    : 'Clear local state after all package-managed components have been removed?';
+  if (!window.confirm(warning)) return;
+  await post('/api/clear-state', {force});
+}
+async function guidedUninstall() {
+  if (!window.confirm('Run the selected uninstall steps? New claims will be paused. Active issue runs block this action.')) return;
+  const data = await post('/api/uninstall', {
+    issueTemplate: document.getElementById('uninstall-template').checked,
+    paseoService: document.getElementById('uninstall-paseo').checked,
+    labels: document.getElementById('uninstall-labels').checked,
+    workspace: document.getElementById('uninstall-workspace').checked,
+    localState: document.getElementById('uninstall-state').checked,
+    forceLabels: document.getElementById('uninstall-force-labels').checked
+  });
+  if (data?.result?.npmRemovalCommand) {
+    document.getElementById('npm-uninstall-command').textContent = data.result.npmRemovalCommand;
+  }
+}
+function showSetupAgain() { forceSetup = true; refresh(); }
+function showDashboardAgain() { forceSetup = false; refresh(); }
+function renderLabels(data) {
+  const list = document.getElementById('label-list');
+  list.innerHTML = '';
+  for (const label of Object.values(data.integration.labels || {})) {
+    const item = document.createElement('div');
+    item.className = 'component';
+    const status = !label.present ? 'Missing'
+      : label.createdByPackage ? 'Created by this package'
+        : 'Pre-existing label reused by the automation';
+    item.innerHTML = '<div class="component-head"><code>'+escapeHtml(label.name)+'</code><span>'+(label.present?'✓':'✕')+'</span></div><p>'+escapeHtml(status)+'</p>';
+    const actions = document.createElement('div'); actions.className = 'actions';
+    if (label.canRepair) {
+      const repair = document.createElement('button'); repair.className='warning'; repair.textContent='Repair'; repair.onclick=()=>post('/api/repair/label',{label:label.name}); actions.appendChild(repair);
+    }
+    if (label.createdByPackage) {
+      const remove = document.createElement('button'); remove.className='danger'; remove.textContent='Remove'; remove.onclick=()=>removeLabel(label.name,false); actions.appendChild(remove);
+      const force = document.createElement('button'); force.className='danger'; force.textContent='Force remove'; force.onclick=()=>removeLabel(label.name,true); actions.appendChild(force);
+    }
+    item.appendChild(actions); list.appendChild(item);
+  }
 }
 function renderFileControls(data) {
   const issue = data.integration.management.issueTemplate;
   const paseo = data.integration.management.paseoJson;
-  const issueStatus = document.getElementById('issue-template-status');
-  const issueButton = document.getElementById('remove-issue-template');
-  if (!issue.present) issueStatus.textContent = 'Not installed.';
-  else if (issue.changedSinceInstall) issueStatus.textContent = 'Installed by the package, but changed afterward. It will not be deleted automatically.';
-  else if (issue.createdByPackage) issueStatus.textContent = 'Installed by this package. The button deletes this file only if it is still unchanged.';
-  else issueStatus.textContent = 'Already present, but not recorded as a file created by this package.';
-  issueButton.classList.toggle('hidden', !issue.createdByPackage);
-  issueButton.disabled = !issue.canRemove;
+  document.getElementById('issue-template-badge').textContent = issue.present ? '✓' : '✕';
+  document.getElementById('issue-template-status').textContent = !issue.present ? 'Not installed.'
+    : issue.changedSinceInstall ? 'Package-created file changed afterward. Automatic deletion is disabled until restored.'
+      : issue.createdByPackage ? 'Package-created and unchanged.' : 'Pre-existing matching file; not package-owned.';
+  document.getElementById('install-issue-template').classList.toggle('hidden', issue.present);
+  document.getElementById('repair-issue-template').classList.toggle('hidden', !issue.canRepair);
+  document.getElementById('remove-issue-template').classList.toggle('hidden', !issue.createdByPackage);
+  document.getElementById('remove-issue-template').disabled = !issue.canRemove;
 
-  const paseoStatus = document.getElementById('paseo-json-status');
-  const paseoButton = document.getElementById('remove-paseo-integration');
-  if (!paseo.servicePresent) paseoStatus.textContent = paseo.present ? 'File exists, but the automation service is not installed.' : 'File does not exist.';
-  else if (paseo.changedSinceInstall) paseoStatus.textContent = 'The package-owned service was changed afterward. It will not be removed automatically.';
-  else if (paseo.removalMode === 'file') paseoStatus.textContent = 'This file was created by the package and contains only the package-owned service.';
-  else if (paseo.serviceAddedByPackage) paseoStatus.textContent = 'The package added one service. Removing it preserves every unrelated paseo.json setting.';
-  else paseoStatus.textContent = 'The service already existed and is not recorded as a package-owned addition.';
-  paseoButton.classList.toggle('hidden', !paseo.serviceAddedByPackage);
-  paseoButton.disabled = !paseo.canRemove;
-  paseoButton.textContent = paseo.removalMode === 'file' ? 'Remove installed file' : 'Remove added service';
+  document.getElementById('paseo-json-badge').textContent = paseo.servicePresent ? '✓' : '✕';
+  document.getElementById('paseo-json-status').textContent = !paseo.servicePresent ? 'Automation service not installed.'
+    : paseo.changedSinceInstall ? 'Package-owned service changed afterward. Restore it before safe removal.'
+      : paseo.removalMode === 'file' ? 'Package-created file containing only the automation service.'
+        : paseo.serviceAddedByPackage ? 'Package-owned service added to an existing file; unrelated content is preserved.'
+          : 'Pre-existing matching service; not package-owned.';
+  document.getElementById('install-paseo-service').classList.toggle('hidden', paseo.servicePresent);
+  document.getElementById('repair-paseo-service').classList.toggle('hidden', !paseo.canRepair);
+  document.getElementById('remove-paseo-integration').classList.toggle('hidden', !paseo.serviceAddedByPackage);
+  document.getElementById('remove-paseo-integration').disabled = !paseo.canRemove;
+  document.getElementById('remove-paseo-integration').textContent = paseo.removalMode === 'file' ? 'Remove installed file' : 'Remove added service';
 }
 function render(data) {
   const operational = data.config.setupComplete && data.checks.ready;
@@ -190,7 +324,7 @@ function render(data) {
   document.getElementById('setup').classList.toggle('hidden', !showSetup);
   document.getElementById('dashboard').classList.toggle('hidden', showSetup);
   document.getElementById('return-dashboard').classList.toggle('hidden', !forceSetup || !operational);
-  document.getElementById('subtitle').textContent = showSetup ? 'Guided setup and repository integration management' : 'Autonomous GitHub issue coding through Paseo';
+  document.getElementById('subtitle').textContent = showSetup ? 'Guided setup, repair, and reversible uninstall' : 'Autonomous GitHub issue coding through Paseo';
   const req = data.requirements;
   document.getElementById('requirements').textContent = [
     'Git: '+req.git,
@@ -200,8 +334,12 @@ function render(data) {
     'Paseo reachable: '+req.paseoReachable,
     'Remote: '+(req.remote || 'missing')
   ].join('\n');
-  renderFileControls(data);
+  document.getElementById('install-preview').textContent = JSON.stringify(data.preview, null, 2);
+  renderFileControls(data); renderLabels(data);
+  document.getElementById('labels-badge').textContent = data.integration.labelsReady ? '✓' : '✕';
+  document.getElementById('workspace-badge').textContent = data.workspace?.id ? '✓' : '✕';
   document.getElementById('workspace').textContent = data.workspace?.id ? data.workspace.title+'\n'+data.workspace.id : 'Not created';
+  document.getElementById('remove-workspace').classList.toggle('hidden', !data.workspaceManagement.canRemove);
   document.getElementById('baseBranch').value = data.config.baseBranch || req.defaultBranch || '';
   document.getElementById('orchestrator').value = data.config.models.orchestrator || '';
   document.getElementById('coder').value = data.config.models.coder || '';
@@ -210,9 +348,11 @@ function render(data) {
   document.getElementById('maxActive').value = data.config.maxActive;
   document.getElementById('maxReviewRounds').value = data.config.maxReviewRounds;
   document.getElementById('verification').textContent = JSON.stringify(data.checks, null, 2);
+  document.getElementById('state-path').textContent = data.stateDirectory;
+  document.getElementById('npm-uninstall-command').textContent = data.npmUninstallCommand;
   document.getElementById('requirements-card').classList.toggle('done', req.githubAuthenticated && req.paseoReachable && req.remote);
-  document.getElementById('integration-card').classList.toggle('done', data.integration.issueTemplate && data.integration.paseoService);
-  document.getElementById('workspace-card').classList.toggle('done', Boolean(data.workspace?.id));
+  document.getElementById('preview-card').classList.toggle('done', data.integration.issueTemplate && data.integration.paseoService && data.integration.labelsReady);
+  document.getElementById('integration-card').classList.toggle('done', data.integration.issueTemplate && data.integration.paseoService && data.integration.labelsReady && Boolean(data.workspace?.id));
   document.getElementById('config-card').classList.toggle('done', data.checks.modelsConfigured && data.checks.baseBranchExists);
   document.getElementById('finish-card').classList.toggle('done', data.checks.ready);
   document.getElementById('claim-state').textContent = data.runtime.claimsEnabled ? 'running' : 'paused';
