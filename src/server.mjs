@@ -3,11 +3,22 @@ import { spawn } from 'node:child_process';
 import { dashboardHtml } from './ui.mjs';
 import { automationStatus, dispatchOnce, setClaimsEnabled, updateRuntimeAfterDispatch } from './automation.mjs';
 import {
+  clearLocalAutomationState,
   createAutomationWorkspace,
   finishSetup,
+  guidedUninstall,
+  installIssueTemplate,
+  installLabels,
+  installPaseoService,
   installRepositoryIntegration,
+  installationPreview,
+  removeAllManagedLabels,
+  removeAutomationWorkspace,
   removeIssueTemplate,
+  removeLabel,
   removePaseoIntegration,
+  repairLabel,
+  runSetupSelfTest,
   setupSnapshot,
 } from './install.mjs';
 import { loadConfig, repositoryRoot, saveConfig } from './state.mjs';
@@ -80,38 +91,48 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
         json(response, 200, combinedSnapshot(root));
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/api/preview') {
+        json(response, 200, installationPreview(root));
+        return;
+      }
       if (request.method !== 'POST') {
         json(response, 404, { error: 'Not found' });
         return;
       }
+
       const body = await readBody(request);
-      if (url.pathname === '/api/install') installRepositoryIntegration(root);
-      else if (url.pathname === '/api/remove/issue-template') {
-        removeIssueTemplate(root);
-        setClaimsEnabled(root, false);
-        const current = loadConfig(root);
-        saveConfig(root, { ...current, setupComplete: false });
-      } else if (url.pathname === '/api/remove/paseo-integration') {
-        removePaseoIntegration(root);
-        setClaimsEnabled(root, false);
-        const current = loadConfig(root);
-        saveConfig(root, { ...current, setupComplete: false });
-      } else if (url.pathname === '/api/workspace') createAutomationWorkspace(root);
+      let result = null;
+      if (url.pathname === '/api/install') result = installRepositoryIntegration(root);
+      else if (url.pathname === '/api/install/issue-template') result = installIssueTemplate(root);
+      else if (url.pathname === '/api/repair/issue-template') result = installIssueTemplate(root, { overwriteManaged: true });
+      else if (url.pathname === '/api/install/paseo-service') result = installPaseoService(root);
+      else if (url.pathname === '/api/repair/paseo-service') result = installPaseoService(root, { overwriteManaged: true });
+      else if (url.pathname === '/api/install/labels') result = installLabels(root);
+      else if (url.pathname === '/api/repair/label') result = repairLabel(root, body.label);
+      else if (url.pathname === '/api/remove/issue-template') result = removeIssueTemplate(root);
+      else if (url.pathname === '/api/remove/paseo-integration') result = removePaseoIntegration(root);
+      else if (url.pathname === '/api/remove/label') result = removeLabel(root, body.label, { force: body.force === true });
+      else if (url.pathname === '/api/remove/labels') result = removeAllManagedLabels(root, { force: body.force === true });
+      else if (url.pathname === '/api/workspace') result = createAutomationWorkspace(root);
+      else if (url.pathname === '/api/remove/workspace') result = removeAutomationWorkspace(root);
+      else if (url.pathname === '/api/self-test') result = runSetupSelfTest(root);
+      else if (url.pathname === '/api/clear-state') result = clearLocalAutomationState(root, { force: body.force === true });
+      else if (url.pathname === '/api/uninstall') result = guidedUninstall(root, body);
       else if (url.pathname === '/api/config') {
         const current = loadConfig(root);
-        saveConfig(root, { ...current, ...body, models: { ...current.models, ...(body.models || {}) } });
+        result = saveConfig(root, { ...current, ...body, models: { ...current.models, ...(body.models || {}) } });
         resetTimer();
       } else if (url.pathname === '/api/finish') {
-        finishSetup(root);
+        result = finishSetup(root);
         setClaimsEnabled(root, false);
-      } else if (url.pathname === '/api/resume') setClaimsEnabled(root, true);
-      else if (url.pathname === '/api/pause') setClaimsEnabled(root, false);
-      else if (url.pathname === '/api/run-now') dispatch();
+      } else if (url.pathname === '/api/resume') result = setClaimsEnabled(root, true);
+      else if (url.pathname === '/api/pause') result = setClaimsEnabled(root, false);
+      else if (url.pathname === '/api/run-now') result = dispatch();
       else {
         json(response, 404, { error: 'Not found' });
         return;
       }
-      json(response, 200, combinedSnapshot(root));
+      json(response, 200, { result, snapshot: combinedSnapshot(root) });
     } catch (error) {
       json(response, 400, { error: error.message });
     }
