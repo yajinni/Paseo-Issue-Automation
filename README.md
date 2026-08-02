@@ -2,18 +2,41 @@
 
 A repository-independent npm package that turns automation-ready GitHub issues into isolated Paseo coding work and draft pull requests.
 
-## What it installs
+## Guided setup
 
-The guided setup dashboard can:
+The package opens a local setup dashboard before the operating dashboard. The setup flow can:
 
+- preview every repository file, GitHub label, Paseo workspace, and local-state location before installation
 - add the automated coding issue template
 - merge the `issue-coding-automation` service into `paseo.json`
-- create the GitHub lifecycle labels
-- create the permanent local Paseo workspace named **Issue Coding Automation**
+- create or reuse the GitHub lifecycle labels
+- create or reconnect to the permanent local Paseo workspace named **Issue Coding Automation**
 - configure the base branch and Orchestrator, Coder, and Reviewer models
+- run a non-destructive setup self-test
 - verify setup and keep issue claims paused until explicitly resumed
 
-It does not configure Paseo worktree setup or teardown, create repository coding instructions, require `AGENTS.md`, select validation commands, or assume a CI workflow name.
+The package does not configure Paseo worktree setup or teardown, create repository coding instructions, require `AGENTS.md`, select validation commands, or assume a CI workflow name.
+
+## Reversible installation
+
+The dashboard records package ownership under the repository's Git common directory and provides separate controls for every managed component:
+
+- remove or restore the package-created issue-template file
+- remove or repair only the package-owned service in `paseo.json`, preserving unrelated settings
+- remove each package-created GitHub label separately or remove all managed labels
+- archive only a Paseo workspace recorded as package-created
+- clear local automation configuration, run records, logs, and ownership state
+- run a guided uninstall with selectable cleanup steps
+
+Pre-existing matching files, labels, services, and workspaces are reused but are not treated as package-owned. Changed package-created files or sections are preserved until the user explicitly restores the package version. Destructive cleanup is blocked while automation issues are running. Forced label removal requires a separate confirmation because GitHub removes that label from open issues using it.
+
+After guided cleanup, close the dashboard and run the displayed package-manager command, such as:
+
+```bash
+npm uninstall paseo-issue-automation
+```
+
+That final command removes the dependency from `package.json`, the lockfile, and `node_modules`.
 
 ## Development installation
 
