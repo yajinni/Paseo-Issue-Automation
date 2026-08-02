@@ -19,7 +19,6 @@ export const DEFAULT_CONFIG = Object.freeze({
   pollIntervalSeconds: 120,
   maxActive: 1,
   maxReviewRounds: 4,
-  requireDifferentCoderReviewer: true,
   models: {
     orchestrator: '',
     coder: '',
@@ -108,14 +107,13 @@ function normalizedBranch(value) {
 }
 
 export function validateConfig(input = {}) {
-  const config = {
+  return {
     version: 1,
     setupComplete: input.setupComplete === true,
     baseBranch: normalizedBranch(input.baseBranch),
     pollIntervalSeconds: normalizedInteger(input.pollIntervalSeconds, 120, 60, 3600, 'Polling interval'),
     maxActive: normalizedInteger(input.maxActive, 1, 1, 10, 'Maximum active issues'),
     maxReviewRounds: normalizedInteger(input.maxReviewRounds, 4, 1, 10, 'Maximum review rounds'),
-    requireDifferentCoderReviewer: input.requireDifferentCoderReviewer !== false,
     models: {
       orchestrator: normalizedModel(input.models?.orchestrator, 'Orchestrator model'),
       coder: normalizedModel(input.models?.coder, 'Coder model'),
@@ -126,11 +124,6 @@ export function validateConfig(input = {}) {
       title: WORKSPACE_TITLE,
     },
   };
-  if (config.requireDifferentCoderReviewer && config.models.coder && config.models.reviewer
-    && config.models.coder === config.models.reviewer) {
-    throw new Error('Coder and reviewer models must be different.');
-  }
-  return config;
 }
 
 export function loadConfig(root) {
