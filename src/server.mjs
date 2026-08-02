@@ -6,6 +6,8 @@ import {
   createAutomationWorkspace,
   finishSetup,
   installRepositoryIntegration,
+  removeIssueTemplate,
+  removePaseoIntegration,
   setupSnapshot,
 } from './install.mjs';
 import { loadConfig, repositoryRoot, saveConfig } from './state.mjs';
@@ -84,7 +86,17 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
       }
       const body = await readBody(request);
       if (url.pathname === '/api/install') installRepositoryIntegration(root);
-      else if (url.pathname === '/api/workspace') createAutomationWorkspace(root);
+      else if (url.pathname === '/api/remove/issue-template') {
+        removeIssueTemplate(root);
+        setClaimsEnabled(root, false);
+        const current = loadConfig(root);
+        saveConfig(root, { ...current, setupComplete: false });
+      } else if (url.pathname === '/api/remove/paseo-integration') {
+        removePaseoIntegration(root);
+        setClaimsEnabled(root, false);
+        const current = loadConfig(root);
+        saveConfig(root, { ...current, setupComplete: false });
+      } else if (url.pathname === '/api/workspace') createAutomationWorkspace(root);
       else if (url.pathname === '/api/config') {
         const current = loadConfig(root);
         saveConfig(root, { ...current, ...body, models: { ...current.models, ...(body.models || {}) } });
