@@ -2,49 +2,40 @@
 
 ## Package boundary
 
-This package coordinates GitHub issue coding through Paseo. It does not own Paseo's generic worktree setup or teardown behavior.
-
-The coding harness is responsible for discovering and following each repository's coding instructions. This package does not require, create, modify, or explicitly tell models to read `AGENTS.md` or any other repository-instruction filename.
-
-## Repository installation
-
-The guided installer may add or update only:
-
-- the npm dependency declaration and lockfile through npm
-- `.github/ISSUE_TEMPLATE/automated-coding-task.md`
-- the `issue-coding-automation` service entry in `paseo.json`
-- the automation lifecycle labels in GitHub
-
-Runtime configuration and run state live under the repository's common Git directory at `.git/paseo-issue-automation/` and are not committed.
+This package coordinates GitHub issue coding through Paseo. It does not own Paseo's generic worktree setup or teardown behavior and does not require any repository-instruction filename.
 
 ## Permanent workspace
 
-The installer creates one local Paseo workspace titled exactly:
-
-`Issue Coding Automation`
-
-This workspace hosts the dashboard and controller. Issue implementation workspaces remain Paseo-managed worktree workspaces created when issues are claimed.
+The installer creates one local Paseo workspace titled exactly `Issue Coding Automation`. Issue implementation workspaces remain Paseo-managed worktree workspaces.
 
 ## Branch configuration
 
-Setup asks for one base branch. Each issue branch is created from that branch and its pull request targets the same branch. There is no separate PR target setting.
+Setup asks for one base branch. Each issue branch is created from that branch and its pull request targets the same branch.
 
 ## Reviewer isolation
 
-The Coder and Reviewer may use the same provider and model. Independence means the Reviewer is launched as a fresh session with no shared chat history or working context from the Coder. The Reviewer receives only the issue, repository state, exact commit, and evidence needed for review.
+Coder and Reviewer may use the same provider and model. Independence means the Reviewer is launched as a fresh session with no shared chat history or working context from the Coder.
 
 ## Controller simplicity
 
-The package does not add controller locks or attempt to coordinate multiple simultaneously running controllers. Running more than one controller is unsupported user behavior and is intentionally not handled in the first version.
+The package does not add controller locks or coordinate multiple simultaneously running controllers.
 
 ## Interruption policy
 
-The package does not reconcile or resume interrupted automation runs. If a run is interrupted, it is treated as failed or abandoned and the user starts a fresh attempt. The package does not try to infer or recover partially completed work.
+The package does not reconcile or resume interrupted runs. An interrupted attempt is abandoned and a fresh attempt starts from the issue. Activity from the old attempt is retained only for visibility.
 
-## Validation
+## Manual issue control
 
-The setup wizard does not configure repository-wide validation commands. Every automation-ready issue must contain meaningful `Validation and checks` instructions. The issue author or issue-authoring AI is responsible for selecting them.
+The dashboard can start a specific ready issue and temporarily skip issues from automatic claiming. This does not change the GitHub issue's authoritative contents.
 
-## GitHub checks
+## Old branch handling
 
-The automation does not ask for a CI workflow name. It inspects the checks attached to the exact pull-request head commit and requires all reported required checks to finish successfully.
+Old branches are never deleted automatically. Restart offers explicit keep or delete choices. Delete is limited to the branch recorded for that issue attempt, is refused when an open PR exists, and must be verified as deleted before a fresh attempt launches.
+
+## Activity records
+
+Attempt state contains an append-only operational timeline for starts, phase changes, validation evidence, reviews, terminal states, abandonment, and human-review readiness. It is diagnostic visibility, not recovery state.
+
+## Validation and GitHub checks
+
+Every issue owns its validation instructions. The package does not configure repository-wide commands or a CI workflow name; it inspects checks attached to the exact PR head.
