@@ -1,7 +1,19 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { dashboardHtml } from './ui.mjs';
-import { automationStatus, dispatchOnce, setClaimsEnabled, updateRuntimeAfterDispatch } from './automation.mjs';
+import { enhanceDashboardHtml } from './operations-ui.mjs';
+import { automationStatus, setClaimsEnabled } from './automation.mjs';
+import {
+  abandonAttempt,
+  dispatchNextIssue,
+  dispatchSpecificIssue,
+  openAttemptWorkspace,
+  operationalStatus,
+  restartIssue,
+  skipIssue,
+  unskipIssue,
+  updateManagedDispatch,
+} from './attempts.mjs';
 import {
   clearLocalAutomationState,
   createAutomationWorkspace,
@@ -36,9 +48,7 @@ async function readBody(request) {
 }
 
 function openBrowser(url) {
-  const command = process.platform === 'win32' ? 'cmd'
-    : process.platform === 'darwin' ? 'open'
-      : 'xdg-open';
+  const command = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
   const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
   const child = spawn(command, args, { detached: true, stdio: 'ignore' });
   child.on('error', () => {});
@@ -48,8 +58,8 @@ function openBrowser(url) {
 function combinedSnapshot(root) {
   const snapshot = setupSnapshot(root);
   let automation = null;
-  if (snapshot.config.setupComplete && snapshot.requirements.githubAuthenticated) {
-    try { automation = automationStatus(root); } catch { automation = null; }
+  if (snapshot.requirements.githubAuthenticated) {
+    try { automation = { ...automationStatus(root), ...operationalStatus(root) }; } catch { automation = null; }
   }
   return { ...snapshot, automation };
 }
@@ -60,12 +70,12 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
 
   const dispatch = () => {
     try {
-      const result = dispatchOnce(root);
-      updateRuntimeAfterDispatch(root, result);
+      const result = dispatchNextIssue(root);
+      updateManagedDispatch(root, result);
       return result;
     } catch (error) {
       const result = { claimed: false, error: error.message };
-      updateRuntimeAfterDispatch(root, result);
+      updateManagedDispatch(root, result);
       throw error;
     }
   };
@@ -84,7 +94,7 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
       const url = new URL(request.url, 'http://localhost');
       if (request.method === 'GET' && url.pathname === '/') {
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        response.end(dashboardHtml());
+        response.end(enhanceDashboardHtml(dashboardHtml()));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/status') {
@@ -118,6 +128,12 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
       else if (url.pathname === '/api/self-test') result = runSetupSelfTest(root);
       else if (url.pathname === '/api/clear-state') result = clearLocalAutomationState(root, { force: body.force === true });
       else if (url.pathname === '/api/uninstall') result = guidedUninstall(root, body);
+      else if (url.pathname === '/api/start-issue') result = dispatchSpecificIssue(root, Number(body.issueNumber), { branchAction: body.branchAction || 'keep' });
+      else if (url.pathname === '/api/skip-issue') result = skipIssue(root, Number(body.issueNumber));
+      else if (url.pathname === '/api/unskip-issue') result = unskipIssue(root, Number(body.issueNumber));
+      else if (url.pathname === '/api/abandon-issue') result = abandonAttempt(root, Number(body.issueNumber), body.reason || 'Abandoned by user');
+      else if (url.pathname === '/api/restart-issue') result = restartIssue(root, Number(body.issueNumber), { branchAction: body.branchAction || 'keep' });
+      else if (url.pathname === '/api/open-attempt-workspace') result = openAttemptWorkspace(root, Number(body.issueNumber));
       else if (url.pathname === '/api/config') {
         const current = loadConfig(root);
         result = saveConfig(root, { ...current, ...body, models: { ...current.models, ...(body.models || {}) } });
