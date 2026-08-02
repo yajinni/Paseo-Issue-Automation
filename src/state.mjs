@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from './process.mjs';
 
@@ -19,21 +19,15 @@ export const DEFAULT_CONFIG = Object.freeze({
   pollIntervalSeconds: 120,
   maxActive: 1,
   maxReviewRounds: 4,
-  models: {
-    orchestrator: '',
-    coder: '',
-    reviewer: '',
-  },
-  workspace: {
-    id: null,
-    title: WORKSPACE_TITLE,
-  },
+  models: { orchestrator: '', coder: '', reviewer: '' },
+  workspace: { id: null, title: WORKSPACE_TITLE },
 });
 
 export const DEFAULT_RUNTIME = Object.freeze({
   claimsEnabled: false,
   lastDispatchAt: null,
   lastDispatchResult: null,
+  skippedIssueNumbers: [],
 });
 
 export const DEFAULT_INTEGRATION = Object.freeze({
@@ -44,9 +38,7 @@ export const DEFAULT_INTEGRATION = Object.freeze({
   workspace: null,
 });
 
-function clone(value) {
-  return JSON.parse(JSON.stringify(value));
-}
+function clone(value) { return JSON.parse(JSON.stringify(value)); }
 
 export function repositoryRoot(cwd = process.cwd()) {
   const result = run('git', ['rev-parse', '--show-toplevel'], { cwd });
@@ -119,10 +111,7 @@ export function validateConfig(input = {}) {
       coder: normalizedModel(input.models?.coder, 'Coder model'),
       reviewer: normalizedModel(input.models?.reviewer, 'Reviewer model'),
     },
-    workspace: {
-      id: input.workspace?.id ? String(input.workspace.id) : null,
-      title: WORKSPACE_TITLE,
-    },
+    workspace: { id: input.workspace?.id ? String(input.workspace.id) : null, title: WORKSPACE_TITLE },
   };
 }
 
@@ -138,7 +127,12 @@ export function saveConfig(root, input) {
 }
 
 export function loadRuntime(root) {
-  return { ...clone(DEFAULT_RUNTIME), ...readJson(statePaths(root).runtime, DEFAULT_RUNTIME) };
+  const stored = readJson(statePaths(root).runtime, DEFAULT_RUNTIME);
+  return {
+    ...clone(DEFAULT_RUNTIME),
+    ...stored,
+    skippedIssueNumbers: [...new Set((stored.skippedIssueNumbers || []).map(Number).filter(Number.isInteger))],
+  };
 }
 
 export function saveRuntime(root, runtime) {
@@ -146,6 +140,7 @@ export function saveRuntime(root, runtime) {
     claimsEnabled: runtime.claimsEnabled === true,
     lastDispatchAt: runtime.lastDispatchAt || null,
     lastDispatchResult: runtime.lastDispatchResult || null,
+    skippedIssueNumbers: [...new Set((runtime.skippedIssueNumbers || []).map(Number).filter(Number.isInteger))].sort((a, b) => a - b),
   };
   atomicWrite(statePaths(root).runtime, `${JSON.stringify(normalized, null, 2)}\n`);
   return normalized;
@@ -178,11 +173,22 @@ export function runFile(root, issueNumber) {
   return path.join(statePaths(root).runs, `issue-${Number(issueNumber)}.json`);
 }
 
-export function loadRun(root, issueNumber) {
-  return readJson(runFile(root, issueNumber), null);
-}
+export function loadRun(root, issueNumber) { return readJson(runFile(root, issueNumber), null); }
 
 export function saveRun(root, issueNumber, state) {
   atomicWrite(runFile(root, issueNumber), `${JSON.stringify(state, null, 2)}\n`);
   return state;
+}
+
+export function removeRun(root, issueNumber) {
+  rmSync(runFile(root, issueNumber), { force: true });
+}
+
+export function listRuns(root) {
+  const directory = statePaths(root).runs;
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^issue-\d+\.json$/.test(entry.name))
+    .map((entry) => readJson(path.join(directory, entry.name), null))
+    .filter(Boolean)
+    .sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber));
 }
