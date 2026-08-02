@@ -1,0 +1,35 @@
+{
+  "name": "paseo-issue-automation",
+  "version": "0.1.0",
+  "description": "Repository-independent GitHub issue coding automation for Paseo",
+  "type": "module",
+  "bin": {
+    "paseo-issue-automation": "./bin/paseo-issue-automation.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "setup": "node ./bin/paseo-issue-automation.mjs setup",
+    "start": "node ./bin/paseo-issue-automation.mjs start",
+    "status": "node ./bin/paseo-issue-automation.mjs status"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yajinni/Paseo-Issue-Automation.git"
+  },
+  "keywords": [
+    "paseo",
+    "github",
+    "coding-agent",
+    "automation"
+  ]
+}
