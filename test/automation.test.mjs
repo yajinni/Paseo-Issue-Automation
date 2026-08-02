@@ -17,16 +17,13 @@ test('workspace title is stable', () => {
   assert.equal(WORKSPACE_TITLE, 'Issue Coding Automation');
 });
 
-test('configuration uses one base branch and validates model separation', () => {
+test('configuration uses one base branch and allows the same coder and reviewer model', () => {
   const config = validateConfig({
     baseBranch: 'main',
-    models: { orchestrator: 'opencode/model-a', coder: 'opencode/model-b', reviewer: 'codex/model-c' },
+    models: { orchestrator: 'opencode/model-a', coder: 'opencode/model-b', reviewer: 'opencode/model-b' },
   });
   assert.equal(config.baseBranch, 'main');
-  assert.throws(() => validateConfig({
-    baseBranch: 'main',
-    models: { coder: 'opencode/same', reviewer: 'opencode/same' },
-  }), /must be different/);
+  assert.equal(config.models.coder, config.models.reviewer);
 });
 
 test('issue validation requires issue-owned checks', () => {
@@ -43,7 +40,7 @@ test('dependencies and branch slug are deterministic', () => {
   assert.equal(slugify('Fix login / redirect!'), 'fix-login-redirect');
 });
 
-test('orchestrator prompt is repository independent', () => {
+test('orchestrator prompt is repository independent and requires a fresh reviewer context', () => {
   const prompt = buildOrchestratorPrompt({
     repository: 'owner/repo',
     issue: { number: 7, url: 'https://github.com/owner/repo/issues/7' },
@@ -51,11 +48,12 @@ test('orchestrator prompt is repository independent', () => {
     config: {
       baseBranch: 'main',
       maxReviewRounds: 4,
-      requireDifferentCoderReviewer: true,
-      models: { orchestrator: 'opencode/a', coder: 'opencode/b', reviewer: 'codex/c' },
+      models: { orchestrator: 'opencode/a', coder: 'opencode/same', reviewer: 'opencode/same' },
     },
   });
   assert.doesNotMatch(prompt, /AGENTS\.md|CodeGraph|rewrite\/openspec|npm run check/);
+  assert.doesNotMatch(prompt, /must use different model selections/i);
+  assert.match(prompt, /fresh independent Reviewer/i);
   assert.match(prompt, /issue author owns selecting those checks/i);
   assert.match(prompt, /Do not assume a workflow name/);
 });
