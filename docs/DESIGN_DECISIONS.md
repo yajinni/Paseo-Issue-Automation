@@ -4,6 +4,18 @@
 
 This package coordinates GitHub issue coding through Paseo. It does not own Paseo's generic worktree setup or teardown behavior and does not require any repository-instruction filename.
 
+## Planning boundary
+
+A strong planning model used outside the runtime creates the master plan, complete GitHub issues, validation requirements, native dependencies, and intended parallel work.
+
+The runtime does not reinterpret or redesign that plan.
+
+## Issue Execution Controller
+
+The runtime manager is called the **Issue Execution Controller**. It is deterministic code, not an AI role.
+
+It owns dependency reconciliation, concurrency, attempt state, Coder launch, Reviewer launch, repair loops, exact-commit evidence, base freshness, conflict detection, CI state, and the transition to human review.
+
 ## Permanent workspace
 
 The installer creates one local Paseo workspace titled exactly `Issue Coding Automation`. Issue implementation workspaces remain Paseo-managed worktree workspaces.
@@ -12,21 +24,37 @@ The installer creates one local Paseo workspace titled exactly `Issue Coding Aut
 
 Setup asks for one base branch. Each issue branch is created from that branch and its pull request targets the same branch.
 
+## Dependency model
+
+Native GitHub `blocked by` relationships are authoritative. Body lines remain a compatibility fallback while repositories migrate.
+
+Sub-issues represent hierarchy; dependencies represent execution constraints.
+
+Relationships are preserved after satisfaction. The controller re-evaluates readiness and updates operational labels instead of deleting dependency history.
+
+A coding dependency is satisfied by merged implementation present in the configured base branch, not by issue closure alone.
+
+## Parallel work
+
+The controller calculates the eligible issue set from the dependency graph and starts up to `maxActive` attempts. Independent issues may run simultaneously. Downstream work becomes eligible automatically after all prerequisite merges reach the base branch.
+
 ## Reviewer isolation
 
 Coder and Reviewer may use the same provider and model. Independence means the Reviewer is launched as a fresh session with no shared chat history or working context from the Coder.
 
-## Controller simplicity
+## Integration updates
 
-The package does not add controller locks or coordinate multiple simultaneously running controllers.
+The same Coder resolves ordinary merge conflicts. The controller detects stale or conflicting branches and requests a merge of the latest base into the issue branch.
+
+Rebase and force-push are not used by the automated workflow. Every integration change invalidates previous validation and review.
 
 ## Interruption policy
 
-The package does not reconcile or resume interrupted runs. An interrupted attempt is abandoned and a fresh attempt starts from the issue. Activity from the old attempt is retained only for visibility.
+The package does not silently resume interrupted runs. An interrupted attempt is abandoned and a fresh attempt starts from the issue. Activity from the old attempt is retained for visibility.
 
 ## Manual issue control
 
-The dashboard can start a specific ready issue and temporarily skip issues from automatic claiming. This does not change the GitHub issue's authoritative contents.
+The dashboard can start a specific eligible issue and temporarily skip issues from automatic claiming. This does not change the GitHub issue's authoritative contents.
 
 ## Old branch handling
 
@@ -34,8 +62,16 @@ Old branches are never deleted automatically. Restart offers explicit keep or de
 
 ## Activity records
 
-Attempt state contains an append-only operational timeline for starts, phase changes, validation evidence, reviews, terminal states, abandonment, and human-review readiness. It is diagnostic visibility, not recovery state.
+Attempt state contains an append-only operational timeline for dependency transitions, starts, phase changes, validation evidence, reviews, base updates, CI, terminal states, abandonment, and human-review readiness.
 
 ## Validation and GitHub checks
 
 Every issue owns its validation instructions. The package does not configure repository-wide commands or a CI workflow name; it inspects checks attached to the exact PR head.
+
+## Human merge boundary
+
+The controller stops at human review. It never merges or auto-merges a pull request.
+
+## Deferred command-wrapper decisions
+
+Windows command-wrapper changes and their regression tests are intentionally outside this controller change. They will be addressed separately.
