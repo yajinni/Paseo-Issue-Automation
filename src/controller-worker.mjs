@@ -7,6 +7,7 @@ import {
 } from './controller-prompts.mjs';
 import { markHumanReview, recordEvent, terminalState } from './automation.mjs';
 import { postReviewerAuditComment } from './reviewer-audit.mjs';
+import { handoffValidatedPullRequest, prReviewAutomationEnabled } from './pr-review-handoff.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
 import { run, runJson } from './process.mjs';
 
@@ -166,6 +167,21 @@ function checkFailureDetails(checks) {
   }).join('\n');
 }
 
+function handoffToSerialReview(root, issueNumber, snapshot) {
+  const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
+  const issue = runJson('gh', [
+    'issue', 'view', String(issueNumber), '--json', 'number,title,body,url,comments,blockedBy,blocking',
+  ], { cwd: root });
+  if (!repository || !issue) throw new Error('Could not load repository or issue context for PR-review handoff.');
+  return handoffValidatedPullRequest(root, {
+    repository,
+    issue,
+    state: snapshot.state,
+    pr: snapshot.pr,
+    headSha: snapshot.head,
+  });
+}
+
 async function execute(root, issueNumber) {
   const config = loadConfig(root);
   let repairCycles = 0;
@@ -185,6 +201,11 @@ async function execute(root, issueNumber) {
       sendCoder(root, snapshot.state, buildBaseUpdatePrompt({ issueNumber, baseBranch: config.baseBranch, reason }));
       repairCycles += 1;
       continue;
+    }
+
+    if (prReviewAutomationEnabled(root)) {
+      handoffToSerialReview(root, issueNumber, snapshot);
+      return;
     }
 
     if (completedReviews >= config.maxReviewRounds) {
