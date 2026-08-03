@@ -30,7 +30,17 @@ test('setup replaces free-text configuration with discovered branch, harness, an
   assert.match(html, /transformModelControl\('reviewer', 'Independent Reviewer'\)/);
   assert.match(html, /Refresh branches and models/);
   assert.match(html, /Models are loaded from the selected Paseo harness/);
-  assert.match(html, /Paseo detail:/);
+});
+
+test('requirements have detail dialogs and a forced uncached refresh', () => {
+  const html = dashboardHtml();
+  assert.match(html, /requirement-details-dialog/);
+  assert.match(html, /Why it is needed/);
+  assert.match(html, /How it is checked/);
+  assert.match(html, /How to enable or fix it/);
+  assert.match(html, /\/api\/status\?refresh=setup/);
+  assert.match(html, /requirements-check-again/);
+  assert.match(html, /Last checked:/);
 });
 
 test('dashboard includes accessible navigation, details, and confirmation dialogs', () => {
