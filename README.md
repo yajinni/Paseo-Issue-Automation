@@ -21,29 +21,48 @@ The package runtime is a deterministic **Issue Execution Controller**. It does n
 - requires the issue branch to contain the latest base branch, using merge-based updates rather than rebase or force-push
 - stops at `human-review`; it never merges or auto-merges
 
+## Local control center
+
+The package serves a local, responsive Issue Execution Controller control center. The browser UI is framework-free and is composed directly from explicit layout, style, behavior, and status-model modules rather than HTML string-patching layers.
+
+The control center has six views:
+
+- **Overview** — controller health, capacity, next poll, latest dispatch result, human-review inbox, active execution, dependency queue, and recent activity
+- **Issues** — filterable execution board for ready, running, blocked, failed, and human-review issues
+- **Dependencies** — calculated execution waves, dependency API health, cycles, unresolved graph nodes, and a blocked-by/blocking map
+- **Activity** — consolidated controller, Coder, Reviewer, validation, CI, and lifecycle history with copy/download controls
+- **Settings** — requirements, Coder and Reviewer models, base branch, polling/concurrency/review limits, installation preview, repairs, and self-test
+- **Maintenance** — package-owned state, lifecycle-label cleanup, workspace removal, and guided uninstall separated from everyday operations
+
+Each issue can be opened in a detail dialog showing its dependencies, branch, workspace, exact validated commit, exact reviewed commit, Reviewer findings, PR metadata, CI checks, base freshness, block/failure reason, and attempt timeline.
+
+Destructive actions use explicit dialogs, and higher-risk cleanup requires typed confirmation. Setup and maintenance remain reversible and limited to package-owned components.
+
 ## Guided setup
 
-The package opens a local setup dashboard before the operating dashboard. It previews and manages the issue template, `paseo.json` service, GitHub labels, permanent **Issue Coding Automation** workspace, Coder and Reviewer model configuration, self-test, repairs, and guided uninstall.
+The control center previews and manages the issue template, `paseo.json` service, GitHub labels, permanent **Issue Coding Automation** workspace, Coder and Reviewer model configuration, self-test, repairs, and guided uninstall.
 
 The package does not configure Paseo worktree setup or teardown, create repository coding instructions, require `AGENTS.md`, select validation commands, or assume a CI workflow name.
 
 Existing configuration files that contain an Orchestrator model remain readable for migration compatibility, but the Issue Execution Controller never launches that model.
 
-## Operating dashboard
+## Operating controls
 
-The operating dashboard supports both automatic polling and direct issue control:
+The control center supports both automatic polling and direct issue control:
 
-- start a specific eligible `agent-ready` issue immediately
+- pause or resume new claims without stopping already-running agents
+- run dispatch immediately or manually reconcile native dependencies
+- start a specific eligible `agent-ready` issue
 - skip or unskip an issue for automatic claiming
-- see phase, branch, dependencies, attempt number, timestamps, heartbeat, review round, workspace, and PR
+- open a running issue's Paseo workspace
 - abandon an interrupted attempt without trying to recover it
 - restart as a completely fresh attempt
 - keep an old branch and use `-attempt-N`, or explicitly delete the package-recorded branch after safety checks
-- copy the activity timeline or download its JSON
+- inspect or export the activity history
 
 Coder and Reviewer may use the same model. Reviewer independence means a fresh session with no shared Coder chat history or working context.
 
-Each Reviewer round also creates a top-level draft-PR audit comment containing the issue number, PR number, exact commit SHA, review round, verdict, and findings. Both approvals and requested changes remain visible on the PR. Failure to write the audit comment stops that controller round.
+Each Reviewer round creates a top-level draft-PR audit comment containing the issue number, PR number, exact commit SHA, review round, verdict, and findings. Both approvals and requested changes remain visible on the PR. Failure to write the audit comment stops that controller round.
 
 ## Dependency source of truth
 
