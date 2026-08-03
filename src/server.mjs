@@ -89,8 +89,8 @@ function openBrowser(url) {
   child.unref();
 }
 
-function combinedSnapshot(root) {
-  const snapshot = setupSnapshot(root);
+function combinedSnapshot(root, options = {}) {
+  const snapshot = setupSnapshot(root, { forceDiscovery: options.forceSetupDiscovery === true });
   let automation = null;
   if (snapshot.requirements.githubAuthenticated) {
     try {
@@ -178,7 +178,9 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/status') {
-        json(response, 200, combinedSnapshot(root));
+        json(response, 200, combinedSnapshot(root, {
+          forceSetupDiscovery: url.searchParams.get('refresh') === 'setup',
+        }));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/pr-reviews/status') {
