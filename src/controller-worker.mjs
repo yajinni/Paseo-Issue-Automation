@@ -212,8 +212,26 @@ async function execute(root, issueNumber) {
     }
     if (ci.state === 'timeout') throw new Error('Timed out waiting for GitHub checks to finish.');
 
+    const finalSnapshot = requireValidatedPr(root, issueNumber);
+    if (finalSnapshot.terminal) return;
+    if (finalSnapshot.head !== afterReview.head) continue;
+    const finalFreshness = branchContainsLatestBase(root, finalSnapshot.state, config.baseBranch);
+    const finalConflict = finalSnapshot.pr.mergeable === 'CONFLICTING' || finalSnapshot.pr.mergeStateStatus === 'DIRTY';
+    if (!finalFreshness.ok || finalConflict) {
+      const reason = finalConflict
+        ? 'GitHub reports merge conflicts after CI completed.'
+        : finalFreshness.reason;
+      sendCoder(root, finalSnapshot.state, buildBaseUpdatePrompt({
+        issueNumber,
+        baseBranch: config.baseBranch,
+        reason,
+      }));
+      repairCycles += 1;
+      continue;
+    }
+
     updateState(root, issueNumber, { phase: 'finalizing-human-review' });
-    markHumanReview(root, issueNumber, afterReview.pr.number);
+    markHumanReview(root, issueNumber, finalSnapshot.pr.number);
     return;
   }
   throw new Error('Maximum controller repair cycles reached.');
