@@ -1,4 +1,4 @@
-import { registerManagedPullRequest } from './pr-review-queue.mjs';
+import { pauseManagedPr, registerManagedPullRequest } from './pr-review-queue.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { PR_REVIEW_LABELS, ensurePrReviewLabels, setPrReviewLabels } from './pr-review-github.mjs';
 import { loadRun, saveRun } from './state.mjs';
@@ -34,9 +34,21 @@ export function handoffValidatedPullRequest(root, {
     add: [PR_REVIEW_LABELS.queued],
     remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.failed],
   });
-  run('gh', ['issue', 'edit', String(issue.number), '--remove-label', 'agent-running'], { cwd: root, allowFailure: true });
+  const released = run('gh', ['issue', 'edit', String(issue.number), '--remove-label', 'agent-running'], {
+    cwd: root,
+    allowFailure: true,
+  });
+  if (!released.ok) {
+    pauseManagedPr(root, registered.managed.id, true);
+    setPrReviewLabels(root, pr.number, {
+      add: [PR_REVIEW_LABELS.failed],
+      remove: [PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.reviewing],
+    });
+    throw new Error(released.stderr || released.stdout || `Could not release the coding slot for issue #${issue.number}.`);
+  }
   run('gh', ['issue', 'comment', String(issue.number), '--body', `Coding completed for PR #${pr.number}. The coding slot was released and the PR entered Paseo's serial review queue at ${headSha}.`], {
-    cwd: root, allowFailure: true,
+    cwd: root,
+    allowFailure: true,
   });
   const current = loadRun(root, issue.number) || state;
   const at = new Date().toISOString();
