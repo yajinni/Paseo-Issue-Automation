@@ -25,8 +25,9 @@ test('dashboard presents deterministic controller configuration without an Orche
 test('setup replaces free-text configuration with discovered branch, harness, and model selectors', () => {
   const html = dashboardHtml();
   assert.match(html, /refresh-setup-options/);
-  assert.match(html, /coderProvider/);
-  assert.match(html, /reviewerProvider/);
+  assert.match(html, /transformBaseBranch\(\)/);
+  assert.match(html, /transformModelControl\('coder', 'Coder'\)/);
+  assert.match(html, /transformModelControl\('reviewer', 'Independent Reviewer'\)/);
   assert.match(html, /Refresh branches and models/);
   assert.match(html, /Models are loaded from the selected Paseo harness/);
   assert.match(html, /Paseo detail:/);
