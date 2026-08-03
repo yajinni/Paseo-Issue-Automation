@@ -38,10 +38,10 @@ import { dispatchSpecificCodingIssue, restartCodingIssue } from './coding-dispat
 import {
   applyManualReviewResult,
   cancelQueuedReview,
+  enqueueManagedReview,
   moveReviewJob,
   pauseManagedPr,
   retryReviewJob,
-  reviewManagedNow,
 } from './pr-review-queue.mjs';
 import { loadPrReviewStore, setReviewQueuePaused } from './pr-review-store.mjs';
 import { saveValidatedPrAutomationConfig } from './pr-review-config.mjs';
@@ -224,7 +224,10 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
         resetPrReviewTimers();
       } else if (url.pathname === '/api/pr-reviews/pause') result = setReviewQueuePaused(root, true);
       else if (url.pathname === '/api/pr-reviews/resume') result = setReviewQueuePaused(root, false);
-      else if (url.pathname === '/api/pr-reviews/review-now') result = reviewManagedNow(root, String(body.managedPullRequestId));
+      else if (url.pathname === '/api/pr-reviews/review-now') result = enqueueManagedReview(root, String(body.managedPullRequestId), {
+        immediate: true,
+        conversationUrlOverride: body.conversationUrlOverride ? normalizeChatGptConversationUrl(body.conversationUrlOverride) : null,
+      });
       else if (url.pathname === '/api/pr-reviews/retry') result = retryReviewJob(root, String(body.reviewJobId));
       else if (url.pathname === '/api/pr-reviews/move') result = moveReviewJob(root, String(body.reviewJobId), body.direction === 'up' ? 'up' : 'down');
       else if (url.pathname === '/api/pr-reviews/pause-pr') result = pauseManagedPr(root, String(body.managedPullRequestId), true);
