@@ -31,6 +31,7 @@ export function browserPaths(options = {}) {
     diagnostics,
     config: path.join(root, 'browser-config.json'),
     lock: path.join(root, 'browser-profile.lock'),
+    reviewSchedulerLock: path.join(root, 'review-scheduler.lock'),
   };
 }
 
