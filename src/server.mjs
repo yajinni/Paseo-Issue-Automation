@@ -1,15 +1,15 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { dashboardHtml } from './ui.mjs';
-import { enhanceDashboardHtml } from './operations-ui.mjs';
-import { applyIssueExecutionControllerUi } from './controller-ui.mjs';
 import { dispatchAvailableIssues } from './dispatch-batch.mjs';
+import { dashboardStatus } from './dashboard-status.mjs';
 import { automationStatus, setClaimsEnabled } from './automation.mjs';
 import {
   abandonAttempt,
   dispatchSpecificIssue,
   openAttemptWorkspace,
   operationalStatus,
+  reconcileDependencies,
   restartIssue,
   skipIssue,
   unskipIssue,
@@ -60,7 +60,12 @@ function combinedSnapshot(root) {
   const snapshot = setupSnapshot(root);
   let automation = null;
   if (snapshot.requirements.githubAuthenticated) {
-    try { automation = { ...automationStatus(root), ...operationalStatus(root) }; } catch { automation = null; }
+    try {
+      const basic = { ...automationStatus(root), ...operationalStatus(root) };
+      automation = dashboardStatus(root, basic);
+    } catch {
+      automation = null;
+    }
   }
   return { ...snapshot, automation };
 }
@@ -95,7 +100,7 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
       const url = new URL(request.url, 'http://localhost');
       if (request.method === 'GET' && url.pathname === '/') {
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        response.end(applyIssueExecutionControllerUi(enhanceDashboardHtml(dashboardHtml())));
+        response.end(dashboardHtml());
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/status') {
@@ -135,6 +140,7 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
       else if (url.pathname === '/api/abandon-issue') result = abandonAttempt(root, Number(body.issueNumber), body.reason || 'Abandoned by user');
       else if (url.pathname === '/api/restart-issue') result = restartIssue(root, Number(body.issueNumber), { branchAction: body.branchAction || 'keep' });
       else if (url.pathname === '/api/open-attempt-workspace') result = openAttemptWorkspace(root, Number(body.issueNumber));
+      else if (url.pathname === '/api/reconcile') result = reconcileDependencies(root);
       else if (url.pathname === '/api/config') {
         const current = loadConfig(root);
         result = saveConfig(root, { ...current, ...body, models: { ...current.models, ...(body.models || {}) } });
@@ -162,7 +168,7 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
   });
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}`;
-  console.log(`Issue Coding Automation dashboard: ${url}`);
+  console.log(`Issue Execution Controller dashboard: ${url}`);
   resetTimer();
   if (open) openBrowser(url);
   return { server, root, url };
