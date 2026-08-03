@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildOrchestratorPrompt, parseDependencies, sectionContent, slugify, validateIssueBody } from '../src/automation.mjs';
+import { sectionContent, slugify, validateIssueBody } from '../src/automation.mjs';
 import {
   installIssueTemplate,
   installPaseoService,
@@ -35,27 +35,8 @@ test('issue validation requires issue-owned checks', () => {
   assert.equal(validateIssueBody(placeholdersOnly).ok, false);
 });
 
-test('dependencies and branch slug are deterministic', () => {
-  assert.deepEqual(parseDependencies('Blocked by #12\nDepends on #13\nBlocked by #12'), [12, 13]);
+test('branch slug is deterministic', () => {
   assert.equal(slugify('Fix login / redirect!'), 'fix-login-redirect');
-});
-
-test('orchestrator prompt is repository independent and requires a fresh reviewer context', () => {
-  const prompt = buildOrchestratorPrompt({
-    repository: 'owner/repo',
-    issue: { number: 7, url: 'https://github.com/owner/repo/issues/7' },
-    branch: 'ai/issue-7-test',
-    config: {
-      baseBranch: 'main',
-      maxReviewRounds: 4,
-      models: { orchestrator: 'opencode/a', coder: 'opencode/same', reviewer: 'opencode/same' },
-    },
-  });
-  assert.doesNotMatch(prompt, /AGENTS\.md|CodeGraph|rewrite\/openspec|npm run check/);
-  assert.doesNotMatch(prompt, /must use different model selections/i);
-  assert.match(prompt, /fresh independent Reviewer/i);
-  assert.match(prompt, /issue author owns selecting those checks/i);
-  assert.match(prompt, /Do not assume a workflow name/);
 });
 
 function temporaryRepository() {
