@@ -1,6 +1,12 @@
 import { spawnSync } from 'node:child_process';
 
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
+export const DEFAULT_AGENT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
+export function agentCommandTimeoutMs(env = process.env) {
+  const configured = Number(env.PASEO_AGENT_TIMEOUT_MS ?? DEFAULT_AGENT_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_AGENT_TIMEOUT_MS;
+}
 
 function commandTimeout(options = {}) {
   const configured = Number(options.timeoutMs ?? process.env.PASEO_COMMAND_TIMEOUT_MS ?? DEFAULT_COMMAND_TIMEOUT_MS);
