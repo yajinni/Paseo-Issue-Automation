@@ -77,34 +77,44 @@ function terminateManagedJobs(store, managed, reason, at) {
   managed.queuePosition = null;
 }
 
-function reconcileMerged(root, store, managed, pr, at) {
-  transitionManaged(store, managed, 'merged', { reason: `PR #${managed.pullRequestNumber} merged.`, actor: 'reconciliation', sha: pr.headRefOid || managed.currentHeadSha, at });
+function reconcileMergedInStore(store, managed, pr, at) {
+  transitionManaged(store, managed, 'merged', {
+    reason: `PR #${managed.pullRequestNumber} merged.`,
+    actor: 'reconciliation',
+    sha: pr.headRefOid || managed.currentHeadSha,
+    at,
+  });
   terminateManagedJobs(store, managed, 'The pull request reached the terminal merged state.', at);
-  managed.issueClosurePending = false;
-  const issue = issueSnapshot(root, managed.issueNumber);
-  if (!store.config.githubActions.verifyIssueClosure || String(issue?.state).toUpperCase() === 'CLOSED') return { state: 'merged', issueClosed: true };
-  managed.issueClosurePending = true;
-  if (!store.config.githubActions.allowPaseoIssueClosureFallback) {
-    managed.lastError = `PR merged, but associated issue #${managed.issueNumber} remains open.`;
-    return { state: 'merged', issueClosed: false, needsOperator: true };
-  }
-  if (!prHasExplicitIssueAssociation(pr, managed.issueNumber)) {
-    managed.lastError = `PR merged, but issue association for #${managed.issueNumber} is ambiguous.`;
-    return { state: 'merged', issueClosed: false, needsOperator: true };
-  }
-  closeAssociatedIssue(root, managed.issueNumber, managed.pullRequestNumber);
-  managed.issueClosurePending = false;
+  managed.issueClosurePending = store.config.githubActions.verifyIssueClosure;
   managed.lastError = null;
-  return { state: 'merged', issueClosed: true, closedByPaseo: true };
+  return {
+    state: 'merged',
+    effects: [
+      { type: 'clear-review-labels', pullRequestNumber: managed.pullRequestNumber },
+      {
+        type: 'verify-merged-issue',
+        managedId: managed.id,
+        issueNumber: managed.issueNumber,
+        pullRequestNumber: managed.pullRequestNumber,
+        verifyIssueClosure: store.config.githubActions.verifyIssueClosure,
+        allowClosureFallback: store.config.githubActions.allowPaseoIssueClosureFallback,
+        explicitAssociation: prHasExplicitIssueAssociation(pr, managed.issueNumber),
+      },
+    ],
+  };
 }
 
-function reconcileClosedUnmerged(store, managed, at) {
+function reconcileClosedUnmergedInStore(store, managed, at) {
   transitionManaged(store, managed, 'closed_unmerged', {
     reason: 'PR was closed without merge. Associated issue remains open.', actor: 'reconciliation', at,
   });
   terminateManagedJobs(store, managed, 'The pull request was closed without merge.', at);
   managed.lastError = 'Closed without merge. Operator action is required.';
-  return { state: 'closed_unmerged', needsOperator: true };
+  return {
+    state: 'closed_unmerged',
+    needsOperator: true,
+    effects: [{ type: 'clear-review-labels', pullRequestNumber: managed.pullRequestNumber }],
+  };
 }
 
 function reconcileHeadChange(store, managed, pr, at) {
@@ -117,7 +127,8 @@ function reconcileHeadChange(store, managed, pr, at) {
   managed.reviewRound += 1;
   const job = enqueueReviewInStore(store, managed, { headSha: newSha, now: Date.parse(at) });
   appendHistory(store, {
-    entityType: 'managed_pull_request', entityId: managed.id, reason: `PR head changed from ${previousSha} to ${newSha}; newest SHA queued after debounce.`,
+    entityType: 'managed_pull_request', entityId: managed.id,
+    reason: `PR head changed from ${previousSha} to ${newSha}; newest SHA queued after debounce.`,
     actor: 'reconciliation', sha: newSha, timestamp: at,
   });
   return job;
@@ -137,7 +148,16 @@ function reviewResultForSnapshot(store, managed, pr) {
   return { reviewJob, result };
 }
 
-function reconcileReviewResult(root, store, managed, pr, at, precomputed = {}) {
+function changesRequestedLabelEffect(managed) {
+  return {
+    type: 'set-review-labels',
+    pullRequestNumber: managed.pullRequestNumber,
+    add: [PR_REVIEW_LABELS.changesRequested],
+    remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.failed],
+  };
+}
+
+function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) {
   const reviewJob = activeReviewForManaged(store, managed);
   if (!reviewJob || reviewJob.state !== 'awaiting_result') return null;
   const result = precomputed.result || matchingReviewResult({ comments: pr.comments || [], reviews: pr.reviews || [] }, {
@@ -152,19 +172,18 @@ function reconcileReviewResult(root, store, managed, pr, at, precomputed = {}) {
   if (managed.currentHeadSha !== result.headSha || result.result === 'stale') {
     completeReviewJob(store, reviewJob, 'stale', result.sourceId, at);
     enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: Date.parse(at) });
-    return { result: 'stale', requeued: true };
+    return { result: 'stale', requeued: true, effects: [] };
   }
   if (result.result === 'changes_requested') {
-    const labels = labelNames(pr);
-    if (!labels.has(PR_REVIEW_LABELS.changesRequested)) return null;
+    if (!labelNames(pr).has(PR_REVIEW_LABELS.changesRequested)) return null;
     const fixJob = createFixJobInStore(store, managed, reviewJob, result.humanMarkdown, {
       sourceCommentId: result.sourceId, now: Date.parse(at),
     });
-    setPrReviewLabels(root, managed.pullRequestNumber, {
-      add: [PR_REVIEW_LABELS.changesRequested],
-      remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.failed],
-    });
-    return { result: 'changes_requested', fixJobId: fixJob.id };
+    return {
+      result: 'changes_requested',
+      fixJobId: fixJob.id,
+      effects: [changesRequestedLabelEffect(managed)],
+    };
   }
 
   const gate = precomputed.gate;
@@ -173,19 +192,20 @@ function reconcileReviewResult(root, store, managed, pr, at, precomputed = {}) {
     if (gate?.stale) {
       completeReviewJob(store, reviewJob, 'stale', result.sourceId, at);
       enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: Date.parse(at) });
-      return { result: 'stale', requeued: true };
+      return { result: 'stale', requeued: true, effects: [] };
     }
     if (gate?.repair) {
       const fixJob = createFixJobInStore(store, managed, reviewJob, gate.reason, {
         sourceCommentId: result.sourceId, now: Date.parse(at),
       });
-      setPrReviewLabels(root, managed.pullRequestNumber, {
-        add: [PR_REVIEW_LABELS.changesRequested],
-        remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.failed],
-      });
-      return { result: 'approved-gate-failed', fixJobId: fixJob.id, reason: gate.reason };
+      return {
+        result: 'approved-gate-failed',
+        fixJobId: fixJob.id,
+        reason: gate.reason,
+        effects: [changesRequestedLabelEffect(managed)],
+      };
     }
-    return { result: 'approved-waiting-gate', waiting: true, reason: managed.lastError };
+    return { result: 'approved-waiting-gate', waiting: true, reason: managed.lastError, effects: [] };
   }
 
   completeReviewJob(store, reviewJob, 'approved', result.sourceId, at);
@@ -199,10 +219,83 @@ function reconcileReviewResult(root, store, managed, pr, at, precomputed = {}) {
       : 'Review approval passed all deterministic gates and the issue entered human review.',
     actor: 'reconciliation', sha: reviewJob.headSha, at,
   });
-  setPrReviewLabels(root, managed.pullRequestNumber, {
-    remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.failed],
+  return {
+    result: 'approved',
+    readyToMerge: true,
+    effects: [{ type: 'clear-review-labels', pullRequestNumber: managed.pullRequestNumber }],
+  };
+}
+
+function recordExternalEffectFailure(root, managedId, error) {
+  mutatePrReviewStore(root, (store) => {
+    const managed = findManaged(store, managedId);
+    if (!managed) return;
+    managed.lastError = String(error?.message || error);
+    managed.updatedAt = nowIso();
+    appendHistory(store, {
+      entityType: 'managed_pull_request', entityId: managed.id,
+      reason: 'A post-reconciliation GitHub effect failed.', actor: 'reconciliation',
+      sha: managed.currentHeadSha, error: managed.lastError,
+    });
   });
-  return { result: 'approved', readyToMerge: true };
+}
+
+function updateMergedIssueStatus(root, effect, patch) {
+  mutatePrReviewStore(root, (store) => {
+    const managed = findManaged(store, effect.managedId);
+    if (!managed || managed.reviewState !== 'merged') return;
+    Object.assign(managed, patch, { updatedAt: nowIso() });
+  });
+}
+
+function applyMergedIssueEffect(root, effect) {
+  if (!effect.verifyIssueClosure) {
+    updateMergedIssueStatus(root, effect, { issueClosurePending: false, lastError: null });
+    return { issueClosed: true, verificationSkipped: true };
+  }
+  const issue = issueSnapshot(root, effect.issueNumber);
+  if (!issue) throw new Error(`Could not verify associated issue #${effect.issueNumber} after merge.`);
+  if (String(issue.state).toUpperCase() === 'CLOSED') {
+    updateMergedIssueStatus(root, effect, { issueClosurePending: false, lastError: null });
+    return { issueClosed: true };
+  }
+  if (!effect.allowClosureFallback) {
+    const message = `PR merged, but associated issue #${effect.issueNumber} remains open.`;
+    updateMergedIssueStatus(root, effect, { issueClosurePending: true, lastError: message });
+    return { issueClosed: false, needsOperator: true };
+  }
+  if (!effect.explicitAssociation) {
+    const message = `PR merged, but issue association for #${effect.issueNumber} is ambiguous.`;
+    updateMergedIssueStatus(root, effect, { issueClosurePending: true, lastError: message });
+    return { issueClosed: false, needsOperator: true };
+  }
+  closeAssociatedIssue(root, effect.issueNumber, effect.pullRequestNumber);
+  updateMergedIssueStatus(root, effect, { issueClosurePending: false, lastError: null });
+  return { issueClosed: true, closedByPaseo: true };
+}
+
+function applyEffects(root, managedId, effects = []) {
+  const results = [];
+  for (const effect of effects) {
+    try {
+      if (effect.type === 'set-review-labels') {
+        results.push(setPrReviewLabels(root, effect.pullRequestNumber, {
+          add: effect.add || [],
+          remove: effect.remove || [],
+        }));
+      } else if (effect.type === 'clear-review-labels') {
+        results.push(setPrReviewLabels(root, effect.pullRequestNumber, {
+          remove: Object.values(PR_REVIEW_LABELS),
+        }));
+      } else if (effect.type === 'verify-merged-issue') {
+        results.push(applyMergedIssueEffect(root, effect));
+      }
+    } catch (error) {
+      recordExternalEffectFailure(root, managedId, error);
+      throw error;
+    }
+  }
+  return results;
 }
 
 export function reconcileManagedPullRequest(root, managedId, { now = Date.now(), snapshot = null } = {}) {
@@ -227,23 +320,27 @@ export function reconcileManagedPullRequest(root, managedId, { now = Date.now(),
     }
   }
 
-  let outcome;
-  mutatePrReviewStore(root, (store) => {
+  const outcome = mutatePrReviewStore(root, (store) => {
     const managed = findManaged(store, managedId);
+    if (!managed) throw new Error(`Managed PR ${managedId} disappeared during reconciliation.`);
     managed.lastReconciledAt = at;
     if (pr.mergedAt || String(pr.state).toUpperCase() === 'MERGED') {
-      outcome = reconcileMerged(root, store, managed, pr, at);
-      return;
+      return reconcileMergedInStore(store, managed, pr, at);
     }
     if (String(pr.state).toUpperCase() === 'CLOSED') {
-      outcome = reconcileClosedUnmerged(store, managed, at);
-      return;
+      return reconcileClosedUnmergedInStore(store, managed, at);
     }
     const headJob = reconcileHeadChange(store, managed, pr, at);
-    const review = reconcileReviewResult(root, store, managed, pr, at, precomputed);
-    outcome = { state: managed.reviewState, headChanged: Boolean(headJob), review };
+    const review = reconcileReviewResultInStore(store, managed, pr, at, precomputed);
+    return {
+      state: managed.reviewState,
+      headChanged: Boolean(headJob),
+      review,
+      effects: review?.effects || [],
+    };
   });
-  return outcome;
+  const effectResults = applyEffects(root, managedId, outcome.effects || []);
+  return { ...outcome, effects: effectResults };
 }
 
 export function reconcileManagedPullRequests(root, options = {}) {
@@ -283,7 +380,11 @@ export function recoverPrReviewState(root, { now = Date.now() } = {}) {
           job.dueAt = at;
         }
         job.updatedAt = at;
-        appendHistory(store, { entityType: 'review_job', entityId: job.id, previousState: 'submitting', newState: job.state, reason: job.state === 'queued' ? 'Recovered interrupted browser submission.' : 'Cancelled interrupted submission for inactive PR.', actor: 'startup-recovery', sha: job.headSha, timestamp: at });
+        appendHistory(store, {
+          entityType: 'review_job', entityId: job.id, previousState: 'submitting', newState: job.state,
+          reason: job.state === 'queued' ? 'Recovered interrupted browser submission.' : 'Cancelled interrupted submission for inactive PR.',
+          actor: 'startup-recovery', sha: job.headSha, timestamp: at,
+        });
       }
     }
     for (const job of store.fixJobs) {
@@ -292,7 +393,10 @@ export function recoverPrReviewState(root, { now = Date.now() } = {}) {
         job.state = !managed || managed.reviewState === 'paused' || TERMINAL_PR_STATES.has(managed.reviewState) ? 'cancelled' : 'interrupted';
         job.updatedAt = at;
         job.lastError = job.state === 'interrupted' ? 'Fix worker was interrupted before recovery.' : 'Fix job cancelled because its PR is inactive.';
-        appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: 'fixing', newState: job.state, reason: job.lastError, actor: 'startup-recovery', sha: job.reviewedHeadSha, timestamp: at });
+        appendHistory(store, {
+          entityType: 'fix_job', entityId: job.id, previousState: 'fixing', newState: job.state,
+          reason: job.lastError, actor: 'startup-recovery', sha: job.reviewedHeadSha, timestamp: at,
+        });
       }
     }
   });
