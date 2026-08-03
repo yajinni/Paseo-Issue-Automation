@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { claimNextReview, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
+import { claimNextReview, enqueueManagedReview, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
 import { loadPrReviewStore, savePrAutomationConfig, setReviewQueuePaused } from '../src/pr-review-store.mjs';
 
 function repo(t) {
@@ -55,4 +55,20 @@ test('serial queue claims one due review and paused queue claims none', (t) => {
   setReviewQueuePaused(root, true);
   registerManagedPullRequest(root, { ...managedInput('abcdef789'), pullRequestNumber: 46, pullRequestUrl: 'https://github.com/owner/repo/pull/46' }, { now: 3000 });
   assert.equal(claimNextReview(root, { now: 5000 }), null);
+});
+
+test('one-time conversation override is stored only on the queued review job', (t) => {
+  const root = repo(t);
+  const registered = registerManagedPullRequest(root, managedInput('abcdef123'), { now: 1000 });
+  const original = loadPrReviewStore(root).reviewJobs[0];
+  original.state = 'cancelled';
+  const review = enqueueManagedReview(root, registered.managed.id, {
+    immediate: true,
+    forceRetry: true,
+    conversationUrlOverride: 'https://chatgpt.com/c/one-time',
+  });
+  const store = loadPrReviewStore(root);
+  assert.equal(review.conversationUrlOverride, 'https://chatgpt.com/c/one-time');
+  assert.equal(store.config.browserReview.projectConversationUrl, null);
+  assert.equal(store.managedPullRequests[0].conversationUrlOverride, null);
 });
