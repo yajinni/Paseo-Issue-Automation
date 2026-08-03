@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/automation.mjs && node --check src/attempts.mjs && node --check src/controller-prompts.mjs && node --check src/controller-ui.mjs && node --check src/controller-worker.mjs && node --check src/dependencies.mjs && node --check src/dispatch-batch.mjs && node --check src/reviewer-audit.mjs && node --check src/server.mjs && node --check src/state.mjs && node --check src/operations-ui.mjs && node --check src/cli.mjs",
+    "check": "node --check src/automation.mjs && node --check src/attempts.mjs && node --check src/controller-prompts.mjs && node --check src/controller-worker.mjs && node --check src/control-center-script.mjs && node --check src/control-center-shell.mjs && node --check src/control-center-style.mjs && node --check src/dashboard-status.mjs && node --check src/dependencies.mjs && node --check src/dispatch-batch.mjs && node --check src/reviewer-audit.mjs && node --check src/server.mjs && node --check src/state.mjs && node --check src/ui.mjs && node --check src/cli.mjs",
     "pack:check": "npm pack --dry-run",
     "setup": "node ./bin/paseo-issue-automation.mjs setup",
     "start": "node ./bin/paseo-issue-automation.mjs start",
