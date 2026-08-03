@@ -50,7 +50,11 @@ Resolve the listed review findings.
 Add or update tests.
 Run changed-area validation and every validation required by the issue.
 Push the fixes to the existing branch.
-Report the new head SHA to Paseo.
+After pushing, record one exact passing validation summary for the new head SHA:
+
+npx --no-install paseo-issue-automation record --issue ${managed.issueNumber} --event validation-summary --result PASS --commit <new-head-sha> --details '<commands and results>'
+
+Do not report completion until the PR head, worktree HEAD, and recorded validation commit are the same exact SHA.
 
 Review findings:
 ${job.findings}
@@ -88,6 +92,31 @@ function launchFixAgent(root, managed, job) {
   return { coderAgentId };
 }
 
+function failForReviewLimit(root, selected, managed, maximum) {
+  const message = `Maximum review rounds (${maximum}) reached; another automated fix round will not start.`;
+  mutatePrReviewStore(root, (store) => {
+    const job = findFixJob(store, selected.id);
+    const record = findManaged(store, managed.id);
+    const at = nowIso();
+    if (job) {
+      job.state = 'failed';
+      job.lastError = message;
+      job.updatedAt = at;
+    }
+    if (record) transitionManaged(store, record, 'failed', {
+      reason: message,
+      actor: 'coding-scheduler',
+      error: message,
+      at,
+    });
+  });
+  setPrReviewLabels(root, managed.pullRequestNumber, {
+    add: [PR_REVIEW_LABELS.failed],
+    remove: [PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.queued],
+  });
+  return { claimed: false, reason: message, jobId: selected.id };
+}
+
 export function dispatchNextFixJob(root, { spawnWorker = true } = {}) {
   const config = loadConfig(root);
   if (activeCodingCount(root) >= config.maxActive) return { claimed: false, reason: 'Maximum coding slot count reached.' };
@@ -96,6 +125,9 @@ export function dispatchNextFixJob(root, { spawnWorker = true } = {}) {
   if (!selected) return { claimed: false, reason: 'No queued PR fix job.' };
   const managed = findManaged(store, selected.managedPullRequestId);
   if (!managed) throw new Error(`Managed PR ${selected.managedPullRequestId} was not found.`);
+  if (managed.reviewRound >= config.maxReviewRounds) {
+    return failForReviewLimit(root, selected, managed, config.maxReviewRounds);
+  }
   let launch;
   try { launch = launchFixAgent(root, managed, selected); }
   catch (error) {
@@ -142,6 +174,44 @@ export function dispatchNextFixJob(root, { spawnWorker = true } = {}) {
   });
   child.unref();
   return { claimed: true, jobId: claimed.id, issueNumber: claimed.issueNumber, pullRequestNumber: claimed.pullRequestNumber, pid: child.pid };
+}
+
+export function retryFixJob(root, fixJobId) {
+  const result = mutatePrReviewStore(root, (store) => {
+    const job = findFixJob(store, fixJobId);
+    if (!job) throw new Error(`Fix job ${fixJobId} was not found.`);
+    if (!['failed', 'interrupted'].includes(job.state)) throw new Error('Only failed or interrupted fix jobs can be retried.');
+    const managed = findManaged(store, job.managedPullRequestId);
+    if (!managed || managed.reviewState === 'paused' || TERMINAL_PR_STATES.has(managed.reviewState)) {
+      throw new Error('The managed pull request is not eligible for another fix attempt.');
+    }
+    const maximum = loadConfig(root).maxReviewRounds;
+    if (managed.reviewRound >= maximum) throw new Error(`Maximum review rounds (${maximum}) reached.`);
+    const previous = job.state;
+    const at = nowIso();
+    job.state = 'queued';
+    job.coderAgentId = null;
+    job.startedAt = null;
+    job.completedAt = null;
+    job.lastError = null;
+    job.updatedAt = at;
+    transitionManaged(store, managed, 'fix_queued', {
+      reason: 'Operator retried the failed PR fix job.',
+      actor: 'user',
+      sha: job.reviewedHeadSha,
+      at,
+    });
+    appendHistory(store, {
+      entityType: 'fix_job', entityId: job.id, previousState: previous, newState: 'queued',
+      reason: 'Failed PR fix job explicitly retried.', actor: 'user', sha: job.reviewedHeadSha, timestamp: at,
+    });
+    return { job: clone(job), pullRequestNumber: managed.pullRequestNumber };
+  });
+  setPrReviewLabels(root, result.pullRequestNumber, {
+    add: [PR_REVIEW_LABELS.changesRequested],
+    remove: [PR_REVIEW_LABELS.failed, PR_REVIEW_LABELS.fixing],
+  });
+  return result.job;
 }
 
 export function fixJobStatus(root, fixJobId) {

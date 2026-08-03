@@ -16,7 +16,7 @@ function repo(t) {
   return root;
 }
 
-test('fixes update the existing PR and requeue only the new head SHA', (t) => {
+test('validated fixes update the existing PR and requeue only the new head SHA', (t) => {
   const root = repo(t);
   const registered = registerManagedPullRequest(root, {
     repository: 'owner/repo', issueNumber: 101, issueUrl: 'https://github.com/owner/repo/issues/101',
@@ -35,7 +35,8 @@ test('fixes update the existing PR and requeue only the new head SHA', (t) => {
   });
   const result = completeFixJob(root, fixJobId, {
     waitForAgent: false,
-    snapshot: { state: 'OPEN', headRefOid: 'abcdef456' },
+    snapshot: { state: 'OPEN', headRefOid: 'abcdef456', baseRefName: 'main' },
+    validator: () => ({ newHeadSha: 'abcdef456', validation: { commit: 'abcdef456' } }),
     labelWriter: () => ({ changed: true }),
   });
   const store = loadPrReviewStore(root);

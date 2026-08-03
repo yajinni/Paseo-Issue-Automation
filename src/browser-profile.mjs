@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -40,6 +41,13 @@ function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 
+function atomicConfigWrite(file, value) {
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  renameSync(temporary, file);
+  try { chmodSync(file, 0o600); } catch {}
+}
+
 export function loadBrowserConfig(options = {}) {
   const file = browserPaths(options).config;
   const stored = readJson(file, {});
@@ -72,8 +80,7 @@ export function saveBrowserConfig(input, options = {}) {
       : input.lastConversationUrl ? normalizeChatGptConversationUrl(input.lastConversationUrl) : null,
     updatedAt: new Date().toISOString(),
   };
-  writeFileSync(paths.config, `${JSON.stringify(config, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  try { chmodSync(paths.config, 0o600); } catch {}
+  atomicConfigWrite(paths.config, config);
   return config;
 }
 
@@ -99,6 +106,7 @@ export function releaseBrowserProfileLease(leaseId, options = {}) {
 
 export function browserProfileStatus(options = {}) {
   const paths = browserPaths(options);
+  clearExpiredLease(paths.lock);
   const lease = readLease(paths.lock);
   const config = loadBrowserConfig(options);
   return {
@@ -119,6 +127,7 @@ export function browserProfileStatus(options = {}) {
 
 export function resetBrowserProfile(options = {}) {
   const paths = browserPaths(options);
+  clearExpiredLease(paths.lock);
   const lease = readLease(paths.lock);
   if (lease) throw new Error('The dedicated browser profile is currently in use.');
   rmSync(paths.profile, { recursive: true, force: true });
@@ -129,8 +138,11 @@ export function resetBrowserProfile(options = {}) {
 
 export function uninstallBrowserState(options = {}) {
   const paths = browserPaths(options);
-  const lease = readLease(paths.lock);
-  if (lease) throw new Error('The dedicated browser profile is currently in use.');
+  clearExpiredLease(paths.lock);
+  clearExpiredLease(paths.reviewSchedulerLock, { requireLiveProcess: false });
+  const profileLease = readLease(paths.lock);
+  const reviewLease = readLease(paths.reviewSchedulerLock);
+  if (profileLease || reviewLease) throw new Error('The dedicated browser or serial review scheduler is currently in use.');
   rmSync(paths.root, { recursive: true, force: true });
   return { removed: true };
 }
