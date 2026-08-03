@@ -17,7 +17,11 @@ function repo(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-review-lifecycle-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  savePrAutomationConfig(root, { enabled: true, browserReview: { enabled: true, reviewDebounceMs: 0 } });
+  savePrAutomationConfig(root, {
+    enabled: true,
+    browserReview: { enabled: true, reviewDebounceMs: 0 },
+    reviewQueue: { paused: false },
+  });
   return root;
 }
 
@@ -53,7 +57,7 @@ test('cancelling the last queued review clears managed queue state', (t) => {
   assert.equal(store.reviewJobs[0].state, 'cancelled');
   assert.equal(record.reviewState, 'paused');
   assert.equal(record.activeReviewRequestId, null);
-  assert.equal(record.queuePosition, null);
+  assert.equal(record.queuePosition, 0);
 });
 
 test('terminal PR reconciliation cancels review and fix jobs', (t) => {
