@@ -6,6 +6,7 @@
 - Use native GitHub issue relationships as the exclusive dependency source; dependency-like issue-body text is ignored.
 - Reconcile blocked issues automatically and unlock them only after prerequisite implementation reaches the configured base branch.
 - Launch Coders directly, run fresh structured Reviewer sessions, and return review or CI findings to the same Coder.
+- Post every Reviewer approval or changes-required verdict to the draft PR with the exact reviewed commit, review round, and findings.
 - Require merge-based base updates, exact-commit revalidation, and human-only final merging.
 - Add dependency-cycle and execution-wave validation.
 - Guided setup, reversible installation, manual issue controls, fresh-attempt restarts, activity history, and package release checks.
