@@ -8,7 +8,7 @@ Planning happens before runtime. A strong planning model creates the GitHub issu
 
 The package runtime is a deterministic **Issue Execution Controller**. It does not launch an Orchestrator AI. It:
 
-- reads native GitHub issue dependencies, with the legacy `Blocked by #123` / `Depends on #123` body syntax as a compatibility fallback
+- reads only native GitHub issue dependencies and refuses to infer dependencies from issue-body text
 - validates dependency cycles and keeps unresolved issues blocked
 - requires coding dependencies to have a merged PR targeting the configured base branch whose merge commit is present in that branch
 - automatically rechecks dependency-blocked issues and restores `agent-ready` when every blocker is satisfied
@@ -52,6 +52,8 @@ gh issue create --title "Integration" --blocked-by 301,302
 ```
 
 Sub-issues describe hierarchy. Native `blocked by` relationships describe execution order. The relationship remains recorded after it is satisfied; the controller changes operational readiness rather than deleting history.
+
+The installed GitHub CLI must expose native `blockedBy` relationship data. If that structured data is unavailable, the controller blocks execution rather than reading dependency-like lines from the issue body.
 
 ## Interruption policy
 
