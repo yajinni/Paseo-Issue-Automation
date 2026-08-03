@@ -4,12 +4,16 @@ import {
   clone,
   findManaged,
   findReviewJob,
+  loadPrReviewStore,
   managedPullRequestId,
   mutatePrReviewStore,
   nextQueuePosition,
   nowIso,
+  TERMINAL_PR_STATES,
   transitionManaged,
 } from './pr-review-store.mjs';
+import { managedPrSnapshot } from './pr-review-github.mjs';
+import { evaluateApprovedReviewGate, finalizeApprovedBrowserReview } from './pr-review-finalize.mjs';
 import { createReviewRequestId, reviewJobId } from './review-prompt.mjs';
 
 function validSha(value) {
@@ -44,6 +48,7 @@ export function enqueueReviewInStore(store, managed, {
   conversationUrlOverride = null,
   now = Date.now(),
 } = {}) {
+  if (TERMINAL_PR_STATES.has(managed.reviewState)) throw new Error(`Managed PR ${managed.id} is terminal and cannot be queued.`);
   const sha = validSha(headSha);
   const at = nowIso(now);
   const promptVersion = Number(managed.reviewPromptVersion || store.config.browserReview.reviewPromptVersion);
@@ -181,7 +186,11 @@ export function enqueueManagedReview(root, managedId, options = {}) {
 export function nextDueReview(store, now = Date.now()) {
   if (!store.config.enabled || !store.config.browserReview.enabled || store.config.reviewQueue.paused || store.runtime.activeReviewJobId) return null;
   return store.reviewJobs
-    .filter((job) => job.state === 'queued' && Date.parse(job.dueAt) <= now)
+    .filter((job) => {
+      if (job.state !== 'queued' || Date.parse(job.dueAt) > now) return false;
+      const managed = findManaged(store, job.managedPullRequestId);
+      return Boolean(managed && managed.reviewState !== 'paused' && !TERMINAL_PR_STATES.has(managed.reviewState));
+    })
     .sort((a, b) => Number(b.priority) - Number(a.priority) || Number(a.queuePosition) - Number(b.queuePosition))[0] || null;
 }
 
@@ -190,7 +199,6 @@ export function claimNextReview(root, { now = Date.now() } = {}) {
     const job = nextDueReview(store, now);
     if (!job) return null;
     const managed = findManaged(store, job.managedPullRequestId);
-    if (!managed || managed.reviewState === 'paused') return null;
     const at = nowIso(now);
     const previous = job.state;
     job.state = 'submitting';
@@ -302,7 +310,21 @@ export function pauseManagedPr(root, managedId, paused = true) {
   return mutatePrReviewStore(root, (store) => {
     const managed = findManaged(store, managedId);
     if (!managed) throw new Error(`Managed PR ${managedId} was not found.`);
-    transitionManaged(store, managed, paused ? 'paused' : 'queued', { reason: paused ? 'PR review paused by user.' : 'PR review resumed by user.', actor: 'user' });
+    const active = store.reviewJobs.find((job) => job.managedPullRequestId === managedId && job.state === 'submitting');
+    if (paused && active) throw new Error('An actively submitting review cannot be paused. Wait for submission to finish or fail.');
+    const at = nowIso();
+    for (const job of store.reviewJobs.filter((candidate) => candidate.managedPullRequestId === managedId)) {
+      if (paused && job.state === 'queued') {
+        job.state = 'paused';
+        job.updatedAt = at;
+      } else if (!paused && job.state === 'paused') {
+        job.state = 'queued';
+        job.dueAt = at;
+        job.queuePosition = nextQueuePosition(store);
+        job.updatedAt = at;
+      }
+    }
+    transitionManaged(store, managed, paused ? 'paused' : 'queued', { reason: paused ? 'PR review paused by user.' : 'PR review resumed by user.', actor: 'user', at });
     return clone(managed);
   });
 }
@@ -312,7 +334,18 @@ export function cancelQueuedReview(root, jobId) {
     const job = findReviewJob(store, jobId);
     if (!job) throw new Error(`Review job ${jobId} was not found.`);
     if (job.state !== 'queued') throw new Error('Only queued review jobs can be cancelled.');
-    job.state = 'cancelled'; job.completedAt = nowIso(); job.updatedAt = job.completedAt;
+    const at = nowIso();
+    job.state = 'cancelled';
+    job.completedAt = at;
+    job.updatedAt = at;
+    const managed = findManaged(store, job.managedPullRequestId);
+    if (managed && managed.activeReviewRequestId === job.reviewRequestId) {
+      managed.activeReviewRequestId = null;
+      managed.queuePosition = null;
+      const remaining = store.reviewJobs.some((candidate) => candidate.managedPullRequestId === managed.id && ['queued', 'submitting', 'awaiting_result'].includes(candidate.state));
+      if (!remaining) transitionManaged(store, managed, 'paused', { reason: 'The last queued review was cancelled by the user.', actor: 'user', at });
+    }
+    appendHistory(store, { entityType: 'review_job', entityId: job.id, previousState: 'queued', newState: 'cancelled', reason: 'Queued review cancelled by user.', actor: 'user', sha: job.headSha, timestamp: at });
     return clone(job);
   });
 }
@@ -336,27 +369,52 @@ export function retryReviewJob(root, jobId) {
   });
 }
 
+function manualReviewSelection(root, managedId) {
+  const store = loadPrReviewStore(root);
+  const managed = findManaged(store, managedId);
+  if (!managed) throw new Error(`Managed PR ${managedId} was not found.`);
+  const job = store.reviewJobs
+    .filter((candidate) => candidate.managedPullRequestId === managed.id && ['awaiting_result', 'failed', 'paused'].includes(candidate.state))
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+  if (!job) throw new Error('No review job is available for a manual result.');
+  const pr = managedPrSnapshot(root, managed.pullRequestNumber);
+  const currentHead = String(pr?.headRefOid || '').toLowerCase();
+  if (!pr || String(pr.state).toUpperCase() !== 'OPEN' || currentHead !== job.headSha || currentHead !== managed.currentHeadSha) {
+    throw new Error('Manual review results require an open PR whose current head exactly matches the selected review job.');
+  }
+  return { managed, job, pr };
+}
+
 export function applyManualReviewResult(root, managedId, { result, findings = '', actor = 'user' } = {}) {
+  const selected = manualReviewSelection(root, managedId);
+  if (result === 'changes_requested') {
+    return mutatePrReviewStore(root, (store) => {
+      const managed = findManaged(store, managedId);
+      const job = findReviewJob(store, selected.job.id);
+      return clone(createFixJobInStore(store, managed, job, findings, { now: Date.now() }));
+    });
+  }
+  if (result !== 'approved') throw new Error('Manual result must be approved or changes_requested.');
+  const gate = evaluateApprovedReviewGate(root, selected.managed, selected.job, selected.pr);
+  if (!gate.ok) throw new Error(gate.reason || 'The approved-review completion gate did not pass.');
+  finalizeApprovedBrowserReview(root, selected.managed, selected.job, {
+    findings: findings || 'Operator approved this exact validated commit.',
+    pr: selected.pr,
+    gate,
+  });
   return mutatePrReviewStore(root, (store) => {
     const managed = findManaged(store, managedId);
-    if (!managed) throw new Error(`Managed PR ${managedId} was not found.`);
-    const job = store.reviewJobs
-      .filter((candidate) => candidate.managedPullRequestId === managed.id && ['awaiting_result', 'failed', 'paused'].includes(candidate.state))
-      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
-    if (!job) throw new Error('No review job is available for a manual result.');
+    const job = findReviewJob(store, selected.job.id);
     const at = nowIso();
-    if (result === 'changes_requested') {
-      return clone(createFixJobInStore(store, managed, job, findings, { now: Date.now() }));
-    }
-    if (result !== 'approved') throw new Error('Manual result must be approved or changes_requested.');
     const previous = job.state;
     job.state = 'completed';
     job.completedAt = at;
     job.updatedAt = at;
     managed.lastCompletedReviewSha = job.headSha;
     managed.lastProcessedReviewRequestId = job.reviewRequestId;
-    transitionManaged(store, managed, 'ready_to_merge', { reason: 'Operator marked the review approved.', actor, sha: job.headSha, at });
-    appendHistory(store, { entityType: 'review_job', entityId: job.id, previousState: previous, newState: 'completed', reason: 'Operator supplied an approved review result.', actor, sha: job.headSha, timestamp: at });
+    managed.lastError = null;
+    transitionManaged(store, managed, 'ready_to_merge', { reason: 'Operator approval passed the deterministic final gate.', actor, sha: job.headSha, at });
+    appendHistory(store, { entityType: 'review_job', entityId: job.id, previousState: previous, newState: 'completed', reason: 'Operator supplied an approved review result after all gates passed.', actor, sha: job.headSha, timestamp: at });
     return clone(managed);
   });
 }
