@@ -1,12 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { browserPaths, loadBrowserConfig } from './browser-profile.mjs';
-import { releaseLease } from './durable-lease.mjs';
+import { releaseLease, startLeaseHeartbeat } from './durable-lease.mjs';
 import { submitReviewPrompt } from './browser-service.mjs';
 import { findManaged, findReviewJob, loadPrReviewStore } from './pr-review-store.mjs';
 import { markReviewSubmitted, markReviewSubmissionFailed } from './pr-review-queue.mjs';
 import { renderReviewPrompt } from './review-prompt.mjs';
 import { PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
+
+const GLOBAL_REVIEW_TTL_MS = 180_000;
 
 export function resolveConversationUrl(store, managed, job, globalConfig = loadBrowserConfig()) {
   return job.conversationUrlOverride
@@ -63,8 +65,24 @@ export async function executeReviewSubmission(root, jobId, {
 async function main() {
   const [root, jobId, globalLeaseId] = process.argv.slice(2);
   if (!root || !jobId) throw new Error('Usage: pr-review-worker.mjs <repository-root> <review-job-id> [global-lease-id]');
-  try { await executeReviewSubmission(path.resolve(root), jobId); }
-  finally { if (globalLeaseId) releaseLease(browserPaths().reviewSchedulerLock, globalLeaseId); }
+  const globalLock = browserPaths().reviewSchedulerLock;
+  let leaseError = null;
+  const stopHeartbeat = globalLeaseId
+    ? startLeaseHeartbeat(globalLock, globalLeaseId, {
+        ttlMs: GLOBAL_REVIEW_TTL_MS,
+        intervalMs: 45_000,
+        metadata: { repositoryRoot: path.resolve(root), reviewJobId: jobId },
+        onError: (error) => { leaseError = error; },
+      })
+    : () => {};
+  try {
+    const result = await executeReviewSubmission(path.resolve(root), jobId);
+    if (leaseError) throw leaseError;
+    return result;
+  } finally {
+    stopHeartbeat();
+    if (globalLeaseId) releaseLease(globalLock, globalLeaseId);
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

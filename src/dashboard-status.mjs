@@ -1,4 +1,6 @@
 import { dependencyNumbers, detectDependencyCycles, executionWaves } from './dependencies.mjs';
+import { activeFixJobs } from './fix-jobs.mjs';
+import { loadPrReviewStore } from './pr-review-store.mjs';
 import { LABELS, listRuns, loadConfig, loadRuntime } from './state.mjs';
 import { run, runJson } from './process.mjs';
 
@@ -144,7 +146,7 @@ function flattenActivity(attempts) {
     .sort((a, b) => String(b.at).localeCompare(String(a.at)));
 }
 
-export function buildExecutionModel({ issues = [], attempts = [], config, runtime }) {
+export function buildExecutionModel({ issues = [], attempts = [], config, runtime, activeFixCount = 0 }) {
   const graph = Object.fromEntries(issues.map((issue) => [issue.number, issue.dependencies || []]));
   const cycles = detectDependencyCycles(graph);
   const waveResult = executionWaves(graph);
@@ -155,6 +157,10 @@ export function buildExecutionModel({ issues = [], attempts = [], config, runtim
   }));
   const running = attempts.filter((attempt) => attempt.status === LABELS.running || attempt.status === 'agent-running');
   const humanReview = attempts.filter((attempt) => attempt.status === LABELS.humanReview || attempt.status === 'human-review');
+  const issueActive = running.length;
+  const fixActive = Math.max(0, Number(activeFixCount) || 0);
+  const totalActive = issueActive + fixActive;
+  const maximum = Number(config.maxActive || 1);
   const intervalMs = Number(config.pollIntervalSeconds || 120) * 1000;
   const lastDispatchAt = runtime.lastDispatchAt || null;
   const nextPollAt = lastDispatchAt ? new Date(new Date(lastDispatchAt).getTime() + intervalMs).toISOString() : null;
@@ -164,9 +170,11 @@ export function buildExecutionModel({ issues = [], attempts = [], config, runtim
     unresolvedWaveIssues: waveResult.unresolved,
     cycles,
     capacity: {
-      active: running.length,
-      maximum: Number(config.maxActive || 1),
-      available: Math.max(0, Number(config.maxActive || 1) - running.length),
+      active: totalActive,
+      issueActive,
+      fixActive,
+      maximum,
+      available: Math.max(0, maximum - totalActive),
     },
     humanReview,
     active: running,
@@ -227,7 +235,8 @@ export function dashboardStatus(root, existing = {}, options = {}) {
       baseFreshness: attempt?.baseFreshness || null,
     };
   }).sort((a, b) => a.number - b.number);
-  const model = buildExecutionModel({ issues, attempts, config, runtime });
+  const activeFixCount = activeFixJobs(loadPrReviewStore(root)).length;
+  const model = buildExecutionModel({ issues, attempts, config, runtime, activeFixCount });
   return {
     ...existing,
     counts: Object.fromEntries(labelEntries.map(([key, list]) => [key, list.length])),

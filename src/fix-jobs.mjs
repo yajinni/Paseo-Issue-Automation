@@ -1,8 +1,18 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { appendHistory, clone, findFixJob, findManaged, loadPrReviewStore, mutatePrReviewStore, nowIso, transitionManaged } from './pr-review-store.mjs';
-import { findFirstKey, run, runJson } from './process.mjs';
+import {
+  appendHistory,
+  clone,
+  findFixJob,
+  findManaged,
+  loadPrReviewStore,
+  mutatePrReviewStore,
+  nowIso,
+  TERMINAL_PR_STATES,
+  transitionManaged,
+} from './pr-review-store.mjs';
+import { findFirstKey, runJson } from './process.mjs';
 import { loadConfig } from './state.mjs';
 import { PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
 
@@ -14,7 +24,11 @@ export function activeFixJobs(store) {
 
 export function queuedFixJobs(store) {
   return store.fixJobs
-    .filter((job) => ['queued', 'interrupted'].includes(job.state))
+    .filter((job) => {
+      if (!['queued', 'interrupted'].includes(job.state)) return false;
+      const managed = findManaged(store, job.managedPullRequestId);
+      return Boolean(managed && managed.reviewState !== 'paused' && !TERMINAL_PR_STATES.has(managed.reviewState));
+    })
     .sort((a, b) => Number(b.priority) - Number(a.priority) || String(a.createdAt).localeCompare(String(b.createdAt)));
 }
 
@@ -44,15 +58,20 @@ ${job.findings}
 Before changing code, confirm that the workspace is on ${managed.branchName} and that PR #${managed.pullRequestNumber} still uses that branch. Stop if the PR was merged, closed, or moved to another branch. Do not broaden the associated issue.`;
 }
 
-function issueCodingCount(root) {
-  const result = runJson('gh', ['issue', 'list', '--state', 'open', '--label', 'agent-running', '--limit', '100', '--json', 'number'], {
-    cwd: root, allowFailure: true,
+function issueCodingCount(root, { jsonRunner = runJson } = {}) {
+  const result = jsonRunner('gh', ['issue', 'list', '--state', 'open', '--label', 'agent-running', '--limit', '100', '--json', 'number'], {
+    cwd: root,
+    allowFailure: true,
   });
-  return Array.isArray(result) ? result.length : 0;
+  if (!Array.isArray(result)) throw new Error('Could not confirm the active issue-coding count from GitHub; no new coding job will start.');
+  return result.length;
 }
 
-export function activeCodingCount(root) {
-  return issueCodingCount(root) + activeFixJobs(loadPrReviewStore(root)).length;
+export function activeCodingCount(root, {
+  jsonRunner = runJson,
+  storeLoader = loadPrReviewStore,
+} = {}) {
+  return issueCodingCount(root, { jsonRunner }) + activeFixJobs(storeLoader(root)).length;
 }
 
 function launchFixAgent(root, managed, job) {
@@ -72,9 +91,9 @@ function launchFixAgent(root, managed, job) {
 export function dispatchNextFixJob(root, { spawnWorker = true } = {}) {
   const config = loadConfig(root);
   if (activeCodingCount(root) >= config.maxActive) return { claimed: false, reason: 'Maximum coding slot count reached.' };
-  const selected = queuedFixJobs(loadPrReviewStore(root))[0];
-  if (!selected) return { claimed: false, reason: 'No queued PR fix job.' };
   const store = loadPrReviewStore(root);
+  const selected = queuedFixJobs(store)[0];
+  if (!selected) return { claimed: false, reason: 'No queued PR fix job.' };
   const managed = findManaged(store, selected.managedPullRequestId);
   if (!managed) throw new Error(`Managed PR ${selected.managedPullRequestId} was not found.`);
   let launch;
@@ -92,6 +111,9 @@ export function dispatchNextFixJob(root, { spawnWorker = true } = {}) {
   const claimed = mutatePrReviewStore(root, (next) => {
     const job = findFixJob(next, selected.id);
     const record = findManaged(next, selected.managedPullRequestId);
+    if (!job || !record || !['queued', 'interrupted'].includes(job.state)) {
+      throw new Error('The selected fix job changed before it could be claimed.');
+    }
     const at = nowIso();
     job.state = 'fixing';
     job.attempts += 1;
@@ -109,8 +131,17 @@ export function dispatchNextFixJob(root, { spawnWorker = true } = {}) {
   });
   if (!spawnWorker) return { claimed: true, job: claimed };
   const child = spawn(process.execPath, [workerPath, root, claimed.id], { detached: true, stdio: 'ignore', windowsHide: true });
+  if (!child.pid) throw new Error('Could not determine the PR fix worker PID.');
+  child.once('error', (error) => {
+    mutatePrReviewStore(root, (next) => {
+      const job = findFixJob(next, claimed.id);
+      const record = job ? findManaged(next, job.managedPullRequestId) : null;
+      if (job) { job.state = 'failed'; job.lastError = error.message; job.updatedAt = nowIso(); }
+      if (record) transitionManaged(next, record, 'failed', { reason: 'PR fix worker process failed to start.', actor: 'coding-scheduler', error: error.message });
+    });
+  });
   child.unref();
-  return { claimed: true, jobId: claimed.id, issueNumber: claimed.issueNumber, pullRequestNumber: claimed.pullRequestNumber, pid: child.pid || null };
+  return { claimed: true, jobId: claimed.id, issueNumber: claimed.issueNumber, pullRequestNumber: claimed.pullRequestNumber, pid: child.pid };
 }
 
 export function fixJobStatus(root, fixJobId) {
