@@ -6,6 +6,7 @@ import {
   buildReviewerPrompt,
 } from './controller-prompts.mjs';
 import { markHumanReview, recordEvent, terminalState } from './automation.mjs';
+import { postReviewerAuditComment } from './reviewer-audit.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
 import { run, runJson } from './process.mjs';
 
@@ -76,7 +77,7 @@ function requireValidatedPr(root, issueNumber) {
   return { terminal: false, state, validation, pr, head };
 }
 
-function runReviewer(root, issueNumber, snapshot) {
+function runReviewer(root, issueNumber, snapshot, reviewRound) {
   const config = loadConfig(root);
   const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
   const issue = runJson('gh', [
@@ -106,6 +107,18 @@ function runReviewer(root, issueNumber, snapshot) {
     result: verdict.approved ? 'APPROVED' : 'CHANGES_REQUIRED',
     commit: snapshot.head,
     details: String(verdict.findings || ''),
+  });
+  const audit = postReviewerAuditComment(root, {
+    issueNumber,
+    prNumber: snapshot.pr.number,
+    commit: snapshot.head,
+    round: reviewRound,
+    approved: verdict.approved,
+    findings: verdict.findings,
+  });
+  updateState(root, issueNumber, {}, {
+    type: 'review-audit-posted',
+    details: `Posted ${audit.verdict} for ${audit.commit} to PR #${audit.prNumber} (round ${audit.round}).`,
   });
   return verdict;
 }
@@ -177,7 +190,7 @@ async function execute(root, issueNumber) {
     if (completedReviews >= config.maxReviewRounds) {
       throw new Error(`Maximum review rounds (${config.maxReviewRounds}) reached.`);
     }
-    const verdict = runReviewer(root, issueNumber, snapshot);
+    const verdict = runReviewer(root, issueNumber, snapshot, completedReviews + 1);
     completedReviews += 1;
     if (!verdict.approved) {
       updateState(root, issueNumber, { phase: 'repairing' }, { type: 'review-changes-required', details: verdict.findings });
