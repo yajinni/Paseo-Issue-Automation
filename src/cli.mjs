@@ -1,8 +1,23 @@
 import { automationStatus, heartbeat, markHumanReview, recordEvent, setClaimsEnabled, terminalState } from './automation.mjs';
-import { abandonAttempt, dispatchSpecificIssue, openAttemptWorkspace, operationalStatus, restartIssue, skipIssue, unskipIssue } from './attempts.mjs';
+import { abandonAttempt, openAttemptWorkspace, operationalStatus, skipIssue, unskipIssue } from './attempts.mjs';
+import { dispatchSpecificCodingIssue, restartCodingIssue } from './coding-dispatch.mjs';
 import { setupSnapshot } from './install.mjs';
 import { repositoryRoot } from './state.mjs';
 import { startServer } from './server.mjs';
+import { runBrowserCommand } from './browser-cli.mjs';
+import { prReviewStatus } from './pr-review-status.mjs';
+import { reconcileManagedPullRequests, recoverPrReviewState } from './pr-review-reconcile.mjs';
+import { dispatchAvailableIssues } from './dispatch-batch.mjs';
+import {
+  applyManualReviewResult,
+  cancelQueuedReview,
+  moveReviewJob,
+  pauseManagedPr,
+  retryReviewJob,
+  reviewManagedNow,
+} from './pr-review-queue.mjs';
+import { setReviewQueuePaused } from './pr-review-store.mjs';
+import { saveValidatedPrAutomationConfig } from './pr-review-config.mjs';
 
 function argsToObject(args) {
   const result = { _: [] };
@@ -43,7 +58,51 @@ Commands:
   human-review --issue N --pr N
   block --issue N --reason TEXT
   fail --issue N --reason TEXT
+
+PR review commands:
+  pr-review status
+  pr-review enable | disable
+  pr-review pause | resume
+  pr-review reconcile | recover
+  pr-review review-now --id REPOSITORY#PR
+  pr-review retry --job REVIEW_JOB_ID
+  pr-review move --job REVIEW_JOB_ID --direction up|down
+  pr-review pause-pr --id REPOSITORY#PR | resume-pr --id REPOSITORY#PR
+  pr-review cancel --job REVIEW_JOB_ID
+  pr-review manual-result --id REPOSITORY#PR --result approved|changes_requested [--findings TEXT]
+  pr-review dispatch-fix
+
+Browser commands:
+  browser setup [--scope project|global] [--url URL] [--deps] [--send]
+  browser install [--deps]
+  browser login
+  browser configure [--scope project|global] [--url URL]
+  browser doctor
+  browser test [--url URL] [--visible] [--send]
+  browser debug [--url URL]
+  browser reset
+  browser uninstall
 `);
+}
+
+async function prReviewCommand(root, options) {
+  const action = options._[1] || 'status';
+  if (action === 'status') return prReviewStatus(root);
+  if (action === 'enable') return saveValidatedPrAutomationConfig(root, { enabled: true, browserReview: { enabled: true } });
+  if (action === 'disable') return saveValidatedPrAutomationConfig(root, { enabled: false });
+  if (action === 'pause') return setReviewQueuePaused(root, true);
+  if (action === 'resume') return setReviewQueuePaused(root, false);
+  if (action === 'reconcile') return reconcileManagedPullRequests(root);
+  if (action === 'recover') return recoverPrReviewState(root);
+  if (action === 'review-now') return reviewManagedNow(root, required(options, 'id'));
+  if (action === 'retry') return retryReviewJob(root, required(options, 'job'));
+  if (action === 'move') return moveReviewJob(root, required(options, 'job'), required(options, 'direction'));
+  if (action === 'pause-pr') return pauseManagedPr(root, required(options, 'id'), true);
+  if (action === 'resume-pr') return pauseManagedPr(root, required(options, 'id'), false);
+  if (action === 'cancel') return cancelQueuedReview(root, required(options, 'job'));
+  if (action === 'manual-result') return applyManualReviewResult(root, required(options, 'id'), { result: required(options, 'result'), findings: options.findings || '' });
+  if (action === 'dispatch-fix') return dispatchAvailableIssues(root);
+  throw new Error(`Unknown pr-review command: ${action}`);
 }
 
 export async function main(argv) {
@@ -54,14 +113,29 @@ export async function main(argv) {
   if (command === 'start') { await startServer({ open: false }); return; }
 
   const root = repositoryRoot();
-  if (command === 'status') console.log(JSON.stringify({ setup: setupSnapshot(root), automation: { ...automationStatus(root), ...operationalStatus(root) } }, null, 2));
+  if (command === 'browser') {
+    const result = await runBrowserCommand(root, options._[1] || 'doctor', {
+      scope: options.scope,
+      url: options.url,
+      deps: options.deps === true,
+      send: options.send === true,
+      visible: options.visible === true,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (command === 'pr-review') {
+    console.log(JSON.stringify(await prReviewCommand(root, options), null, 2));
+    return;
+  }
+  if (command === 'status') console.log(JSON.stringify({ setup: setupSnapshot(root), automation: { ...automationStatus(root), ...operationalStatus(root) }, prReviews: prReviewStatus(root) }, null, 2));
   else if (command === 'enable') console.log(JSON.stringify(setClaimsEnabled(root, true), null, 2));
   else if (command === 'disable') console.log(JSON.stringify(setClaimsEnabled(root, false), null, 2));
-  else if (command === 'start-issue') console.log(JSON.stringify(dispatchSpecificIssue(root, issueNumber(options), { branchAction: options['branch-action'] || 'keep' }), null, 2));
+  else if (command === 'start-issue') console.log(JSON.stringify(dispatchSpecificCodingIssue(root, issueNumber(options), { branchAction: options['branch-action'] || 'keep' }), null, 2));
   else if (command === 'skip-issue') console.log(JSON.stringify(skipIssue(root, issueNumber(options)), null, 2));
   else if (command === 'unskip-issue') console.log(JSON.stringify(unskipIssue(root, issueNumber(options)), null, 2));
   else if (command === 'abandon') console.log(JSON.stringify(abandonAttempt(root, issueNumber(options), options.reason || 'Abandoned by user'), null, 2));
-  else if (command === 'restart') console.log(JSON.stringify(restartIssue(root, issueNumber(options), { branchAction: options['branch-action'] || 'keep' }), null, 2));
+  else if (command === 'restart') console.log(JSON.stringify(restartCodingIssue(root, issueNumber(options), { branchAction: options['branch-action'] || 'keep' }), null, 2));
   else if (command === 'open-workspace') console.log(JSON.stringify(openAttemptWorkspace(root, issueNumber(options)), null, 2));
   else if (command === 'record') console.log(JSON.stringify(recordEvent(root, issueNumber(options), {
     event: required(options, 'event'), result: required(options, 'result'), commit: required(options, 'commit'), details: options.details || '',
