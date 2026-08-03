@@ -3,11 +3,11 @@ import test from 'node:test';
 import {
   dependencyNumbers,
   detectDependencyCycles,
+  evaluateIssueDependencies,
   executionWaves,
-  parseBodyDependencies,
 } from '../src/dependencies.mjs';
 
-test('native dependencies are authoritative over body fallback', () => {
+test('native dependencies are the only dependency source', () => {
   const issue = {
     body: 'Blocked by #99',
     blockedBy: [{ number: 12, title: 'Foundation', state: 'OPEN' }],
@@ -23,16 +23,24 @@ test('native dependencies are authoritative over body fallback', () => {
       url: null,
       closedByPullRequestsReferences: [],
     }],
+    unavailable: false,
+    reason: null,
   });
 });
 
-test('body dependencies remain a compatibility fallback', () => {
-  assert.deepEqual(parseBodyDependencies('Blocked by #12\nDepends on #13\nBlocked by #12'), [12, 13]);
-  assert.deepEqual(dependencyNumbers({ body: 'Depends on #7' }), {
-    source: 'body-fallback',
-    numbers: [7],
-    dependencies: [],
-  });
+test('issue-body dependency text is never used as a fallback', () => {
+  const result = dependencyNumbers({ body: 'Blocked by #12\nDepends on #13' });
+  assert.equal(result.source, 'native');
+  assert.equal(result.unavailable, true);
+  assert.deepEqual(result.numbers, []);
+  assert.match(result.reason, /will not infer dependencies from issue-body text/i);
+});
+
+test('missing native relationship data blocks execution', () => {
+  const result = evaluateIssueDependencies('/repo', { body: 'Depends on #7' }, { baseBranch: 'main' });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.dependencies, []);
+  assert.match(result.unresolved[0], /native github blocked-by relationship data is unavailable/i);
 });
 
 test('dependency cycles are reported', () => {
@@ -43,8 +51,6 @@ test('execution waves preserve parallel work', () => {
   const result = executionWaves({ 100: [], 101: [100], 102: [100], 103: [101, 102] });
   assert.deepEqual(result, { waves: [[100], [101, 102], [103]], unresolved: [] });
 });
-
-import { evaluateIssueDependencies } from '../src/dependencies.mjs';
 
 test('closed coding dependencies require a merged PR present in the base branch', () => {
   const issue = {
