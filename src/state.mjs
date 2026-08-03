@@ -13,12 +13,13 @@ export const LABELS = Object.freeze({
 });
 
 export const DEFAULT_CONFIG = Object.freeze({
-  version: 1,
+  version: 2,
   setupComplete: false,
   baseBranch: '',
   pollIntervalSeconds: 120,
   maxActive: 1,
   maxReviewRounds: 4,
+  controller: { type: 'deterministic' },
   models: { orchestrator: '', coder: '', reviewer: '' },
   workspace: { id: null, title: WORKSPACE_TITLE },
 });
@@ -99,17 +100,23 @@ function normalizedBranch(value) {
 }
 
 export function validateConfig(input = {}) {
+  const coder = normalizedModel(input.models?.coder, 'Coder model');
+  const reviewer = normalizedModel(input.models?.reviewer, 'Reviewer model');
+  const legacyOrchestrator = normalizedModel(input.models?.orchestrator, 'Legacy Orchestrator model') || coder;
   return {
-    version: 1,
+    version: 2,
     setupComplete: input.setupComplete === true,
     baseBranch: normalizedBranch(input.baseBranch),
     pollIntervalSeconds: normalizedInteger(input.pollIntervalSeconds, 120, 60, 3600, 'Polling interval'),
     maxActive: normalizedInteger(input.maxActive, 1, 1, 10, 'Maximum active issues'),
     maxReviewRounds: normalizedInteger(input.maxReviewRounds, 4, 1, 10, 'Maximum review rounds'),
+    controller: { type: 'deterministic' },
     models: {
-      orchestrator: normalizedModel(input.models?.orchestrator, 'Orchestrator model'),
-      coder: normalizedModel(input.models?.coder, 'Coder model'),
-      reviewer: normalizedModel(input.models?.reviewer, 'Reviewer model'),
+      // Retained only so existing saved configuration and the pre-migration setup UI continue to load.
+      // The Issue Execution Controller never launches this model.
+      orchestrator: legacyOrchestrator,
+      coder,
+      reviewer,
     },
     workspace: { id: input.workspace?.id ? String(input.workspace.id) : null, title: WORKSPACE_TITLE },
   };
