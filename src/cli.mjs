@@ -11,13 +11,14 @@ import { dispatchAvailableIssues } from './dispatch-batch.mjs';
 import {
   applyManualReviewResult,
   cancelQueuedReview,
+  enqueueManagedReview,
   moveReviewJob,
   pauseManagedPr,
   retryReviewJob,
-  reviewManagedNow,
 } from './pr-review-queue.mjs';
 import { setReviewQueuePaused } from './pr-review-store.mjs';
 import { saveValidatedPrAutomationConfig } from './pr-review-config.mjs';
+import { normalizeChatGptConversationUrl } from './chatgpt-url.mjs';
 
 function argsToObject(args) {
   const result = { _: [] };
@@ -64,7 +65,7 @@ PR review commands:
   pr-review enable | disable
   pr-review pause | resume
   pr-review reconcile | recover
-  pr-review review-now --id REPOSITORY#PR
+  pr-review review-now --id REPOSITORY#PR [--url CHATGPT_CONVERSATION_URL]
   pr-review retry --job REVIEW_JOB_ID
   pr-review move --job REVIEW_JOB_ID --direction up|down
   pr-review pause-pr --id REPOSITORY#PR | resume-pr --id REPOSITORY#PR
@@ -94,7 +95,10 @@ async function prReviewCommand(root, options) {
   if (action === 'resume') return setReviewQueuePaused(root, false);
   if (action === 'reconcile') return reconcileManagedPullRequests(root);
   if (action === 'recover') return recoverPrReviewState(root);
-  if (action === 'review-now') return reviewManagedNow(root, required(options, 'id'));
+  if (action === 'review-now') return enqueueManagedReview(root, required(options, 'id'), {
+    immediate: true,
+    conversationUrlOverride: options.url ? normalizeChatGptConversationUrl(options.url) : null,
+  });
   if (action === 'retry') return retryReviewJob(root, required(options, 'job'));
   if (action === 'move') return moveReviewJob(root, required(options, 'job'), required(options, 'direction'));
   if (action === 'pause-pr') return pauseManagedPr(root, required(options, 'id'), true);
