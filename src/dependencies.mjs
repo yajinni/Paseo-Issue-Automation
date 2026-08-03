@@ -1,13 +1,5 @@
 import { run, runJson } from './process.mjs';
 
-export function parseBodyDependencies(body) {
-  const numbers = new Set();
-  const pattern = /^(?:Blocked by|Depends on)\s+#(\d+)\s*$/gim;
-  let match;
-  while ((match = pattern.exec(String(body || '')))) numbers.add(Number(match[1]));
-  return [...numbers];
-}
-
 function normalizeDependency(value) {
   if (!value || typeof value !== 'object') return null;
   const number = Number(value.number);
@@ -25,33 +17,34 @@ function normalizeDependency(value) {
 }
 
 export function dependencyNumbers(issue) {
-  const native = Array.isArray(issue?.blockedBy)
-    ? issue.blockedBy.map(normalizeDependency).filter(Boolean)
-    : null;
-  if (native !== null) return { source: 'native', numbers: native.map((item) => item.number), dependencies: native };
-  const numbers = parseBodyDependencies(issue?.body);
-  return { source: 'body-fallback', numbers, dependencies: [] };
+  if (!Array.isArray(issue?.blockedBy)) {
+    return {
+      source: 'native',
+      numbers: [],
+      dependencies: [],
+      unavailable: true,
+      reason: 'Native GitHub blocked-by relationship data is unavailable. The controller will not infer dependencies from issue-body text.',
+    };
+  }
+  const dependencies = issue.blockedBy.map(normalizeDependency).filter(Boolean);
+  return {
+    source: 'native',
+    numbers: dependencies.map((item) => item.number),
+    dependencies,
+    unavailable: false,
+    reason: null,
+  };
 }
 
 export function fetchIssue(root, issueNumber, { jsonRunner = runJson } = {}) {
-  const rich = jsonRunner('gh', [
+  return jsonRunner('gh', [
     'issue', 'view', String(issueNumber),
     '--json', 'number,title,body,labels,state,stateReason,url,createdAt,blockedBy,blocking,closedByPullRequestsReferences',
   ], { cwd: root, allowFailure: true });
-  if (rich) return rich;
-  return jsonRunner('gh', [
-    'issue', 'view', String(issueNumber),
-    '--json', 'number,title,body,labels,state,stateReason,url,createdAt,closedByPullRequestsReferences',
-  ], { cwd: root, allowFailure: true });
 }
 
-export function fetchIssueDependencies(root, issue, options = {}) {
-  const declared = dependencyNumbers(issue);
-  if (declared.source === 'native') return declared;
-  const dependencies = declared.numbers
-    .map((number) => normalizeDependency(fetchIssue(root, number, options)))
-    .filter(Boolean);
-  return { ...declared, dependencies };
+export function fetchIssueDependencies(root, issue) {
+  return dependencyNumbers(issue);
 }
 
 function mergeCommitOid(pr) {
@@ -118,7 +111,15 @@ export function evaluateDependency(root, dependency, config, options = {}) {
 }
 
 export function evaluateIssueDependencies(root, issue, config, options = {}) {
-  const declared = fetchIssueDependencies(root, issue, options);
+  const declared = fetchIssueDependencies(root, issue);
+  if (declared.unavailable) {
+    return {
+      ok: false,
+      source: declared.source,
+      dependencies: [],
+      unresolved: [declared.reason],
+    };
+  }
   if (!declared.numbers.length) return { ok: true, source: declared.source, dependencies: [], unresolved: [] };
   const refreshed = options.remoteRef
     ? { ok: true, remoteRef: options.remoteRef }
