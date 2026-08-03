@@ -1,6 +1,7 @@
 import { automationStatus, heartbeat, markHumanReview, recordEvent, setClaimsEnabled, terminalState } from './automation.mjs';
 import { abandonAttempt, openAttemptWorkspace, operationalStatus, skipIssue, unskipIssue } from './attempts.mjs';
 import { dispatchSpecificCodingIssue, restartCodingIssue } from './coding-dispatch.mjs';
+import { retryFixJob } from './fix-jobs.mjs';
 import { setupSnapshot } from './install.mjs';
 import { repositoryRoot } from './state.mjs';
 import { startServer } from './server.mjs';
@@ -67,6 +68,7 @@ PR review commands:
   pr-review reconcile | recover
   pr-review review-now --id REPOSITORY#PR [--url CHATGPT_CONVERSATION_URL]
   pr-review retry --job REVIEW_JOB_ID
+  pr-review retry-fix --job FIX_JOB_ID
   pr-review move --job REVIEW_JOB_ID --direction up|down
   pr-review pause-pr --id REPOSITORY#PR | resume-pr --id REPOSITORY#PR
   pr-review cancel --job REVIEW_JOB_ID
@@ -100,6 +102,7 @@ async function prReviewCommand(root, options) {
     conversationUrlOverride: options.url ? normalizeChatGptConversationUrl(options.url) : null,
   });
   if (action === 'retry') return retryReviewJob(root, required(options, 'job'));
+  if (action === 'retry-fix') return retryFixJob(root, required(options, 'job'));
   if (action === 'move') return moveReviewJob(root, required(options, 'job'), required(options, 'direction'));
   if (action === 'pause-pr') return pauseManagedPr(root, required(options, 'id'), true);
   if (action === 'resume-pr') return pauseManagedPr(root, required(options, 'id'), false);
