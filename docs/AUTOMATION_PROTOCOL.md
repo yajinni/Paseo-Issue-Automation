@@ -10,7 +10,7 @@ There is no runtime Planner role and no Orchestrator AI. Planning and issue crea
 
 The GitHub issue is the authoritative implementation plan. It must contain a concrete objective, required behavior, verifiable acceptance criteria, explicit validation and checks, and stop conditions.
 
-Native GitHub issue dependencies are authoritative. The legacy body syntax `Blocked by #123` and `Depends on #123` remains a compatibility fallback only.
+Native GitHub issue dependencies are the only dependency source. The controller never infers blockers from dependency-like text in the issue body.
 
 ## Dependency gate
 
@@ -25,6 +25,8 @@ A coding dependency is satisfied only when:
 A closed duplicate, abandoned issue, unmerged PR, or merge into a different branch does not unlock downstream work.
 
 The controller preserves dependency relationships after completion. It changes labels and execution state rather than erasing history.
+
+If native GitHub `blockedBy` relationship data is unavailable, execution is blocked. The controller does not fall back to parsing the issue body.
 
 ## Starting work
 
@@ -52,6 +54,8 @@ The Coder owns implementation and every repair loop. It must:
 ## Reviewer contract
 
 Every review round launches a fresh Reviewer session with no shared Coder chat history or working context. The Reviewer may use the same model selection as the Coder, but it must not edit.
+
+The controller records each structured Reviewer verdict and its findings in the local attempt history, then returns changes-required findings to the same Coder. Reviewer findings are not currently posted as GitHub issue comments.
 
 A code change, base merge, or conflict resolution invalidates all previous validation and review evidence.
 
