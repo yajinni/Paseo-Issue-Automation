@@ -68,7 +68,7 @@ missing tests, and optional non-blocking recommendations.
 If changes are required:
 
 1. Do not merge or close the PR.
-2. Add the label `paseo:changes-requested`.
+2. Add the label "paseo:changes-requested".
 3. Remove obsolete Paseo review-state labels when appropriate.
 4. Add one detailed review comment using the marker above and result
    "changes_requested".
