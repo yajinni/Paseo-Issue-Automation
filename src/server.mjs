@@ -2,6 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { dashboardHtml } from './ui.mjs';
 import { enhanceDashboardHtml } from './operations-ui.mjs';
+import { applyIssueExecutionControllerUi } from './controller-ui.mjs';
 import { automationStatus, setClaimsEnabled } from './automation.mjs';
 import {
   abandonAttempt,
@@ -94,7 +95,7 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
       const url = new URL(request.url, 'http://localhost');
       if (request.method === 'GET' && url.pathname === '/') {
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        response.end(enhanceDashboardHtml(dashboardHtml()));
+        response.end(applyIssueExecutionControllerUi(enhanceDashboardHtml(dashboardHtml())));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/status') {
