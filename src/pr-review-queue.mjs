@@ -50,12 +50,23 @@ export function enqueueReviewInStore(store, managed, {
   const id = reviewJobId({ repository: managed.repository, pullRequestNumber: managed.pullRequestNumber, headSha: sha, reviewPromptVersion: promptVersion });
   const existing = findReviewJob(store, id);
   if (existing) {
+    if (existing.state === 'queued' && conversationUrlOverride) {
+      existing.conversationUrlOverride = conversationUrlOverride;
+      if (immediate) existing.dueAt = at;
+      existing.updatedAt = at;
+      appendHistory(store, {
+        entityType: 'review_job', entityId: existing.id, previousState: 'queued', newState: 'queued',
+        reason: 'One-time review destination updated on the existing deduplicated job.', actor: 'user', sha, timestamp: at,
+      });
+      return existing;
+    }
     if (!forceRetry || !['failed', 'paused', 'cancelled'].includes(existing.state)) return existing;
     const previousState = existing.state;
     existing.state = 'queued';
     existing.lastError = null;
     existing.diagnosticScreenshot = null;
     existing.completedAt = null;
+    if (conversationUrlOverride) existing.conversationUrlOverride = conversationUrlOverride;
     existing.dueAt = immediate ? at : nowIso(now + store.config.browserReview.reviewDebounceMs);
     existing.queuePosition = nextQueuePosition(store);
     existing.updatedAt = at;
