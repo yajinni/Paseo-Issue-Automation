@@ -35,6 +35,7 @@ import {
 } from './install.mjs';
 import { loadConfig, repositoryRoot, saveConfig } from './state.mjs';
 import { dispatchSpecificCodingIssue, restartCodingIssue } from './coding-dispatch.mjs';
+import { retryFixJob } from './fix-jobs.mjs';
 import {
   applyManualReviewResult,
   cancelQueuedReview,
@@ -48,6 +49,7 @@ import { saveValidatedPrAutomationConfig } from './pr-review-config.mjs';
 import { prReviewStatus } from './pr-review-status.mjs';
 import { reconcileManagedPullRequests, recoverPrReviewState } from './pr-review-reconcile.mjs';
 import { tickReviewScheduler } from './pr-review-scheduler.mjs';
+import { reconciliationDelay } from './reconciliation-timing.mjs';
 import {
   browserDoctor,
   closeManualBrowser,
@@ -109,6 +111,7 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
   let reviewTimer = null;
   let reconciliationTimer = null;
   let manualBrowserSession = null;
+  let closing = false;
 
   const dispatch = () => {
     try {
@@ -131,23 +134,30 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
     codingTimer.unref();
   };
 
+  const scheduleReconciliation = () => {
+    if (closing) return;
+    if (reconciliationTimer) clearTimeout(reconciliationTimer);
+    const store = loadPrReviewStore(root);
+    reconciliationTimer = setTimeout(() => {
+      try {
+        if (loadPrReviewStore(root).config.reconciliation.enabled) reconcileManagedPullRequests(root);
+      } catch (error) {
+        console.error(JSON.stringify({ subsystem: 'github-reconciliation', error: error.message }));
+      } finally {
+        scheduleReconciliation();
+      }
+    }, reconciliationDelay(store));
+    reconciliationTimer.unref();
+  };
+
   const resetPrReviewTimers = () => {
     if (reviewTimer) clearInterval(reviewTimer);
-    if (reconciliationTimer) clearInterval(reconciliationTimer);
+    if (reconciliationTimer) clearTimeout(reconciliationTimer);
     reviewTimer = setInterval(() => {
       try { tickReviewScheduler(root); } catch (error) { console.error(JSON.stringify({ subsystem: 'serial-review-scheduler', error: error.message })); }
     }, 5_000);
     reviewTimer.unref();
-    const store = loadPrReviewStore(root);
-    const interval = store.managedPullRequests.some((record) => !['merged', 'closed_unmerged'].includes(record.reviewState))
-      ? store.config.reconciliation.activeIntervalMs
-      : store.config.reconciliation.idleIntervalMs;
-    reconciliationTimer = setInterval(() => {
-      try {
-        if (loadPrReviewStore(root).config.reconciliation.enabled) reconcileManagedPullRequests(root);
-      } catch (error) { console.error(JSON.stringify({ subsystem: 'github-reconciliation', error: error.message })); }
-    }, interval);
-    reconciliationTimer.unref();
+    scheduleReconciliation();
   };
 
   try { recoverPrReviewState(root); } catch (error) {
@@ -229,14 +239,17 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
         conversationUrlOverride: body.conversationUrlOverride ? normalizeChatGptConversationUrl(body.conversationUrlOverride) : null,
       });
       else if (url.pathname === '/api/pr-reviews/retry') result = retryReviewJob(root, String(body.reviewJobId));
+      else if (url.pathname === '/api/pr-reviews/retry-fix') result = retryFixJob(root, String(body.fixJobId));
       else if (url.pathname === '/api/pr-reviews/move') result = moveReviewJob(root, String(body.reviewJobId), body.direction === 'up' ? 'up' : 'down');
       else if (url.pathname === '/api/pr-reviews/pause-pr') result = pauseManagedPr(root, String(body.managedPullRequestId), true);
       else if (url.pathname === '/api/pr-reviews/resume-pr') result = pauseManagedPr(root, String(body.managedPullRequestId), false);
       else if (url.pathname === '/api/pr-reviews/cancel') result = cancelQueuedReview(root, String(body.reviewJobId));
       else if (url.pathname === '/api/pr-reviews/manual-result') result = applyManualReviewResult(root, String(body.managedPullRequestId), { result: body.result, findings: body.findings || '' });
       else if (url.pathname === '/api/pr-reviews/send-to-coding') result = dispatch();
-      else if (url.pathname === '/api/pr-reviews/reconcile') result = reconcileManagedPullRequests(root);
-      else if (url.pathname === '/api/pr-reviews/browser/install') result = installPlaywrightChromium({ withSystemDependencies: body.withSystemDependencies === true });
+      else if (url.pathname === '/api/pr-reviews/reconcile') {
+        result = reconcileManagedPullRequests(root);
+        scheduleReconciliation();
+      } else if (url.pathname === '/api/pr-reviews/browser/install') result = installPlaywrightChromium({ withSystemDependencies: body.withSystemDependencies === true });
       else if (url.pathname === '/api/pr-reviews/browser/open') {
         if (manualBrowserSession?.closed) manualBrowserSession = null;
         if (manualBrowserSession) throw new Error('The dedicated browser is already open.');
@@ -286,9 +299,10 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
   resetCodingTimer();
   resetPrReviewTimers();
   server.on('close', async () => {
+    closing = true;
     if (codingTimer) clearInterval(codingTimer);
     if (reviewTimer) clearInterval(reviewTimer);
-    if (reconciliationTimer) clearInterval(reconciliationTimer);
+    if (reconciliationTimer) clearTimeout(reconciliationTimer);
     await closeManualBrowser(manualBrowserSession).catch(() => {});
   });
   if (open) openBrowser(url);
