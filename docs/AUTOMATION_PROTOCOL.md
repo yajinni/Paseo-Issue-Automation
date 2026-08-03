@@ -55,7 +55,9 @@ The Coder owns implementation and every repair loop. It must:
 
 Every review round launches a fresh Reviewer session with no shared Coder chat history or working context. The Reviewer may use the same model selection as the Coder, but it must not edit.
 
-The controller records each structured Reviewer verdict and its findings in the local attempt history, then returns changes-required findings to the same Coder. Reviewer findings are not currently posted as GitHub issue comments.
+The controller records each structured Reviewer verdict and its findings in the local attempt history. It also posts a top-level audit comment to the draft PR containing the issue number, PR number, exact reviewed commit, review round, verdict, and findings. Both `APPROVED` and `CHANGES_REQUIRED` rounds are recorded. If the PR audit comment cannot be written, the controller fails the round rather than continuing without an audit trail.
+
+Changes-required findings are then returned to the same Coder. Reviewer findings are not posted to the planning issue.
 
 A code change, base merge, or conflict resolution invalidates all previous validation and review evidence.
 
@@ -73,6 +75,7 @@ The exact final commit must have:
 
 - recorded passing issue-defined validation;
 - a fresh Reviewer approval for the same commit;
+- a Reviewer audit comment on the draft PR for that exact review round;
 - the latest base branch incorporated;
 - no merge conflict;
 - no failed or pending GitHub checks; and
