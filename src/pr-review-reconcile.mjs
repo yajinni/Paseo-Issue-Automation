@@ -160,7 +160,9 @@ function changesRequestedLabelEffect(managed) {
 function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) {
   const reviewJob = activeReviewForManaged(store, managed);
   if (!reviewJob || reviewJob.state !== 'awaiting_result') return null;
-  const result = precomputed.result || matchingReviewResult({ comments: pr.comments || [], reviews: pr.reviews || [] }, {
+  const reservationMatches = !precomputed.reviewJob || precomputed.reviewJob.id === reviewJob.id;
+  const result = reservationMatches ? precomputed.result : null;
+  const resolvedResult = result || matchingReviewResult({ comments: pr.comments || [], reviews: pr.reviews || [] }, {
     reviewRequestId: reviewJob.reviewRequestId,
     repository: managed.repository,
     pullRequestNumber: managed.pullRequestNumber,
@@ -168,16 +170,16 @@ function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) 
     headSha: reviewJob.headSha,
     promptVersion: reviewJob.promptVersion,
   });
-  if (!result || managed.lastProcessedReviewRequestId === result.reviewRequestId) return null;
-  if (managed.currentHeadSha !== result.headSha || result.result === 'stale') {
-    completeReviewJob(store, reviewJob, 'stale', result.sourceId, at);
+  if (!resolvedResult || managed.lastProcessedReviewRequestId === resolvedResult.reviewRequestId) return null;
+  if (managed.currentHeadSha !== resolvedResult.headSha || resolvedResult.result === 'stale') {
+    completeReviewJob(store, reviewJob, 'stale', resolvedResult.sourceId, at);
     enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: Date.parse(at) });
     return { result: 'stale', requeued: true, effects: [] };
   }
-  if (result.result === 'changes_requested') {
+  if (resolvedResult.result === 'changes_requested') {
     if (!labelNames(pr).has(PR_REVIEW_LABELS.changesRequested)) return null;
-    const fixJob = createFixJobInStore(store, managed, reviewJob, result.humanMarkdown, {
-      sourceCommentId: result.sourceId, now: Date.parse(at),
+    const fixJob = createFixJobInStore(store, managed, reviewJob, resolvedResult.humanMarkdown, {
+      sourceCommentId: resolvedResult.sourceId, now: Date.parse(at),
     });
     return {
       result: 'changes_requested',
@@ -186,17 +188,17 @@ function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) 
     };
   }
 
-  const gate = precomputed.gate;
+  const gate = reservationMatches ? precomputed.gate : null;
   if (!gate?.ok) {
-    managed.lastError = gate?.reason || 'The deterministic approval gate has not passed.';
+    managed.lastError = gate?.reason || 'The deterministic approval gate must be reevaluated on the current reservation.';
     if (gate?.stale) {
-      completeReviewJob(store, reviewJob, 'stale', result.sourceId, at);
+      completeReviewJob(store, reviewJob, 'stale', resolvedResult.sourceId, at);
       enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: Date.parse(at) });
       return { result: 'stale', requeued: true, effects: [] };
     }
     if (gate?.repair) {
       const fixJob = createFixJobInStore(store, managed, reviewJob, gate.reason, {
-        sourceCommentId: result.sourceId, now: Date.parse(at),
+        sourceCommentId: resolvedResult.sourceId, now: Date.parse(at),
       });
       return {
         result: 'approved-gate-failed',
@@ -208,9 +210,9 @@ function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) 
     return { result: 'approved-waiting-gate', waiting: true, reason: managed.lastError, effects: [] };
   }
 
-  completeReviewJob(store, reviewJob, 'approved', result.sourceId, at);
+  completeReviewJob(store, reviewJob, 'approved', resolvedResult.sourceId, at);
   managed.lastCompletedReviewSha = reviewJob.headSha;
-  managed.lastReviewCommentId = result.sourceId;
+  managed.lastReviewCommentId = resolvedResult.sourceId;
   managed.lastProcessedReviewRequestId = reviewJob.reviewRequestId;
   managed.lastError = null;
   transitionManaged(store, managed, 'ready_to_merge', {
@@ -274,7 +276,7 @@ function applyMergedIssueEffect(root, effect) {
   return { issueClosed: true, closedByPaseo: true };
 }
 
-function applyEffects(root, managedId, effects = []) {
+export function applyReconciliationEffects(root, managedId, effects = []) {
   const results = [];
   for (const effect of effects) {
     try {
@@ -298,7 +300,11 @@ function applyEffects(root, managedId, effects = []) {
   return results;
 }
 
-export function reconcileManagedPullRequest(root, managedId, { now = Date.now(), snapshot = null } = {}) {
+export function reconcileManagedPullRequest(root, managedId, {
+  now = Date.now(),
+  snapshot = null,
+  effectRunner = applyReconciliationEffects,
+} = {}) {
   const at = nowIso(now);
   const current = loadPrReviewStore(root);
   const currentManaged = findManaged(current, managedId);
@@ -339,7 +345,7 @@ export function reconcileManagedPullRequest(root, managedId, { now = Date.now(),
       effects: review?.effects || [],
     };
   });
-  const effectResults = applyEffects(root, managedId, outcome.effects || []);
+  const effectResults = effectRunner(root, managedId, outcome.effects || []);
   return { ...outcome, effects: effectResults };
 }
 
@@ -365,7 +371,7 @@ export function reconcileManagedPullRequests(root, options = {}) {
   return result;
 }
 
-export function recoverPrReviewState(root, { now = Date.now() } = {}) {
+export function recoverPrReviewState(root, { now = Date.now(), effectRunner = applyReconciliationEffects } = {}) {
   mutatePrReviewStore(root, (store) => {
     const at = nowIso(now);
     store.runtime.activeReviewJobId = null;
@@ -400,5 +406,5 @@ export function recoverPrReviewState(root, { now = Date.now() } = {}) {
       }
     }
   });
-  return reconcileManagedPullRequests(root, { now });
+  return reconcileManagedPullRequests(root, { now, effectRunner });
 }
