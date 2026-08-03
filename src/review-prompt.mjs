@@ -53,10 +53,12 @@ request fixes against stale code. Add one explanatory PR comment containing the
 structured marker below with result "stale", then stop.
 
 Every final review result must include exactly one top-level PR comment beginning
-with this machine-readable marker. Keep the JSON valid and preserve all values:
+with this machine-readable marker. Keep the JSON valid, preserve all values, and
+replace the example result with exactly one of: "changes_requested", "approved",
+or "stale":
 
 <!-- paseo-review:v1
-{"reviewRequestId":"{{reviewRequestId}}","repository":"{{repository}}","pullRequestNumber":{{pullRequestNumber}},"issueNumber":{{issueNumber}},"headSha":"{{headSha}}","reviewRound":{{reviewRound}},"promptVersion":{{reviewPromptVersion}},"result":"changes_requested|approved|stale"}
+{"reviewRequestId":"{{reviewRequestId}}","repository":"{{repository}}","pullRequestNumber":{{pullRequestNumber}},"issueNumber":{{issueNumber}},"headSha":"{{headSha}}","reviewRound":{{reviewRound}},"promptVersion":{{reviewPromptVersion}},"result":"changes_requested"}
 -->
 
 After the marker, add concise human-readable Markdown with the reviewed SHA,
@@ -66,7 +68,7 @@ missing tests, and optional non-blocking recommendations.
 If changes are required:
 
 1. Do not merge or close the PR.
-2. Add the label \`paseo:changes-requested\`.
+2. Add the label `paseo:changes-requested`.
 3. Remove obsolete Paseo review-state labels when appropriate.
 4. Add one detailed review comment using the marker above and result
    "changes_requested".
