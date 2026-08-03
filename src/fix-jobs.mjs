@@ -58,8 +58,8 @@ ${job.findings}
 Before changing code, confirm that the workspace is on ${managed.branchName} and that PR #${managed.pullRequestNumber} still uses that branch. Stop if the PR was merged, closed, or moved to another branch. Do not broaden the associated issue.`;
 }
 
-function issueCodingCount(root) {
-  const result = runJson('gh', ['issue', 'list', '--state', 'open', '--label', 'agent-running', '--limit', '100', '--json', 'number'], {
+function issueCodingCount(root, { jsonRunner = runJson } = {}) {
+  const result = jsonRunner('gh', ['issue', 'list', '--state', 'open', '--label', 'agent-running', '--limit', '100', '--json', 'number'], {
     cwd: root,
     allowFailure: true,
   });
@@ -67,8 +67,11 @@ function issueCodingCount(root) {
   return result.length;
 }
 
-export function activeCodingCount(root) {
-  return issueCodingCount(root) + activeFixJobs(loadPrReviewStore(root)).length;
+export function activeCodingCount(root, {
+  jsonRunner = runJson,
+  storeLoader = loadPrReviewStore,
+} = {}) {
+  return issueCodingCount(root, { jsonRunner }) + activeFixJobs(storeLoader(root)).length;
 }
 
 function launchFixAgent(root, managed, job) {
