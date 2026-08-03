@@ -88,7 +88,7 @@ export const DEFAULT_PR_AUTOMATION_CONFIG = Object.freeze({
 });
 
 const STORE_VERSION = 1;
-const STORE_LOCK_TTL_MS = 30_000;
+const STORE_LOCK_TTL_MS = 300_000;
 const STORE_LOCK_RETRIES = 200;
 const STORE_LOCK_DELAY_MS = 25;
 const HISTORY_LIMIT = 10_000;
@@ -207,7 +207,9 @@ export function normalizeManagedPullRequest(record) {
     reviewRound: Math.max(1, Number(record.reviewRound) || 1),
     reviewPromptVersion: Math.max(1, Number(record.reviewPromptVersion) || REVIEW_PROMPT_VERSION),
     reviewState,
-    queuePosition: Number.isFinite(Number(record.queuePosition)) ? Number(record.queuePosition) : null,
+    queuePosition: record.queuePosition === null || record.queuePosition === undefined
+      ? null
+      : Number.isFinite(Number(record.queuePosition)) ? Number(record.queuePosition) : null,
     priority: Number.isFinite(Number(record.priority)) ? Number(record.priority) : 0,
     activeReviewRequestId: record.activeReviewRequestId || null,
     lastReviewCommentId: record.lastReviewCommentId || null,
@@ -311,13 +313,14 @@ function processAlive(pid) {
   }
 }
 
+function readStoreLock(file) {
+  try { return JSON.parse(readFileSync(file, 'utf8')); }
+  catch { return null; }
+}
+
 function staleLock(file, now = Date.now()) {
-  try {
-    const lock = JSON.parse(readFileSync(file, 'utf8'));
-    return !lock.expiresAt || Date.parse(lock.expiresAt) <= now || !processAlive(lock.pid);
-  } catch {
-    return true;
-  }
+  const lock = readStoreLock(file);
+  return !lock || !lock.expiresAt || Date.parse(lock.expiresAt) <= now || !processAlive(lock.pid);
 }
 
 function acquireStoreLock(root) {
@@ -326,18 +329,25 @@ function acquireStoreLock(root) {
     try {
       const descriptor = openSync(file, 'wx', 0o600);
       const at = Date.now();
-      writeFileSync(descriptor, JSON.stringify({
+      const lock = {
+        id: `store-lock-${randomUUID()}`,
         pid: process.pid,
         acquiredAt: nowIso(at),
         expiresAt: nowIso(at + STORE_LOCK_TTL_MS),
-      }));
+      };
+      writeFileSync(descriptor, JSON.stringify(lock));
       closeSync(descriptor);
       try { chmodSync(file, 0o600); } catch {}
-      return () => rmSync(file, { force: true });
+      return () => {
+        const current = readStoreLock(file);
+        if (current?.id === lock.id) rmSync(file, { force: true });
+      };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       if (staleLock(file)) {
-        rmSync(file, { force: true });
+        const stale = readStoreLock(file);
+        const current = readStoreLock(file);
+        if (!stale || current?.id === stale.id) rmSync(file, { force: true });
         continue;
       }
       sleepSync(STORE_LOCK_DELAY_MS);
