@@ -16,6 +16,7 @@ The package runtime is a deterministic **Issue Execution Controller**. It does n
 - launches one Coder in an isolated Paseo worktree
 - waits for issue-defined validation on an exact commit and draft PR head
 - launches a fresh independent Reviewer session in the same workspace
+- posts every Reviewer verdict and finding to the draft PR with the exact reviewed commit and review round
 - returns Reviewer and CI findings to the same Coder
 - requires the issue branch to contain the latest base branch, using merge-based updates rather than rebase or force-push
 - stops at `human-review`; it never merges or auto-merges
@@ -41,6 +42,8 @@ The operating dashboard supports both automatic polling and direct issue control
 - copy the activity timeline or download its JSON
 
 Coder and Reviewer may use the same model. Reviewer independence means a fresh session with no shared Coder chat history or working context.
+
+Each Reviewer round also creates a top-level draft-PR audit comment containing the issue number, PR number, exact commit SHA, review round, verdict, and findings. Both approvals and requested changes remain visible on the PR. Failure to write the audit comment stops that controller round.
 
 ## Dependency source of truth
 
