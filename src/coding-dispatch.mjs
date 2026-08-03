@@ -1,8 +1,10 @@
 import path from 'node:path';
 import { dispatchSpecificIssue, restartIssue } from './attempts.mjs';
-import { acquireLease, releaseLease } from './durable-lease.mjs';
+import { acquireLease, releaseLease, renewLease } from './durable-lease.mjs';
 import { activeCodingCount } from './fix-jobs.mjs';
 import { loadConfig, loadRun, statePaths } from './state.mjs';
+
+const CODING_COMMAND_TTL_MS = 30 * 60_000;
 
 function withCodingSchedulerLease(root, action) {
   const lockFile = path.join(statePaths(root).root, 'coding-scheduler.lock');
@@ -10,11 +12,18 @@ function withCodingSchedulerLease(root, action) {
     owner: `coding-command-${process.pid}`,
     purpose: 'coding-command',
     resource: root,
-    ttlMs: 60_000,
+    ttlMs: CODING_COMMAND_TTL_MS,
   });
   if (!lease.acquired) throw new Error('Another Paseo process owns the coding scheduler lease.');
-  try { return action(); }
-  finally { releaseLease(lockFile, lease.lease.id); }
+  try {
+    renewLease(lockFile, lease.lease.id, {
+      ttlMs: CODING_COMMAND_TTL_MS,
+      metadata: { phase: 'manual-coding-command' },
+    });
+    return action();
+  } finally {
+    releaseLease(lockFile, lease.lease.id);
+  }
 }
 
 function requireAvailableCodingSlot(root, { replacingRunningIssue = false } = {}) {
