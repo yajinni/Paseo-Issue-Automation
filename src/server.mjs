@@ -3,10 +3,10 @@ import { spawn } from 'node:child_process';
 import { dashboardHtml } from './ui.mjs';
 import { enhanceDashboardHtml } from './operations-ui.mjs';
 import { applyIssueExecutionControllerUi } from './controller-ui.mjs';
+import { dispatchAvailableIssues } from './dispatch-batch.mjs';
 import { automationStatus, setClaimsEnabled } from './automation.mjs';
 import {
   abandonAttempt,
-  dispatchNextIssue,
   dispatchSpecificIssue,
   openAttemptWorkspace,
   operationalStatus,
@@ -71,7 +71,7 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
 
   const dispatch = () => {
     try {
-      const result = dispatchNextIssue(root);
+      const result = dispatchAvailableIssues(root);
       updateManagedDispatch(root, result);
       return result;
     } catch (error) {
