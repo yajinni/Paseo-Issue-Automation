@@ -3,7 +3,7 @@ import path from 'node:path';
 import { appendHistory, findFixJob, findManaged, loadPrReviewStore, mutatePrReviewStore, nowIso, transitionManaged } from './pr-review-store.mjs';
 import { enqueueReviewInStore } from './pr-review-queue.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
-import { run } from './process.mjs';
+import { agentCommandTimeoutMs, run } from './process.mjs';
 import { loadConfig, loadRun } from './state.mjs';
 
 function latestPassingValidation(state, commit) {
@@ -58,7 +58,12 @@ export function completeFixJob(root, fixJobId, {
   const managed = findManaged(initial, job.managedPullRequestId);
   if (!managed) throw new Error(`Managed PR ${job.managedPullRequestId} was not found.`);
   if (waitForAgent) {
-    const result = run('paseo', ['wait', String(job.coderAgentId)], { cwd: root, allowFailure: true, inherit: true });
+    const result = run('paseo', ['wait', String(job.coderAgentId)], {
+      cwd: root,
+      allowFailure: true,
+      inherit: true,
+      timeoutMs: agentCommandTimeoutMs(),
+    });
     if (!result.ok) throw new Error(result.stderr || result.stdout || 'Paseo could not wait for the PR fix Coder.');
   }
   const pr = snapshot || managedPrSnapshot(root, managed.pullRequestNumber);

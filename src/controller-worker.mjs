@@ -9,7 +9,7 @@ import { markHumanReview, recordEvent, terminalState } from './automation.mjs';
 import { postReviewerAuditComment } from './reviewer-audit.mjs';
 import { handoffValidatedPullRequest, prReviewAutomationEnabled } from './pr-review-handoff.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
-import { run, runJson } from './process.mjs';
+import { agentCommandTimeoutMs, run, runJson } from './process.mjs';
 
 const CHECK_POLL_MS = 15_000;
 const MAX_CHECK_POLLS = 120;
@@ -32,7 +32,12 @@ function updateState(root, issueNumber, patch, activity = null) {
 function waitForCoder(root, state) {
   const agentId = state.coderAgentId || state.agentId;
   if (!agentId) throw new Error('Coder agent ID is missing.');
-  const result = run('paseo', ['wait', String(agentId)], { cwd: root, allowFailure: true, inherit: true });
+  const result = run('paseo', ['wait', String(agentId)], {
+    cwd: root,
+    allowFailure: true,
+    inherit: true,
+    timeoutMs: agentCommandTimeoutMs(),
+  });
   if (!result.ok) throw new Error(result.stderr || result.stdout || 'Paseo could not wait for the Coder.');
 }
 
@@ -101,7 +106,7 @@ function runReviewer(root, issueNumber, snapshot, reviewRound) {
       commit: snapshot.head,
       config,
     }),
-  ], { cwd: root });
+  ], { cwd: root, timeoutMs: agentCommandTimeoutMs() });
   if (!verdict || typeof verdict.approved !== 'boolean') throw new Error('Reviewer did not return the required structured verdict.');
   recordEvent(root, issueNumber, {
     event: 'review',

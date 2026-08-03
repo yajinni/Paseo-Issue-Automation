@@ -1,8 +1,10 @@
 import path from 'node:path';
 import { dispatchNextIssue } from './attempts.mjs';
 import { activeCodingCount, dispatchNextFixJob } from './fix-jobs.mjs';
-import { acquireLease, releaseLease } from './durable-lease.mjs';
+import { acquireLease, releaseLease, renewLease } from './durable-lease.mjs';
 import { loadConfig, statePaths } from './state.mjs';
+
+const CODING_SCHEDULER_TTL_MS = 30 * 60_000;
 
 function normalizedAttempt(result, type) {
   if (!result?.claimed) return [];
@@ -31,22 +33,32 @@ export function dispatchAvailableIssues(root, {
     owner: `coding-scheduler-${process.pid}`,
     purpose: 'coding-dispatch',
     resource: root,
-    ttlMs: 60_000,
+    ttlMs: CODING_SCHEDULER_TTL_MS,
   });
   if (!lease.acquired) return { claimed: false, reason: 'Another Paseo process owns the coding scheduler lease.' };
+  const renew = (metadata) => renewLease(lockFile, lease.lease.id, {
+    ttlMs: CODING_SCHEDULER_TTL_MS,
+    metadata,
+  });
   try {
     const attempts = [];
     const results = [];
-    while (activeCount(root) < maximum) {
+    while (true) {
+      renew({ phase: 'counting-capacity', claimed: attempts.length });
+      if (activeCount(root) >= maximum) break;
+      renew({ phase: 'dispatching-fix', claimed: attempts.length });
       const fixResult = dispatchFix(root);
       if (fixResult?.claimed) {
         results.push({ type: 'fix', ...fixResult });
         attempts.push(...normalizedAttempt(fixResult, 'fix'));
+        renew({ phase: 'fix-dispatched', claimed: attempts.length });
         continue;
       }
+      renew({ phase: 'dispatching-issue', claimed: attempts.length });
       const issueResult = dispatchIssue(root);
       results.push({ type: 'issue', ...issueResult });
       attempts.push(...normalizedAttempt(issueResult, 'issue'));
+      renew({ phase: 'issue-dispatch-complete', claimed: attempts.length });
       if (!issueResult?.claimed) break;
     }
     if (!attempts.length) return results[0] || { claimed: false, reason: 'No eligible coding job found.' };
