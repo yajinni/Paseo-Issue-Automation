@@ -13,6 +13,8 @@ import {
 import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
 import { reconcileManagedPullRequest, reconcileManagedPullRequests } from '../src/pr-review-reconcile.mjs';
 
+const noEffects = () => [];
+
 function repo(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-review-lifecycle-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });
@@ -57,7 +59,7 @@ test('cancelling the last queued review clears managed queue state', (t) => {
   assert.equal(store.reviewJobs[0].state, 'cancelled');
   assert.equal(record.reviewState, 'paused');
   assert.equal(record.activeReviewRequestId, null);
-  assert.equal(record.queuePosition, 0);
+  assert.equal(record.queuePosition, null);
 });
 
 test('terminal PR reconciliation cancels review and fix jobs', (t) => {
@@ -74,6 +76,7 @@ test('terminal PR reconciliation cancels review and fix jobs', (t) => {
   reconcileManagedPullRequest(root, managed.id, {
     now: 5000,
     snapshot: { state: 'CLOSED', mergedAt: null, headRefOid: 'abcdef101' },
+    effectRunner: noEffects,
   });
   const store = loadPrReviewStore(root);
   assert.equal(store.managedPullRequests[0].reviewState, 'closed_unmerged');
@@ -85,7 +88,7 @@ test('operator-paused records are not reverted by reconciliation', (t) => {
   const root = repo(t);
   const managed = register(root);
   pauseManagedPr(root, managed.id, true);
-  const result = reconcileManagedPullRequests(root, { now: 5000 });
+  const result = reconcileManagedPullRequests(root, { now: 5000, effectRunner: noEffects });
   assert.equal(result.checked, 0);
   assert.equal(loadPrReviewStore(root).managedPullRequests[0].reviewState, 'paused');
 });
