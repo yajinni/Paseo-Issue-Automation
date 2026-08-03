@@ -36,7 +36,7 @@ assignees: ""
 
 ## Dependencies
 
-<!-- Configure actual execution constraints using GitHub's native "blocked by" relationships. Explain why they exist here. During migration only, one legacy fallback line per dependency may be used: Blocked by #123 or Depends on #123. Write None when there are no dependencies. -->
+<!-- Configure every execution constraint using GitHub's native "blocked by" relationships. Use this section only to explain why those native relationships exist. Write None when there are no dependencies. Dependency-like body text is not read by the controller. -->
 
 ## Privacy and security
 
