@@ -1,6 +1,8 @@
 import { PR_REVIEW_LABELS } from './pr-review-store.mjs';
 import { run, runJson } from './process.mjs';
 
+export { PR_REVIEW_LABELS };
+
 export const PR_REVIEW_LABEL_DETAILS = Object.freeze({
   [PR_REVIEW_LABELS.queued]: ['0969da', 'Paseo PR review is queued'],
   [PR_REVIEW_LABELS.reviewing]: ['8250df', 'Paseo submitted this PR for review'],
