@@ -186,8 +186,28 @@ function startControllerWorker(root, issueNumber) {
     stdio: 'ignore',
     windowsHide: true,
   });
+  if (!child.pid) throw new Error('Could not determine the Issue Execution Controller worker PID.');
   child.unref();
-  return child.pid || null;
+  return child.pid;
+}
+
+function rollbackLaunch(root, issue, ids, reason) {
+  if (ids?.coderAgentId) run('paseo', ['stop', String(ids.coderAgentId)], { cwd: root, allowFailure: true });
+  if (ids?.workspaceId) run('paseo', ['workspace', 'archive', String(ids.workspaceId)], { cwd: root, allowFailure: true });
+  try { editLabels(root, issue.number, [LABELS.failed], [LABELS.running]); } catch {}
+  const at = now();
+  saveRun(root, issue.number, {
+    ...(loadRun(root, issue.number) || {}),
+    issueNumber: issue.number,
+    issueTitle: issue.title,
+    issueUrl: issue.url,
+    status: LABELS.failed,
+    phase: 'launch-failed',
+    reason: String(reason),
+    completedAt: at,
+    updatedAt: at,
+    activity: [...(loadRun(root, issue.number)?.activity || []), { type: 'launch-failed', at, details: String(reason) }],
+  });
 }
 
 function launch(root, issue, branchAction) {
@@ -209,65 +229,69 @@ function launch(root, issue, branchAction) {
 
   const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
   if (!repository) throw new Error('Could not determine the GitHub repository.');
-  editLabels(root, issue.number, [LABELS.running], [LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
 
-  const payload = runJson('paseo', [
-    'run', '--background', '--json', '--provider', config.models.coder,
-    '--title', `Issue #${issue.number} Coder (attempt ${selection.attempt})`,
-    '--new-workspace', 'worktree', '--worktree-mode', 'branch-off',
-    '--new-branch', selection.branch, '--base', config.baseBranch,
-    buildAttemptPrompt(repository, issue, selection.branch, config),
-  ], { cwd: root });
-  const ids = {
-    coderAgentId: findFirstKey(payload, ['agentId', 'agent_id', 'id']),
-    workspaceId: findFirstKey(payload, ['workspaceId', 'workspace_id']),
-    worktreePath: findFirstKey(payload, ['worktreePath', 'worktree_path', 'cwd', 'path']),
-  };
-  if (!ids.coderAgentId) {
-    editLabels(root, issue.number, [LABELS.failed], [LABELS.running]);
-    throw new Error(`Paseo did not return an agent ID for issue #${issue.number}.`);
+  let ids = null;
+  try {
+    const payload = runJson('paseo', [
+      'run', '--background', '--json', '--provider', config.models.coder,
+      '--title', `Issue #${issue.number} Coder (attempt ${selection.attempt})`,
+      '--new-workspace', 'worktree', '--worktree-mode', 'branch-off',
+      '--new-branch', selection.branch, '--base', config.baseBranch,
+      buildAttemptPrompt(repository, issue, selection.branch, config),
+    ], { cwd: root });
+    ids = {
+      coderAgentId: findFirstKey(payload, ['agentId', 'agent_id', 'id']),
+      workspaceId: findFirstKey(payload, ['workspaceId', 'workspace_id']),
+      worktreePath: findFirstKey(payload, ['worktreePath', 'worktree_path', 'cwd', 'path']),
+    };
+    if (!ids.coderAgentId) throw new Error(`Paseo did not return an agent ID for issue #${issue.number}.`);
+
+    editLabels(root, issue.number, [LABELS.running], [LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
+
+    const history = previous ? [...(previous.history || []), {
+      attempt: previous.attempt || 1,
+      branch: previous.branch || null,
+      status: previous.status || null,
+      startedAt: previous.startedAt || null,
+      completedAt: previous.completedAt || null,
+      workspaceId: previous.workspaceId || null,
+      activity: previous.activity || [],
+      events: previous.events || [],
+    }] : [];
+    const started = now();
+    const state = saveRun(root, issue.number, {
+      issueNumber: issue.number,
+      issueTitle: issue.title,
+      issueUrl: issue.url,
+      branch: selection.branch,
+      attempt: selection.attempt,
+      status: LABELS.running,
+      phase: 'coding',
+      ...ids,
+      agentId: ids.coderAgentId,
+      dependencies: dependency.dependencies,
+      dependencySource: dependency.source,
+      startedAt: started,
+      heartbeatAt: started,
+      updatedAt: started,
+      completedAt: null,
+      prNumber: null,
+      events: [],
+      activity: [{ type: 'attempt-started', at: started, details: `Attempt ${selection.attempt} started on ${selection.branch}.` }],
+      history,
+    });
+    const controllerPid = startControllerWorker(root, issue.number);
+    saveRun(root, issue.number, {
+      ...state,
+      controllerPid,
+      activity: [...state.activity, { type: 'controller-started', at: now(), details: `Issue Execution Controller PID ${controllerPid}.` }],
+    });
+    unskipIssue(root, issue.number);
+    return { claimed: true, issueNumber: issue.number, branch: selection.branch, attempt: selection.attempt, controllerPid };
+  } catch (error) {
+    rollbackLaunch(root, issue, ids, error.message);
+    throw error;
   }
-
-  const history = previous ? [...(previous.history || []), {
-    attempt: previous.attempt || 1,
-    branch: previous.branch || null,
-    status: previous.status || null,
-    startedAt: previous.startedAt || null,
-    completedAt: previous.completedAt || null,
-    workspaceId: previous.workspaceId || null,
-    activity: previous.activity || [],
-    events: previous.events || [],
-  }] : [];
-  const started = now();
-  const state = saveRun(root, issue.number, {
-    issueNumber: issue.number,
-    issueTitle: issue.title,
-    issueUrl: issue.url,
-    branch: selection.branch,
-    attempt: selection.attempt,
-    status: LABELS.running,
-    phase: 'coding',
-    ...ids,
-    agentId: ids.coderAgentId,
-    dependencies: dependency.dependencies,
-    dependencySource: dependency.source,
-    startedAt: started,
-    heartbeatAt: started,
-    updatedAt: started,
-    completedAt: null,
-    prNumber: null,
-    events: [],
-    activity: [{ type: 'attempt-started', at: started, details: `Attempt ${selection.attempt} started on ${selection.branch}.` }],
-    history,
-  });
-  const controllerPid = startControllerWorker(root, issue.number);
-  saveRun(root, issue.number, {
-    ...state,
-    controllerPid,
-    activity: [...state.activity, { type: 'controller-started', at: now(), details: `Issue Execution Controller PID ${controllerPid || 'unknown'}.` }],
-  });
-  unskipIssue(root, issue.number);
-  return { claimed: true, issueNumber: issue.number, branch: selection.branch, attempt: selection.attempt, controllerPid };
 }
 
 export function dispatchSpecificIssue(root, number, { branchAction = 'keep' } = {}) {
