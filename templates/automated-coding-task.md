@@ -36,7 +36,7 @@ assignees: ""
 
 ## Dependencies
 
-<!-- Use one dependency per line in either form: Blocked by #123 or Depends on #123. Write None when there are no dependencies. -->
+<!-- Configure actual execution constraints using GitHub's native "blocked by" relationships. Explain why they exist here. During migration only, one legacy fallback line per dependency may be used: Blocked by #123 or Depends on #123. Write None when there are no dependencies. -->
 
 ## Privacy and security
 
