@@ -16,6 +16,16 @@ The runtime manager is called the **Issue Execution Controller**. It is determin
 
 It owns dependency reconciliation, concurrency, attempt state, Coder launch, Reviewer launch, repair loops, exact-commit evidence, base freshness, conflict detection, CI state, and the transition to human review.
 
+## Control center UI
+
+The local browser interface is an operations control center rather than only a setup page. It separates everyday operation from installation and destructive maintenance through six explicit views: Overview, Issues, Dependencies, Activity, Settings, and Maintenance.
+
+The overview prioritizes work requiring human attention, active executions, dependency-blocked work, controller capacity, polling, and recent activity. Issue details expose exact validation and review commits, Reviewer findings, PR and CI state, base freshness, dependencies, failure reasons, and the attempt timeline.
+
+The UI remains framework-free. Its layout, style, browser behavior, and status model are explicit modules composed by `ui.mjs`; the runtime does not extend the page through chained string replacements or global render overrides.
+
+Dangerous maintenance actions are separated from normal controls. High-risk cleanup uses typed confirmation, and cleanup remains limited to package-owned components.
+
 ## Permanent workspace
 
 The installer creates one local Paseo workspace titled exactly `Issue Coding Automation`. Issue implementation workspaces remain Paseo-managed worktree workspaces.
@@ -40,11 +50,13 @@ If structured native relationship data cannot be retrieved, the controller block
 
 The controller calculates the eligible issue set from the dependency graph and starts up to `maxActive` attempts. Independent issues may run simultaneously. Downstream work becomes eligible automatically after all prerequisite merges reach the base branch.
 
-## Reviewer isolation
+## Reviewer isolation and audit trail
 
 Coder and Reviewer may use the same provider and model. Independence means the Reviewer is launched as a fresh session with no shared chat history or working context from the Coder.
 
-Reviewer verdicts and findings are stored in the local attempt history and returned to the same Coder. They are not currently published as GitHub issue comments.
+Reviewer verdicts and findings are stored in local attempt history and returned to the same Coder when changes are required. Every approval and changes-required verdict is also posted to the draft PR with the exact reviewed commit and review round. Reviewer findings are not posted to the planning issue.
+
+Failure to write the PR audit comment fails the controller round rather than allowing an incomplete audit trail.
 
 ## Integration updates
 
@@ -58,7 +70,7 @@ The package does not silently resume interrupted runs. An interrupted attempt is
 
 ## Manual issue control
 
-The dashboard can start a specific eligible issue and temporarily skip issues from automatic claiming. This does not change the GitHub issue's authoritative contents.
+The dashboard can start a specific eligible issue, temporarily skip issues from automatic claiming, manually reconcile dependencies, pause or resume claiming, and run dispatch immediately. These controls do not change the GitHub issue's authoritative implementation contents.
 
 ## Old branch handling
 
@@ -67,6 +79,8 @@ Old branches are never deleted automatically. Restart offers explicit keep or de
 ## Activity records
 
 Attempt state contains an append-only operational timeline for dependency transitions, starts, phase changes, validation evidence, reviews, base updates, CI, terminal states, abandonment, and human-review readiness.
+
+The control center consolidates those records across attempts for visibility and export. Local history remains diagnostic and auditable; GitHub and Git remain authoritative for repository and pull-request state.
 
 ## Validation and GitHub checks
 
