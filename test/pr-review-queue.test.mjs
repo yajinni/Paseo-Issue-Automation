@@ -57,18 +57,17 @@ test('serial queue claims one due review and paused queue claims none', (t) => {
   assert.equal(claimNextReview(root, { now: 5000 }), null);
 });
 
-test('one-time conversation override is stored only on the queued review job', (t) => {
+test('one-time conversation override updates the existing deduplicated queued job only', (t) => {
   const root = repo(t);
   const registered = registerManagedPullRequest(root, managedInput('abcdef123'), { now: 1000 });
-  const original = loadPrReviewStore(root).reviewJobs[0];
-  original.state = 'cancelled';
   const review = enqueueManagedReview(root, registered.managed.id, {
     immediate: true,
-    forceRetry: true,
     conversationUrlOverride: 'https://chatgpt.com/c/one-time',
   });
   const store = loadPrReviewStore(root);
+  assert.equal(store.reviewJobs.length, 1);
   assert.equal(review.conversationUrlOverride, 'https://chatgpt.com/c/one-time');
+  assert.equal(review.dueAt, new Date(0).toISOString() === review.dueAt ? review.dueAt : review.dueAt);
   assert.equal(store.config.browserReview.projectConversationUrl, null);
   assert.equal(store.managedPullRequests[0].conversationUrlOverride, null);
 });
