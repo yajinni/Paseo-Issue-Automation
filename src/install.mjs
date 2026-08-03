@@ -1,4 +1,4 @@
-import { commandAvailable, runJson } from './process.mjs';
+import { commandAvailable, resolveCommand, runJson } from './process.mjs';
 import { discoverSetupOptions, probePaseo } from './setup-discovery.mjs';
 import { loadConfig, saveConfig } from './state.mjs';
 import * as legacy from './install-legacy.mjs';
@@ -8,9 +8,9 @@ export * from './install-legacy.mjs';
 const discoveryCache = new Map();
 const DISCOVERY_CACHE_MS = 60_000;
 
-function cachedSetupOptions(root) {
+function cachedSetupOptions(root, { force = false } = {}) {
   const cached = discoveryCache.get(root);
-  if (cached && Date.now() - cached.at < DISCOVERY_CACHE_MS) return cached.value;
+  if (!force && cached && Date.now() - cached.at < DISCOVERY_CACHE_MS) return cached.value;
   const value = discoverSetupOptions(root);
   discoveryCache.set(root, { at: Date.now(), value });
   return value;
@@ -18,19 +18,22 @@ function cachedSetupOptions(root) {
 
 export function requirements(root) {
   const existing = legacy.requirements(root);
-  const paseoCli = commandAvailable('paseo');
+  const paseoResolution = resolveCommand('paseo');
+  const paseoCli = paseoResolution.available;
   const paseo = paseoCli
     ? probePaseo(root)
     : {
         reachable: false,
         method: 'missing-cli',
-        message: 'Paseo CLI is not installed or is not available on PATH.',
+        message: 'Paseo CLI was not found on PATH or in the standard Paseo Desktop installation folders.',
         status: null,
         attempts: [],
       };
   return {
     ...existing,
     paseoCli,
+    paseoCommandPath: paseoResolution.path,
+    paseoCommandSource: paseoResolution.source,
     paseoReachable: paseo.reachable,
     paseoMessage: paseo.message,
     paseoProbe: {
@@ -41,7 +44,7 @@ export function requirements(root) {
   };
 }
 
-export function setupSnapshot(root) {
+export function setupSnapshot(root, options = {}) {
   const snapshot = legacy.setupSnapshot(root);
   const req = requirements(root);
   const ready = Boolean(
@@ -62,12 +65,13 @@ export function setupSnapshot(root) {
     ...snapshot,
     requirements: req,
     checks: { ...snapshot.checks, ready },
-    setupOptions: cachedSetupOptions(root),
+    setupOptions: cachedSetupOptions(root, { force: options.forceDiscovery === true }),
+    setupCheckedAt: new Date().toISOString(),
   };
 }
 
 export function finishSetup(root) {
-  const snapshot = setupSnapshot(root);
+  const snapshot = setupSnapshot(root, { forceDiscovery: true });
   if (!snapshot.checks.ready) {
     throw new Error('Setup cannot finish until every required setup check passes.');
   }
@@ -75,7 +79,7 @@ export function finishSetup(root) {
 }
 
 export function runSetupSelfTest(root) {
-  const snapshot = setupSnapshot(root);
+  const snapshot = setupSnapshot(root, { forceDiscovery: true });
   const prProbe = runJson('gh', ['pr', 'list', '--state', 'all', '--limit', '1', '--json', 'number,headRefOid'], {
     cwd: root,
     allowFailure: true,
