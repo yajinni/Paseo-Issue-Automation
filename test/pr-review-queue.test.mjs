@@ -62,12 +62,13 @@ test('one-time conversation override updates the existing deduplicated queued jo
   const registered = registerManagedPullRequest(root, managedInput('abcdef123'), { now: 1000 });
   const review = enqueueManagedReview(root, registered.managed.id, {
     immediate: true,
+    now: 1500,
     conversationUrlOverride: 'https://chatgpt.com/c/one-time',
   });
   const store = loadPrReviewStore(root);
   assert.equal(store.reviewJobs.length, 1);
   assert.equal(review.conversationUrlOverride, 'https://chatgpt.com/c/one-time');
-  assert.equal(review.dueAt, new Date(0).toISOString() === review.dueAt ? review.dueAt : review.dueAt);
+  assert.equal(review.dueAt, new Date(1500).toISOString());
   assert.equal(store.config.browserReview.projectConversationUrl, null);
   assert.equal(store.managedPullRequests[0].conversationUrlOverride, null);
 });
