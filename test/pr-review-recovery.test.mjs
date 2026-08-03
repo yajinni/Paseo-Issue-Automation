@@ -8,6 +8,8 @@ import { registerManagedPullRequest } from '../src/pr-review-queue.mjs';
 import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
 import { recoverPrReviewState, reconcileManagedPullRequest } from '../src/pr-review-reconcile.mjs';
 
+const noEffects = () => [];
+
 function repo(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-review-recovery-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });
@@ -37,7 +39,7 @@ test('startup recovery returns interrupted review and fix workers to recoverable
       state: 'fixing', priority: 0, attempts: 1, createdAt: new Date(1000).toISOString(), updatedAt: new Date(1000).toISOString(),
     });
   });
-  recoverPrReviewState(root, { now: 5000 });
+  recoverPrReviewState(root, { now: 5000, effectRunner: noEffects });
   const store = loadPrReviewStore(root);
   assert.equal(store.runtime.activeReviewJobId, null);
   assert.equal(store.reviewJobs[0].state, 'queued');
@@ -50,6 +52,7 @@ test('closed without merge becomes an operator state and never success', (t) => 
   reconcileManagedPullRequest(root, managed.id, {
     now: 5000,
     snapshot: { state: 'CLOSED', mergedAt: null, headRefOid: 'abcdef123' },
+    effectRunner: noEffects,
   });
   const record = loadPrReviewStore(root).managedPullRequests[0];
   assert.equal(record.reviewState, 'closed_unmerged');
