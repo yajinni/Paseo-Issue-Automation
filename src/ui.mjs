@@ -2,6 +2,13 @@ import { CONTROL_CENTER_SCRIPT } from './control-center-script.mjs';
 import { CONTROL_CENTER_SHELL } from './control-center-shell.mjs';
 import { CONTROL_CENTER_STYLE } from './control-center-style.mjs';
 
+function shellWithPrReviews() {
+  return CONTROL_CENTER_SHELL.replace(
+    '</nav>',
+    '<a class="nav-tab" href="/pr-reviews" aria-label="Open serial PR review management">PR Reviews</a></nav>',
+  );
+}
+
 export function dashboardHtml() {
   return `<!doctype html>
 <html lang="en">
@@ -13,7 +20,7 @@ export function dashboardHtml() {
 <style>${CONTROL_CENTER_STYLE}</style>
 </head>
 <body>
-${CONTROL_CENTER_SHELL}
+${shellWithPrReviews()}
 <script>${CONTROL_CENTER_SCRIPT}</script>
 </body>
 </html>`;
