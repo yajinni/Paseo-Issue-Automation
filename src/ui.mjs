@@ -1,6 +1,7 @@
 import { CONTROL_CENTER_SCRIPT } from './control-center-script.mjs';
 import { CONTROL_CENTER_SHELL } from './control-center-shell.mjs';
 import { CONTROL_CENTER_STYLE } from './control-center-style.mjs';
+import { SETUP_CONTROLS_SCRIPT } from './setup-controls-script.mjs';
 
 function shellWithPrReviews() {
   return CONTROL_CENTER_SHELL.replace(
@@ -22,6 +23,7 @@ export function dashboardHtml() {
 <body>
 ${shellWithPrReviews()}
 <script>${CONTROL_CENTER_SCRIPT}</script>
+<script>${SETUP_CONTROLS_SCRIPT}</script>
 </body>
 </html>`;
 }
