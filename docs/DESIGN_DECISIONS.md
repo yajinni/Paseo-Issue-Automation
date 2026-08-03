@@ -26,13 +26,15 @@ Setup asks for one base branch. Each issue branch is created from that branch an
 
 ## Dependency model
 
-Native GitHub `blocked by` relationships are authoritative. Body lines remain a compatibility fallback while repositories migrate.
+Native GitHub `blocked by` relationships are the only dependency source. The controller does not parse `Blocked by #123`, `Depends on #123`, or similar issue-body text.
 
 Sub-issues represent hierarchy; dependencies represent execution constraints.
 
 Relationships are preserved after satisfaction. The controller re-evaluates readiness and updates operational labels instead of deleting dependency history.
 
 A coding dependency is satisfied by merged implementation present in the configured base branch, not by issue closure alone.
+
+If structured native relationship data cannot be retrieved, the controller blocks execution rather than guessing that an issue has no dependencies.
 
 ## Parallel work
 
@@ -41,6 +43,8 @@ The controller calculates the eligible issue set from the dependency graph and s
 ## Reviewer isolation
 
 Coder and Reviewer may use the same provider and model. Independence means the Reviewer is launched as a fresh session with no shared chat history or working context from the Coder.
+
+Reviewer verdicts and findings are stored in the local attempt history and returned to the same Coder. They are not currently published as GitHub issue comments.
 
 ## Integration updates
 
