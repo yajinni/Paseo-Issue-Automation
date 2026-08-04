@@ -6,6 +6,15 @@ import { DASHBOARD_POLL_SCRIPT } from './dashboard-poll-script.mjs';
 import { SETUP_CONTROLS_SCRIPT } from './setup-controls-script.mjs';
 import { SETUP_REFRESH_SCRIPT } from './setup-refresh-script.mjs';
 
+const CONTROL_CENTER_SCRIPT_WITHOUT_MAINTENANCE = CONTROL_CENTER_SCRIPT
+  .replace(
+    /\nfunction uninstallPayload\(\) \{[\s\S]*?\n\}\n\nfunction findAttempt/,
+    '\nfunction findAttempt',
+  )
+  .replace("  document.getElementById('state-path').textContent = data.stateDirectory || 'Unknown';\n", '')
+  .replace("  document.getElementById('npm-uninstall-command').textContent = data.npmUninstallCommand || '';\n", '')
+  .replace(" && currentView !== 'maintenance'", '');
+
 const COMPONENTS_PANEL = String.raw`
       <article class="card setup-step" id="installation-card" style="margin-top:14px">
         <div class="card-head">
@@ -66,8 +75,6 @@ const COMPONENTS_PANEL = String.raw`
           <span id="remove-paseo-integration"></span>
           <div id="label-list"></div>
           <span id="remove-workspace"></span>
-          <span id="state-path"></span>
-          <span id="npm-uninstall-command"></span>
         </div>
       </article>`;
 
@@ -103,7 +110,7 @@ export function dashboardHtml() {
 </head>
 <body>
 ${shellWithPrReviews()}
-<script>${CONTROL_CENTER_SCRIPT}</script>
+<script>${CONTROL_CENTER_SCRIPT_WITHOUT_MAINTENANCE}</script>
 <script>${SETUP_CONTROLS_SCRIPT}</script>
 <script>${SETUP_REFRESH_SCRIPT}</script>
 <script>${COMPONENTS_UI_SCRIPT}</script>
