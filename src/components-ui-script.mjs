@@ -90,6 +90,11 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
       else await refreshStatus();
       toast(successLabel);
     } catch (error) {
+      try {
+        await refreshStatus();
+      } catch {
+        // Preserve the original component error when a follow-up status refresh also fails.
+      }
       toast(error && error.message ? error.message : 'The component operation failed.', true);
     } finally {
       operationInFlight = false;
