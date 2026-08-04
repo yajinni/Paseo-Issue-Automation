@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { prReviewDashboardHtml } from '../src/pr-review-dashboard.mjs';
+import { dashboardHtml } from '../src/ui.mjs';
 
-test('PR dashboard separates serial review from coding and exposes required controls', () => {
-  const html = prReviewDashboardHtml();
+test('PR review management is integrated into the main dashboard', () => {
+  const html = dashboardHtml();
+  assert.match(html, /data-view="pr-reviews"/);
+  assert.match(html, /id="view-pr-reviews"/);
   assert.match(html, /Several builders, one inspector/);
   assert.match(html, /Active inspector/);
   assert.match(html, /Waiting review line/);
@@ -17,4 +20,12 @@ test('PR dashboard separates serial review from coding and exposes required cont
   assert.match(html, /Allow ChatGPT merge/);
   assert.match(html, /Diagnostic screenshot/);
   assert.match(html, /closed\/reopen/);
+  assert.doesNotMatch(html, /href="\/pr-reviews"/);
+});
+
+test('legacy PR review route redirects into the integrated tab', () => {
+  const html = prReviewDashboardHtml();
+  assert.match(html, /location\.replace\('\/#pr-reviews'\)/);
+  assert.match(html, /content="0;url=\/#pr-reviews"/);
+  assert.doesNotMatch(html, /<h1>Serial PR Review<\/h1>/);
 });

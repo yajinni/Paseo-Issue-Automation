@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { dashboardHtml } from '../src/ui.mjs';
 
-test('dashboard exposes operations, dependency, activity, and settings views', () => {
+test('dashboard exposes operations, dependency, activity, settings, and PR review views', () => {
   const html = dashboardHtml();
-  for (const view of ['overview', 'issues', 'dependencies', 'activity', 'settings']) {
+  for (const view of ['overview', 'issues', 'dependencies', 'activity', 'settings', 'pr-reviews']) {
     assert.match(html, new RegExp(`data-view="${view}"`));
     assert.match(html, new RegExp(`id="view-${view}"`));
   }
@@ -14,6 +14,21 @@ test('dashboard exposes operations, dependency, activity, and settings views', (
   assert.match(html, /Execution waves/);
   assert.match(html, /Dependency map/);
   assert.match(html, /Issue execution board/);
+});
+
+test('controller actions always render as one stable action bar', () => {
+  const html = dashboardHtml();
+  assert.match(html, /id="controller-action-state"/);
+  assert.match(html, /id="claims-toggle-button"/);
+  assert.match(html, /id="run-now-button"/);
+  assert.match(html, /id="reconcile-button"/);
+  assert.match(html, /Controller loading/);
+  assert.match(html, /Setup required/);
+  assert.match(html, /Pause claims/);
+  assert.match(html, /Resume claims/);
+  assert.doesNotMatch(html, /id="resume-button"/);
+  assert.doesNotMatch(html, /id="pause-button"/);
+  assert.doesNotMatch(html, /classList\.toggle\('hidden', !operational\)/);
 });
 
 test('dashboard presents deterministic controller configuration without an Orchestrator model field', () => {
@@ -51,5 +66,6 @@ test('dashboard includes accessible navigation, details, and confirmation dialog
   assert.match(html, /aria-label="Dashboard sections"/);
   assert.match(html, /id="issue-dialog"/);
   assert.match(html, /id="action-dialog"/);
+  assert.match(html, /id="pr-override-dialog"/);
   assert.match(html, /prefers-reduced-motion/);
 });
