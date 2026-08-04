@@ -69,7 +69,7 @@ test('browser dependency installation is selected from the server environment', 
 });
 
 test('PR review conversation resolution does not use a machine-global fallback', () => {
-  const store = { config: { browserReview: { projectConversationUrl: null } };
+  const store = { config: { browserReview: { projectConversationUrl: null } } };
   const managed = { conversationUrlOverride: null };
   const job = { conversationUrlOverride: null };
   assert.equal(resolveConversationUrl(store, managed, job, { globalConversationUrl: 'https://chatgpt.com/c/global' }), null);
