@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { dashboardHtml } from '../src/ui.mjs';
 
-test('dashboard exposes operations, dependency, activity, settings, and maintenance views', () => {
+test('dashboard exposes operations, dependency, activity, and settings views', () => {
   const html = dashboardHtml();
-  for (const view of ['overview', 'issues', 'dependencies', 'activity', 'settings', 'maintenance']) {
+  for (const view of ['overview', 'issues', 'dependencies', 'activity', 'settings']) {
     assert.match(html, new RegExp(`data-view="${view}"`));
     assert.match(html, new RegExp(`id="view-${view}"`));
   }
+  assert.doesNotMatch(html, /data-view="maintenance"/);
+  assert.doesNotMatch(html, /id="view-maintenance"/);
   assert.match(html, /Needs your review/);
   assert.match(html, /Execution waves/);
   assert.match(html, /Dependency map/);
