@@ -97,6 +97,17 @@ function quoteCmdArgument(value) {
   return `"${text}"`;
 }
 
+export function buildWindowsCmdInvocation(executable, args = [], env = process.env) {
+  const inner = [executable, ...args].map(quoteCmdArgument).join(' ');
+  // With `cmd /s /c`, a quoted executable must be wrapped in a second pair
+  // of quotes so cmd removes only the outer pair and preserves the path quotes.
+  const commandLine = `"${inner}"`;
+  return {
+    executable: env.ComSpec || env.COMSPEC || 'cmd.exe',
+    args: ['/d', '/s', '/v:off', '/c', commandLine],
+  };
+}
+
 function resolvedSpawn(command, args, options) {
   const env = options.env || process.env;
   const resolution = process.platform === 'win32' && String(command).toLowerCase() === 'paseo'
@@ -105,10 +116,8 @@ function resolvedSpawn(command, args, options) {
   const executable = resolution.path || command;
 
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable)) {
-    const commandLine = [executable, ...args].map(quoteCmdArgument).join(' ');
     return {
-      executable: env.ComSpec || env.COMSPEC || 'cmd.exe',
-      args: ['/d', '/s', '/v:off', '/c', commandLine],
+      ...buildWindowsCmdInvocation(executable, args, env),
       resolution,
     };
   }
