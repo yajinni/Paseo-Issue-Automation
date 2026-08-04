@@ -27,21 +27,21 @@ export const SETUP_REFRESH_SCRIPT = String.raw`
     });
   }
 
-  function cloneAndWire(id, label) {
+  function cloneAndWire(id, label, mode) {
     const existing = document.getElementById(id);
     if (!existing) return null;
     const button = existing.cloneNode(true);
     button.disabled = false;
     button.textContent = label;
     existing.replaceWith(button);
-    button.addEventListener('click', function() { authoritativeRefresh(button); });
+    button.addEventListener('click', function() { authoritativeRefresh(button, mode); });
     return button;
   }
 
   function wireButtons() {
-    cloneAndWire('requirements-check-again', 'Check again');
-    cloneAndWire('refresh-setup-options', 'Refresh branches and models');
-    cloneAndWire('requirement-details-recheck', 'Check again');
+    cloneAndWire('requirements-check-again', 'Check again', 'requirements');
+    cloneAndWire('refresh-setup-options', 'Refresh branches and models', 'catalog');
+    cloneAndWire('requirement-details-recheck', 'Check again', 'requirements');
   }
 
   function allRefreshButtons() {
@@ -52,28 +52,33 @@ export const SETUP_REFRESH_SCRIPT = String.raw`
     ].filter(Boolean);
   }
 
-  async function authoritativeRefresh(clickedButton) {
+  async function authoritativeRefresh(clickedButton, mode) {
     if (refreshInFlight) return;
     refreshInFlight = true;
+    const catalogRefresh = mode === 'catalog';
     const buttons = allRefreshButtons();
     const originalLabels = new Map(buttons.map(function(button) { return [button, button.textContent]; }));
     buttons.forEach(function(button) {
       button.disabled = true;
-      button.textContent = 'Checking…';
+      button.textContent = catalogRefresh ? 'Loading models…' : 'Checking…';
     });
-    renderPendingRows('Checking now…', false);
+    renderPendingRows(catalogRefresh ? 'Refreshing setup data…' : 'Checking requirements now…', false);
 
     const controller = new AbortController();
-    const timeout = setTimeout(function() { controller.abort(); }, 25_000);
+    const timeoutMs = catalogRefresh ? 25_000 : 12_000;
+    const timeout = setTimeout(function() { controller.abort(); }, timeoutMs);
+    const refreshValue = catalogRefresh ? 'setup' : 'requirements';
     try {
-      const data = await api('/api/status?refresh=setup&_=' + Date.now(), { signal: controller.signal });
+      const data = await api('/api/status?refresh=' + refreshValue + '&_=' + Date.now(), { signal: controller.signal });
       render(data);
       wireButtons();
-      toast('Requirements, branches, Paseo harnesses, and models were rechecked.');
+      toast(catalogRefresh
+        ? 'Branches, Paseo harnesses, and models were refreshed.'
+        : 'Git, GitHub, Paseo, and remote requirements were rechecked.');
       return data;
     } catch (error) {
       const message = error && error.name === 'AbortError'
-        ? 'The recheck exceeded 25 seconds and was stopped. No button will remain stuck.'
+        ? 'The recheck exceeded ' + Math.round(timeoutMs / 1000) + ' seconds and was stopped. No button will remain stuck.'
         : (error && error.message ? error.message : 'The recheck failed.');
       renderPendingRows(message, true);
       toast(message, true);

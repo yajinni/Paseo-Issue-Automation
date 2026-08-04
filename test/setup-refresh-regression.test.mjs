@@ -38,18 +38,19 @@ test('normal setup discovery is shallow and does not enumerate provider models',
   assert.equal(calls.some((call) => call.includes('provider models')), false);
 });
 
-test('refresh recovery script renders visible placeholders and always has a timeout escape', () => {
+test('refresh recovery script renders visible placeholders and always has timeout escapes', () => {
   assert.match(SETUP_REFRESH_SCRIPT, /Waiting for the first check/);
-  assert.match(SETUP_REFRESH_SCRIPT, /renderPendingRows\('Checking now…'/);
+  assert.match(SETUP_REFRESH_SCRIPT, /Checking requirements now/);
+  assert.match(SETUP_REFRESH_SCRIPT, /Refreshing setup data/);
   assert.match(SETUP_REFRESH_SCRIPT, /AbortController/);
-  assert.match(SETUP_REFRESH_SCRIPT, /25_000/);
+  assert.match(SETUP_REFRESH_SCRIPT, /catalogRefresh \? 25_000 : 12_000/);
   assert.match(SETUP_REFRESH_SCRIPT, /No button will remain stuck/);
   assert.match(SETUP_REFRESH_SCRIPT, /button\.disabled = false/);
 });
 
-test('refresh recovery script rewires both setup refresh controls', () => {
-  assert.match(SETUP_REFRESH_SCRIPT, /requirements-check-again/);
-  assert.match(SETUP_REFRESH_SCRIPT, /refresh-setup-options/);
-  assert.match(SETUP_REFRESH_SCRIPT, /requirement-details-recheck/);
-  assert.match(SETUP_REFRESH_SCRIPT, /refresh=setup/);
+test('refresh recovery script gives requirements and catalog buttons distinct modes', () => {
+  assert.match(SETUP_REFRESH_SCRIPT, /requirements-check-again', 'Check again', 'requirements'/);
+  assert.match(SETUP_REFRESH_SCRIPT, /refresh-setup-options', 'Refresh branches and models', 'catalog'/);
+  assert.match(SETUP_REFRESH_SCRIPT, /requirement-details-recheck', 'Check again', 'requirements'/);
+  assert.match(SETUP_REFRESH_SCRIPT, /refreshValue = catalogRefresh \? 'setup' : 'requirements'/);
 });

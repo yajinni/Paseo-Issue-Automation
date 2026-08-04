@@ -25,8 +25,8 @@ function cachedSetupOptions(root, { force = false, paseoOverride = null } = {}) 
   return discovered;
 }
 
-export function requirements(root) {
-  const existing = legacy.requirements(root);
+export function requirements(root, existing = null) {
+  const base = existing || legacy.requirements(root);
   const paseoResolution = resolveCommand('paseo');
   const paseoCli = paseoResolution.available;
   const paseo = paseoCli
@@ -39,7 +39,7 @@ export function requirements(root) {
         attempts: [],
       };
   return {
-    ...existing,
+    ...base,
     paseoCli,
     paseoCommandPath: paseoResolution.path,
     paseoCommandSource: paseoResolution.source,
@@ -65,7 +65,10 @@ function paseoOverrideFromRequirements(req) {
 
 export function setupSnapshot(root, options = {}) {
   const snapshot = legacy.setupSnapshot(root);
-  const req = requirements(root);
+  // Reuse the legacy pass's Git/GitHub/remote results. Only Paseo needs the
+  // newer authoritative daemon probe, so do not immediately repeat every
+  // requirement command a second time.
+  const req = requirements(root, snapshot.requirements);
   const ready = Boolean(
     req.git
     && req.githubCli
