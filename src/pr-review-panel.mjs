@@ -54,9 +54,9 @@ export const PR_REVIEW_PANEL = String.raw`
             <label>Enable PR automation<select id="pr-enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
             <label>Enable ChatGPT browser reviews<select id="pr-browser-enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
             <label>Project conversation URL<input id="pr-project-url" placeholder="https://chatgpt.com/c/..."></label>
-            <label>Review debounce in milliseconds<input id="pr-debounce" type="number" min="0" max="600000"></label>
-            <label>Active reconciliation in milliseconds<input id="pr-active-interval" type="number" min="10000"></label>
-            <label>Idle reconciliation in milliseconds<input id="pr-idle-interval" type="number" min="30000"></label>
+            <label>Review debounce in seconds<input id="pr-debounce" type="number" min="0" max="600" step="1"></label>
+            <label>Active reconciliation in seconds<input id="pr-active-interval" type="number" min="10" max="3600" step="1"></label>
+            <label>Idle reconciliation in seconds<input id="pr-idle-interval" type="number" min="30" max="86400" step="1"></label>
             <label>Maximum browser submission attempts<input id="pr-max-attempts" type="number" min="1" max="10"></label>
             <label>Allow ChatGPT merge<select id="pr-allow-merge"><option value="false">No</option><option value="true">Yes</option></select></label>
             <label>Verify associated issue closure<select id="pr-verify-closure"><option value="true">Yes</option><option value="false">No</option></select></label>
@@ -67,22 +67,19 @@ export const PR_REVIEW_PANEL = String.raw`
         </article>
 
         <article class="card">
-          <div class="card-head"><div><h2>Dedicated ChatGPT browser</h2><p>Manage the isolated browser used by serial PR review.</p></div></div>
+          <div class="card-head"><div><h2>Dedicated ChatGPT browser</h2><p>Manage the isolated browser used by serial PR review for this project.</p></div></div>
           <div id="pr-browser-status" class="meta-grid"></div>
           <div class="actions pr-review-section">
-            <button onclick="prReviewPost('/api/pr-reviews/browser/install')">Install Chromium</button>
-            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/install',{withSystemDependencies:true})">Install dependencies + Chromium</button>
+            <button onclick="installPrReviewBrowser()">Install Chromium</button>
             <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/open')">Launch browser</button>
-            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/use-current',{scope:'project'})">Use current for project</button>
-            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/use-current',{scope:'global'})">Use current globally</button>
+            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/use-current',{scope:'project'})">Use current conversation</button>
             <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/test')">Test destination</button>
             <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/test',{sendTestPrompt:true})">Send harmless test</button>
             <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/close')">Close browser</button>
           </div>
-          <div class="reason pr-review-section">Reset and uninstall remove only machine-local browser state. They never expose cookies or uninstall the package.</div>
           <div class="actions pr-review-section">
             <button class="danger" onclick="openPrReviewConfirm('Reset dedicated profile','RESET','/api/pr-reviews/browser/reset')">Reset profile</button>
-            <button class="danger" onclick="openPrReviewConfirm('Uninstall browser state','UNINSTALL','/api/pr-reviews/browser/uninstall')">Uninstall browser state</button>
+            <button class="danger" onclick="openPrReviewConfirm('Uninstall browser','UNINSTALL','/api/pr-reviews/browser/uninstall')">Uninstall browser</button>
           </div>
         </article>
       </div>
