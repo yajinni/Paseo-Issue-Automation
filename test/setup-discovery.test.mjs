@@ -83,18 +83,24 @@ test('branch discovery combines local and origin branches and marks the current 
   });
 });
 
-test('provider and model discovery returns only enabled available Paseo harnesses', () => {
+test('provider and model discovery parses the official list envelope', () => {
   const calls = [];
   const runner = fakeRunner({
-    'paseo provider ls --json': result({ stdout: JSON.stringify([
-      { provider: 'opencode', label: 'OpenCode', status: 'available', enabled: 'Enabled' },
-      { provider: 'codex', label: 'Codex', status: 'unavailable', enabled: 'Enabled' },
-      { provider: 'claude', label: 'Claude', status: 'available', enabled: 'Disabled' },
-    ]) }),
-    'paseo provider models opencode --json': result({ stdout: JSON.stringify([
-      { id: 'openai/gpt-5.4', model: 'GPT-5.4', description: 'Coding model' },
-      { id: 'xai/grok-code', model: 'Grok Code' },
-    ]) }),
+    'paseo provider ls --json': result({ stdout: JSON.stringify({
+      type: 'list',
+      data: [
+        { provider: 'opencode', label: 'OpenCode', status: 'available', enabled: 'Enabled' },
+        { provider: 'codex', label: 'Codex', status: 'unavailable', enabled: 'Enabled' },
+        { provider: 'claude', label: 'Claude', status: 'available', enabled: 'Disabled' },
+      ],
+    }) }),
+    'paseo provider models opencode --thinking --json': result({ stdout: JSON.stringify({
+      type: 'list',
+      data: [
+        { id: 'openai/gpt-5.4', model: 'GPT-5.4', description: 'Coding model' },
+        { id: 'xai/grok-code', model: 'Grok Code' },
+      ],
+    }) }),
   }, calls);
   const catalog = discoverPaseoCatalog('/repo', { runner });
   assert.deepEqual(catalog.providers.map((provider) => provider.id), ['opencode']);
@@ -102,8 +108,26 @@ test('provider and model discovery returns only enabled available Paseo harnesse
     'opencode/openai/gpt-5.4',
     'opencode/xai/grok-code',
   ]);
+  assert.match(catalog.errors.join('\n'), /codex: provider is unavailable/);
+  assert.match(catalog.errors.join('\n'), /claude: provider is available and disabled/);
   assert.deepEqual(calls, [
     'paseo provider ls --json',
-    'paseo provider models opencode --json',
+    'paseo provider models opencode --thinking --json',
   ]);
+});
+
+test('loading enabled providers are retained so setup can show diagnostics instead of zero harnesses', () => {
+  const runner = fakeRunner({
+    'paseo provider ls --json': result({ stdout: JSON.stringify({
+      data: [{ provider: 'opencode', label: 'OpenCode', status: 'loading', enabled: true }],
+    }) }),
+    'paseo provider models opencode --thinking --json': result({
+      ok: false,
+      stderr: 'provider still loading',
+    }),
+  });
+  const catalog = discoverPaseoCatalog('/repo', { runner });
+  assert.equal(catalog.providers.length, 1);
+  assert.equal(catalog.providers[0].id, 'opencode');
+  assert.match(catalog.providers[0].error, /still loading/);
 });
