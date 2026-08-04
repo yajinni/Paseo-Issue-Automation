@@ -44,8 +44,9 @@ test('model thinking controls are rendered for coder and reviewer', () => {
   const html = dashboardHtml();
   assert.match(html, /coderThinking/);
   assert.match(html, /reviewerThinking/);
-  assert.match(MODEL_THINKING_UI_SCRIPT, /Coder thinking level/);
-  assert.match(MODEL_THINKING_UI_SCRIPT, /Independent Reviewer thinking level/);
+  assert.match(MODEL_THINKING_UI_SCRIPT, /roleLabel \+ ' thinking level/);
+  assert.match(MODEL_THINKING_UI_SCRIPT, /ensureThinkingControl\('coder', 'Coder'\)/);
+  assert.match(MODEL_THINKING_UI_SCRIPT, /ensureThinkingControl\('reviewer', 'Independent Reviewer'\)/);
   assert.match(MODEL_THINKING_UI_SCRIPT, /thinkingOptionIds/);
   assert.match(MODEL_THINKING_UI_SCRIPT, /defaultThinkingOptionId/);
 });
