@@ -9,7 +9,7 @@ import { dashboardHtml } from '../src/ui.mjs';
 
 test('PR Reviews navigation is opt-in and component changes script is installed', () => {
   const html = dashboardHtml();
-  assert.match(html, /id="pr-reviews-nav"[^>]*class="nav-tab hidden"/);
+  assert.match(html, /<button[^>]*class="nav-tab hidden"[^>]*id="pr-reviews-nav"/);
   assert.match(html, /moveComponents\(\)/);
   assert.match(html, /movePrSettings\(\)/);
   assert.match(html, /Enable PR Reviews/);
