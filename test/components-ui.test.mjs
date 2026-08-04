@@ -36,6 +36,19 @@ test('GitHub labels are summarized as one status card', () => {
   assert.doesNotMatch(panel, /Install or repair missing labels/);
 });
 
+test('maintenance tab and maintenance controls are not rendered', () => {
+  const html = dashboardHtml();
+
+  assert.doesNotMatch(html, /data-view="maintenance"/);
+  assert.doesNotMatch(html, /id="view-maintenance"/);
+  assert.doesNotMatch(html, />Maintenance<\/button>/);
+  assert.doesNotMatch(html, /Clear local state/);
+  assert.doesNotMatch(html, /Force clear ownership records/);
+  assert.doesNotMatch(html, /Guided uninstall/);
+  assert.doesNotMatch(html, /Remove safe labels/);
+  assert.doesNotMatch(html, /Force remove all/);
+});
+
 test('component action switches to safe component-only uninstall when healthy', () => {
   const script = source('src/components-ui-script.mjs');
 
