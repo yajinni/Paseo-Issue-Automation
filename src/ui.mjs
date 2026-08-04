@@ -66,11 +66,17 @@ const COMPONENTS_PANEL = String.raw`
           <span id="remove-paseo-integration"></span>
           <div id="label-list"></div>
           <span id="remove-workspace"></span>
+          <span id="state-path"></span>
+          <span id="npm-uninstall-command"></span>
         </div>
       </article>`;
 
 function shellWithPrReviews() {
   return CONTROL_CENTER_SHELL
+    .replace(
+      '    <button class="nav-tab" data-view="maintenance" onclick="showView(\'maintenance\')">Maintenance</button>\n',
+      '',
+    )
     .replace(
       '</nav>',
       '<a class="nav-tab" href="/pr-reviews" aria-label="Open serial PR review management">PR Reviews</a></nav>',
@@ -78,6 +84,10 @@ function shellWithPrReviews() {
     .replace(
       /<article class="card setup-step" id="installation-card"[\s\S]*?<\/article>/,
       COMPONENTS_PANEL,
+    )
+    .replace(
+      /\n    <section class="view" id="view-maintenance">[\s\S]*?<\/section>\n  <\/main>/,
+      '\n  </main>',
     );
 }
 
