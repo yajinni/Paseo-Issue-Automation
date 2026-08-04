@@ -1,6 +1,39 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildExecutionModel, summarizePrChecks } from '../src/dashboard-status.mjs';
+import {
+  buildExecutionModel,
+  repositoryIssueSnapshot,
+  summarizePrChecks,
+} from '../src/dashboard-status.mjs';
+
+test('repository discovery reads all open issues with native dependency relationships', () => {
+  let invocation = null;
+  const expected = [{
+    number: 371,
+    labels: [],
+    blockedBy: { nodes: [{ number: 349 }], totalCount: 1 },
+    blocking: { nodes: [], totalCount: 0 },
+  }];
+  const result = repositoryIssueSnapshot('/repo', {
+    jsonRunner(command, args, options) {
+      invocation = { command, args, options };
+      return expected;
+    },
+  });
+  assert.equal(result.available, true);
+  assert.deepEqual(result.issues, expected);
+  assert.equal(invocation.command, 'gh');
+  assert.deepEqual(invocation.args.slice(0, 5), ['issue', 'list', '--state', 'open', '--limit']);
+  assert.equal(invocation.args[5], '1000');
+  assert.match(invocation.args.at(-1), /blockedBy,blocking/);
+  assert.equal(invocation.options.allowFailure, true);
+});
+
+test('repository discovery reports unavailable without inventing issue data', () => {
+  const result = repositoryIssueSnapshot('/repo', { jsonRunner: () => null });
+  assert.equal(result.available, false);
+  assert.deepEqual(result.issues, []);
+});
 
 test('PR check summary distinguishes passed, pending, and failed checks', () => {
   assert.equal(summarizePrChecks([{ name: 'test', conclusion: 'SUCCESS' }]).state, 'passed');
