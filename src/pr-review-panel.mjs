@@ -63,7 +63,7 @@ export const PR_REVIEW_PANEL = String.raw`
             <label>Allow safe Paseo issue-closure fallback<select id="pr-closure-fallback"><option value="false">No</option><option value="true">Yes</option></select></label>
           </div>
           <label class="pr-review-section">Versioned review prompt template<textarea id="pr-prompt"></textarea></label>
-          <div class="actions pr-review-section"><button onclick="savePrReviewSettings()">Save settings</button></div>
+          <div class="actions pr-review-section"><button id="pr-save-settings" type="button" onclick="savePrReviewSettings()">Save settings</button></div>
         </article>
 
         <article class="card">
