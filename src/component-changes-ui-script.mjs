@@ -94,12 +94,6 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     if (textNode) textNode.textContent = labelText;
   }
 
-  function buttonByText(text) {
-    return Array.from(document.querySelectorAll('button')).find(function(button) {
-      return textOf(button) === text;
-    }) || null;
-  }
-
   function normalizePrControls() {
     replaceLabel('pr-enabled', 'Enable PR Reviews');
     replaceLabel('pr-browser-enabled', 'Enable automatic ChatGPT browser reviews');
@@ -113,27 +107,6 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     if (debounce) Object.assign(debounce, { min: '0', max: '600', step: '1' });
     if (active) Object.assign(active, { min: '10', max: '3600', step: '1' });
     if (idle) Object.assign(idle, { min: '30', max: '86400', step: '1' });
-
-    const installWithDependencies = buttonByText('Install dependencies + Chromium');
-    if (installWithDependencies) installWithDependencies.remove();
-    const install = buttonByText('Install Chromium');
-    if (install) install.setAttribute('onclick', 'installPrReviewBrowser()');
-
-    const currentProject = buttonByText('Use current for project');
-    if (currentProject) {
-      currentProject.textContent = 'Use current conversation';
-      currentProject.setAttribute('onclick', "prReviewPost('/api/pr-reviews/browser/use-current',{scope:'project'})");
-    }
-    const currentGlobal = buttonByText('Use current globally');
-    if (currentGlobal) currentGlobal.remove();
-
-    const warning = Array.from(document.querySelectorAll('.reason')).find(function(node) {
-      return textOf(node) === 'Reset and uninstall remove only machine-local browser state. They never expose cookies or uninstall the package.';
-    });
-    if (warning) warning.remove();
-
-    const uninstall = buttonByText('Uninstall browser state');
-    if (uninstall) uninstall.textContent = 'Uninstall browser';
   }
 
   function applyPrData(data) {
@@ -191,24 +164,6 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     const requirementsText = textOf(document.getElementById('requirements-card'));
     const withSystemDependencies = shouldInstallDependencies(latestPrData, requirementsText);
     return window.prReviewPost('/api/pr-reviews/browser/install', { withSystemDependencies });
-  };
-
-  const originalSave = window.savePrReviewSettings;
-  window.savePrReviewSettings = function() {
-    const ids = ['pr-debounce', 'pr-active-interval', 'pr-idle-interval'];
-    const originalValues = ids.map(function(id) { return document.getElementById(id)?.value; });
-    ids.forEach(function(id) {
-      const input = document.getElementById(id);
-      if (input) input.value = String(Math.round(Number(input.value || 0) * 1000));
-    });
-    try {
-      return originalSave();
-    } finally {
-      ids.forEach(function(id, index) {
-        const input = document.getElementById(id);
-        if (input) input.value = originalValues[index];
-      });
-    }
   };
 
   const originalRefresh = window.refreshPrReviews;

@@ -25,7 +25,7 @@ test('settings expose an opt-in automatic ChatGPT PR review toggle', () => {
   const html = dashboardHtml();
   assert.match(html, /Automatic PR Review With ChatGPT/);
   assert.match(html, /id=\"automatic-pr-review-enabled\"/);
-  assert.match(html, /id=\"pr-review-settings-grid\" hidden/);
+  assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /grid\.hidden = true/);
   assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /projectSettingsCard/);
   assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /browserSettingsCard/);
   assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /master\.value = String\(enabled\)/);

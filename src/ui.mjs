@@ -5,10 +5,12 @@ import { CONTROL_CENTER_SCRIPT } from './control-center-script.mjs';
 import { CONTROL_CENTER_SHELL } from './control-center-shell.mjs';
 import { CONTROL_CENTER_STYLE } from './control-center-style.mjs';
 import { DASHBOARD_POLL_SCRIPT } from './dashboard-poll-script.mjs';
+import { ISSUES_MAP_LAYOUT_UI_SCRIPT } from './issues-map-layout-ui-script.mjs';
 import { MODEL_THINKING_UI_SCRIPT } from './model-thinking-ui-script.mjs';
 import { PR_REVIEW_DASHBOARD_SCRIPT } from './pr-review-dashboard-script.mjs';
 import { PR_REVIEW_DASHBOARD_STYLE } from './pr-review-dashboard-style.mjs';
 import { PR_REVIEW_PANEL } from './pr-review-panel.mjs';
+import { PR_REVIEW_SETTINGS_SAVE_SCRIPT } from './pr-review-settings-save-script.mjs';
 import { PR_REVIEW_SETTINGS_TOGGLE_SCRIPT } from './pr-review-settings-toggle-script.mjs';
 import { SETUP_CATALOG_FEEDBACK_SCRIPT } from './setup-catalog-feedback-script.mjs';
 import { SETUP_CONTROLS_SCRIPT } from './setup-controls-script.mjs';
@@ -152,6 +154,8 @@ ${integratedDashboardShell()}
 <script>${CONTROLLER_ACTIONS_UI_SCRIPT}</script>
 <script>${PR_REVIEW_DASHBOARD_SCRIPT}</script>
 <script>${COMPONENT_CHANGES_UI_SCRIPT}</script>
+<script>${PR_REVIEW_SETTINGS_SAVE_SCRIPT}</script>
+<script>${ISSUES_MAP_LAYOUT_UI_SCRIPT}</script>
 <script>${PR_REVIEW_SETTINGS_TOGGLE_SCRIPT}</script>
 <script>${DASHBOARD_POLL_SCRIPT}</script>
 </body>
