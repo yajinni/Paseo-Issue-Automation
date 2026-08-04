@@ -17,7 +17,7 @@ test('dashboard exposes operations, issue map, activity, settings, and PR review
   assert.match(html, /Issue execution board/);
 });
 
-test('controller actions render one stable action bar without manual dispatch', () => {
+test('controller actions use explicit issue-processing language without manual dispatch', () => {
   const html = dashboardHtml();
   assert.match(html, /id="controller-action-state"/);
   assert.match(html, /id="claims-toggle-button"/);
@@ -28,11 +28,34 @@ test('controller actions render one stable action bar without manual dispatch', 
   assert.match(html, /Controller loading/);
   assert.match(html, /Read-only discovery/);
   assert.match(html, /Setup required/);
-  assert.match(html, /Pause claims/);
-  assert.match(html, /Resume claims/);
+  assert.match(html, /Stop Issues Processing/);
+  assert.match(html, /Resume Issues Processing/);
+  assert.match(html, /Issues Processing unavailable/);
+  assert.match(html, /Issues Processing running/);
+  assert.match(html, /Issues Processing stopped/);
   assert.doesNotMatch(html, /id="resume-button"/);
   assert.doesNotMatch(html, /id="pause-button"/);
   assert.doesNotMatch(html, /classList\.toggle\('hidden', !operational\)/);
+});
+
+test('PR review controls remove redundant refresh and move the review toggle to the top action bar', () => {
+  const html = dashboardHtml();
+  assert.match(html, /refreshButton\.remove\(\)/);
+  assert.match(html, /Force Sync PR States/);
+  assert.match(html, /actionBar\.appendChild\(reviewToggle\)/);
+  assert.match(html, /Resume PR Reviews/);
+  assert.match(html, /Pause PR Reviews/);
+  assert.match(html, /Immediately compare managed pull requests with GitHub/);
+});
+
+test('ChatGPT browser controls show useful state and describe credential reset accurately', () => {
+  const html = dashboardHtml();
+  assert.match(html, /GPT Chat Selected/);
+  assert.match(html, /GPT chat not selected/);
+  assert.match(html, /if \(\/\^Profile:\/\.test\(text\)\)/);
+  assert.match(html, /item\.remove\(\)/);
+  assert.match(html, /Reset ChatGPT Credentials/);
+  assert.match(html, /saved ChatGPT login credentials and local session data/);
 });
 
 test('setup does not hide read-only repository views', () => {
