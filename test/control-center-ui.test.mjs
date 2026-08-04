@@ -37,8 +37,8 @@ test('dashboard presents deterministic controller configuration without an Orche
   assert.match(html, /Issue Execution Controller/);
   assert.match(html, /Coder model/);
   assert.match(html, /Independent Reviewer model/);
-  assert.match(html, /Coder thinking level/);
-  assert.match(html, /Independent Reviewer thinking level/);
+  assert.match(html, /coderThinking/);
+  assert.match(html, /reviewerThinking/);
   assert.doesNotMatch(html, /Orchestrator model/);
 });
 
