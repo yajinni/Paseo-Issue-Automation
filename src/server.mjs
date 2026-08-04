@@ -33,6 +33,8 @@ import {
   runSetupSelfTest,
   setupSnapshot,
 } from './install.mjs';
+import { checkSetupRequirement } from './setup-requirements.mjs';
+import { clearSetupSnapshotCache } from './setup-snapshot.mjs';
 import { loadConfig, repositoryRoot, saveConfig } from './state.mjs';
 import { dispatchSpecificCodingIssue, restartCodingIssue } from './coding-dispatch.mjs';
 import { retryFixJob } from './fix-jobs.mjs';
@@ -90,9 +92,13 @@ function openBrowser(url) {
 }
 
 function combinedSnapshot(root, options = {}) {
-  const snapshot = setupSnapshot(root, { forceDiscovery: options.forceSetupDiscovery === true });
+  const snapshot = setupSnapshot(root, {
+    forceDiscovery: options.forceSetupDiscovery === true,
+    forceRequirements: options.forceSetupRequirements === true,
+    forceIntegration: options.forceSetupDiscovery === true,
+  });
   let automation = null;
-  if (snapshot.requirements.githubAuthenticated) {
+  if (snapshot.config.setupComplete && snapshot.checks.ready && snapshot.requirements.githubAuthenticated) {
     try {
       const basic = { ...automationStatus(root), ...operationalStatus(root) };
       automation = dashboardStatus(root, basic);
@@ -105,7 +111,7 @@ function combinedSnapshot(root, options = {}) {
   return { ...snapshot, automation, prReviews };
 }
 
-export async function startServer({ cwd = process.cwd(), open = false } = {}) {
+export async function startServer({ cwd = process.cwd(), open = false, initialView = null } = {}) {
   const root = repositoryRoot(cwd);
   let codingTimer = null;
   let reviewTimer = null;
@@ -177,9 +183,18 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
         response.end(prReviewDashboardHtml());
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/api/setup/requirement') {
+        const name = String(url.searchParams.get('name') || '');
+        json(response, 200, checkSetupRequirement(root, name, {
+          force: url.searchParams.get('refresh') === '1',
+        }));
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/api/status') {
+        const refresh = url.searchParams.get('refresh');
         json(response, 200, combinedSnapshot(root, {
-          forceSetupDiscovery: url.searchParams.get('refresh') === 'setup',
+          forceSetupDiscovery: refresh === 'setup',
+          forceSetupRequirements: refresh === 'requirements',
         }));
         return;
       }
@@ -284,6 +299,7 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
         json(response, 404, { error: 'Not found' });
         return;
       }
+      clearSetupSnapshotCache(root);
       json(response, 200, { result, snapshot: combinedSnapshot(root) });
     } catch (error) {
       json(response, 400, { error: error.message });
@@ -307,6 +323,6 @@ export async function startServer({ cwd = process.cwd(), open = false } = {}) {
     if (reconciliationTimer) clearTimeout(reconciliationTimer);
     await closeManualBrowser(manualBrowserSession).catch(() => {});
   });
-  if (open) openBrowser(url);
+  if (open) openBrowser(initialView ? `${url}#${encodeURIComponent(initialView)}` : url);
   return { server, root, url };
 }

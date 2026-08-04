@@ -39,6 +39,10 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
   async function efficientRefreshStatus(options) {
     const force = options && options.force === true;
     if (pollInFlight) return dashboardData;
+    if (!initialLoaded && !force && location.hash === '#settings'
+      && typeof window.progressiveSetupRequirements === 'function') {
+      return dashboardData;
+    }
     if (initialLoaded && !force) {
       if (document.hidden) return dashboardData;
       if (Date.now() - lastPollStartedAt < MIN_BACKGROUND_POLL_MS) return dashboardData;

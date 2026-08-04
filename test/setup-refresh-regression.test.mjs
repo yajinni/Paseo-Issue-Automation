@@ -38,19 +38,35 @@ test('normal setup discovery is shallow and does not enumerate provider models',
   assert.equal(calls.some((call) => call.includes('provider models')), false);
 });
 
-test('refresh recovery script renders visible placeholders and always has timeout escapes', () => {
-  assert.match(SETUP_REFRESH_SCRIPT, /Waiting for the first check/);
-  assert.match(SETUP_REFRESH_SCRIPT, /Checking requirements now/);
-  assert.match(SETUP_REFRESH_SCRIPT, /Refreshing setup data/);
-  assert.match(SETUP_REFRESH_SCRIPT, /AbortController/);
-  assert.match(SETUP_REFRESH_SCRIPT, /catalogRefresh \? 25_000 : 12_000/);
-  assert.match(SETUP_REFRESH_SCRIPT, /No button will remain stuck/);
-  assert.match(SETUP_REFRESH_SCRIPT, /button\.disabled = false/);
+test('setup renders each pending requirement and updates it independently', () => {
+  for (const id of ['git', 'githubCli', 'githubAuthenticated', 'paseoCli', 'paseoReachable', 'remote']) {
+    assert.match(SETUP_REFRESH_SCRIPT, new RegExp(`id: '${id}'`));
+  }
+  assert.match(SETUP_REFRESH_SCRIPT, /setup-progress-/);
+  assert.match(SETUP_REFRESH_SCRIPT, /updateProgressRow/);
+  assert.match(SETUP_REFRESH_SCRIPT, /\/api\/setup\/requirement\?name=/);
+  assert.match(SETUP_REFRESH_SCRIPT, /Checking now/);
+  assert.match(SETUP_REFRESH_SCRIPT, /good-text/);
+  assert.match(SETUP_REFRESH_SCRIPT, /bad-text/);
 });
 
-test('refresh recovery script gives requirements and catalog buttons distinct modes', () => {
+test('setup automatically runs catalog discovery after requirements pass', () => {
+  assert.match(SETUP_REFRESH_SCRIPT, /progressiveRequirements\(null, true\)/);
+  assert.match(SETUP_REFRESH_SCRIPT, /fullData\.setupOptions\.catalog\.skipped/);
+  assert.match(SETUP_REFRESH_SCRIPT, /authoritativeRefresh\(document\.getElementById\('refresh-setup-options'\), 'catalog'\)/);
+  assert.match(SETUP_REFRESH_SCRIPT, /\/api\/status\?refresh=setup/);
+  assert.match(SETUP_REFRESH_SCRIPT, /40_000/);
+});
+
+test('catalog status distinguishes not-run, failed, partial, and successful discovery', () => {
+  assert.match(SETUP_REFRESH_SCRIPT, /Harness and model discovery has not run yet/);
+  assert.match(SETUP_REFRESH_SCRIPT, /no usable harnesses were loaded/);
+  assert.match(SETUP_REFRESH_SCRIPT, /Some providers reported problems/);
+  assert.match(SETUP_REFRESH_SCRIPT, /Loaded ' \+ branches \+ ' branches/);
+});
+
+test('requirements and catalog buttons remain distinct', () => {
   assert.match(SETUP_REFRESH_SCRIPT, /requirements-check-again', 'Check again', 'requirements'/);
   assert.match(SETUP_REFRESH_SCRIPT, /refresh-setup-options', 'Refresh branches and models', 'catalog'/);
   assert.match(SETUP_REFRESH_SCRIPT, /requirement-details-recheck', 'Check again', 'requirements'/);
-  assert.match(SETUP_REFRESH_SCRIPT, /refreshValue = catalogRefresh \? 'setup' : 'requirements'/);
 });

@@ -116,7 +116,7 @@ export async function main(argv) {
   const options = argsToObject(argv);
   const command = options._[0] || 'help';
   if (command === 'help' || command === '--help' || command === '-h') { help(); return; }
-  if (command === 'setup') { await startServer({ open: true }); return; }
+  if (command === 'setup') { await startServer({ open: true, initialView: 'settings' }); return; }
   if (command === 'start') { await startServer({ open: false }); return; }
 
   const root = repositoryRoot();

@@ -1,12 +1,17 @@
-import { resolveCommand, runJson } from './process.mjs';
-import { discoverSetupOptions, probePaseo } from './setup-discovery.mjs';
-import { loadConfig, saveConfig } from './state.mjs';
+import { runJson } from './process.mjs';
+import { discoverSetupOptions } from './setup-discovery.mjs';
+import { buildSetupSnapshot, clearSetupSnapshotCache } from './setup-snapshot.mjs';
+import {
+  clearSetupRequirementCache,
+  setupRequirements,
+} from './setup-requirements.mjs';
+import { saveConfig } from './state.mjs';
 import * as legacy from './install-legacy.mjs';
 
 export * from './install-legacy.mjs';
 
 const discoveryCache = new Map();
-const DISCOVERY_CACHE_MS = 60_000;
+const DISCOVERY_CACHE_MS = 5 * 60_000;
 
 function cachedSetupOptions(root, { force = false, paseoOverride = null } = {}) {
   const cached = discoveryCache.get(root);
@@ -25,32 +30,8 @@ function cachedSetupOptions(root, { force = false, paseoOverride = null } = {}) 
   return discovered;
 }
 
-export function requirements(root, existing = null) {
-  const base = existing || legacy.requirements(root);
-  const paseoResolution = resolveCommand('paseo');
-  const paseoCli = paseoResolution.available;
-  const paseo = paseoCli
-    ? probePaseo(root)
-    : {
-        reachable: false,
-        method: 'missing-cli',
-        message: 'Paseo CLI was not found on PATH or in the standard Paseo Desktop installation folders.',
-        status: null,
-        attempts: [],
-      };
-  return {
-    ...base,
-    paseoCli,
-    paseoCommandPath: paseoResolution.path,
-    paseoCommandSource: paseoResolution.source,
-    paseoReachable: paseo.reachable,
-    paseoMessage: paseo.message,
-    paseoProbe: {
-      method: paseo.method,
-      status: paseo.status,
-      attempts: paseo.attempts,
-    },
-  };
+export function requirements(root, _existing = null, options = {}) {
+  return setupRequirements(root, { force: options.force === true });
 }
 
 function paseoOverrideFromRequirements(req) {
@@ -64,39 +45,30 @@ function paseoOverrideFromRequirements(req) {
 }
 
 export function setupSnapshot(root, options = {}) {
-  const snapshot = legacy.setupSnapshot(root);
-  // Reuse the legacy pass's Git/GitHub/remote results. Only Paseo needs the
-  // newer authoritative daemon probe, so do not immediately repeat every
-  // requirement command a second time.
-  const req = requirements(root, snapshot.requirements);
-  const ready = Boolean(
-    req.git
-    && req.githubCli
-    && req.githubAuthenticated
-    && req.paseoCli
-    && req.paseoReachable
-    && req.remote
-    && snapshot.integration.issueTemplate
-    && snapshot.integration.paseoService
-    && snapshot.integration.labelsReady
-    && snapshot.workspace?.id
-    && snapshot.checks.modelsConfigured
-    && snapshot.checks.baseBranchExists,
-  );
+  const force = options.forceDiscovery === true;
+  const req = setupRequirements(root, { force: options.forceRequirements === true });
+  const setupOptions = cachedSetupOptions(root, {
+    force,
+    paseoOverride: paseoOverrideFromRequirements(req),
+  });
+  const snapshot = buildSetupSnapshot(root, {
+    requirements: req,
+    branches: setupOptions.branches?.branches || [],
+    forceIntegration: options.forceIntegration === true || force,
+  });
   return {
     ...snapshot,
-    requirements: req,
-    checks: { ...snapshot.checks, ready },
-    setupOptions: cachedSetupOptions(root, {
-      force: options.forceDiscovery === true,
-      paseoOverride: paseoOverrideFromRequirements(req),
-    }),
+    setupOptions,
     setupCheckedAt: new Date().toISOString(),
   };
 }
 
 export function finishSetup(root) {
-  const snapshot = setupSnapshot(root, { forceDiscovery: true });
+  const snapshot = setupSnapshot(root, {
+    forceDiscovery: true,
+    forceRequirements: true,
+    forceIntegration: true,
+  });
   if (!snapshot.checks.ready) {
     throw new Error('Setup cannot finish until every required setup check passes.');
   }
@@ -104,10 +76,15 @@ export function finishSetup(root) {
 }
 
 export function runSetupSelfTest(root) {
-  const snapshot = setupSnapshot(root, { forceDiscovery: true });
+  const snapshot = setupSnapshot(root, {
+    forceDiscovery: true,
+    forceRequirements: true,
+    forceIntegration: true,
+  });
   const prProbe = runJson('gh', ['pr', 'list', '--state', 'all', '--limit', '1', '--json', 'number,headRefOid'], {
     cwd: root,
     allowFailure: true,
+    timeoutMs: 8_000,
   });
   const checks = [
     ['Git repository and remote', Boolean(snapshot.requirements.git && snapshot.requirements.remote)],
@@ -134,4 +111,6 @@ export function runSetupSelfTest(root) {
 export function clearSetupDiscoveryCache(root) {
   if (root) discoveryCache.delete(root);
   else discoveryCache.clear();
+  clearSetupRequirementCache(root);
+  clearSetupSnapshotCache(root);
 }
