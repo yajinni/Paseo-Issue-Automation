@@ -16,8 +16,15 @@ function normalizeDependency(value) {
   };
 }
 
+export function relationshipNodes(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object' && Array.isArray(value.nodes)) return value.nodes;
+  return null;
+}
+
 export function dependencyNumbers(issue) {
-  if (!Array.isArray(issue?.blockedBy)) {
+  const nodes = relationshipNodes(issue?.blockedBy);
+  if (!nodes) {
     return {
       source: 'native',
       numbers: [],
@@ -26,7 +33,7 @@ export function dependencyNumbers(issue) {
       reason: 'Native GitHub blocked-by relationship data is unavailable. The controller will not infer dependencies from issue-body text.',
     };
   }
-  const dependencies = issue.blockedBy.map(normalizeDependency).filter(Boolean);
+  const dependencies = nodes.map(normalizeDependency).filter(Boolean);
   return {
     source: 'native',
     numbers: dependencies.map((item) => item.number),
