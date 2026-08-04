@@ -29,7 +29,6 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     'Reconcile GitHub': 'Immediately compare managed pull requests with GitHub and process new commits, reviews, checks, merges, and closures.',
     'Resume reviews': 'Allow the serial PR review scheduler to claim the next eligible review job.',
     'Pause reviews': 'Stop new PR review submissions without interrupting an active submission.',
-    'Run now': 'Immediately ask the controller to claim eligible issue work instead of waiting for the next poll.',
     'Reconcile dependencies': 'Immediately refresh native GitHub blocked-by relationships and issue readiness.',
     'Pause claims': 'Stop the controller from claiming new coding work while allowing current work to continue.',
     'Resume claims': 'Allow the controller to claim new eligible coding work again.'

@@ -91,6 +91,14 @@ function openBrowser(url) {
   child.unref();
 }
 
+export function repositoryDiscoveryAvailable(snapshot) {
+  return Boolean(
+    snapshot?.requirements?.git
+    && snapshot?.requirements?.githubAuthenticated
+    && snapshot?.requirements?.remote,
+  );
+}
+
 function combinedSnapshot(root, options = {}) {
   const snapshot = setupSnapshot(root, {
     forceDiscovery: options.forceSetupDiscovery === true,
@@ -98,9 +106,11 @@ function combinedSnapshot(root, options = {}) {
     forceIntegration: options.forceSetupDiscovery === true,
   });
   let automation = null;
-  if (snapshot.config.setupComplete && snapshot.checks.ready && snapshot.requirements.githubAuthenticated) {
+  if (repositoryDiscoveryAvailable(snapshot)) {
     try {
-      const basic = { ...automationStatus(root), ...operationalStatus(root) };
+      const basic = snapshot.config.setupComplete && snapshot.checks.ready
+        ? { ...automationStatus(root), ...operationalStatus(root) }
+        : {};
       automation = dashboardStatus(root, basic);
     } catch {
       automation = null;
@@ -245,7 +255,6 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
         setClaimsEnabled(root, false);
       } else if (url.pathname === '/api/resume') result = setClaimsEnabled(root, true);
       else if (url.pathname === '/api/pause') result = setClaimsEnabled(root, false);
-      else if (url.pathname === '/api/run-now') result = dispatch();
       else if (url.pathname === '/api/pr-reviews/config') {
         result = saveValidatedPrAutomationConfig(root, body);
         resetPrReviewTimers();

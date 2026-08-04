@@ -22,11 +22,15 @@ function issueStatus(issue) {
   return match?.[1] || 'open';
 }
 
-function listByLabel(root, label, { jsonRunner = runJson } = {}) {
-  return jsonRunner('gh', [
-    'issue', 'list', '--state', 'open', '--limit', '100', '--label', label,
+export function repositoryIssueSnapshot(root, { jsonRunner = runJson } = {}) {
+  const result = jsonRunner('gh', [
+    'issue', 'list', '--state', 'open', '--limit', '1000',
     '--json', 'number,title,body,labels,state,stateReason,url,createdAt,blockedBy,blocking',
-  ], { cwd: root, allowFailure: true }) || [];
+  ], { cwd: root, allowFailure: true });
+  return {
+    available: Array.isArray(result),
+    issues: Array.isArray(result) ? result : [],
+  };
 }
 
 export function summarizePrChecks(checks = []) {
@@ -189,11 +193,12 @@ export function dashboardStatus(root, existing = {}, options = {}) {
   const config = loadConfig(root);
   const runtime = loadRuntime(root);
   const skipped = new Set(runtime.skippedIssueNumbers || []);
-  const labelEntries = Object.entries(LABELS).map(([key, label]) => [key, listByLabel(root, label, options)]);
-  const issueMap = new Map();
-  for (const [, list] of labelEntries) {
-    for (const issue of list) issueMap.set(Number(issue.number), issue);
-  }
+  const repository = repositoryIssueSnapshot(root, options);
+  const labelEntries = Object.entries(LABELS).map(([key, label]) => [
+    key,
+    repository.issues.filter((issue) => labelNames(issue).has(label)),
+  ]);
+  const issueMap = new Map(repository.issues.map((issue) => [Number(issue.number), issue]));
   const rawRuns = listRuns(root);
   for (const state of rawRuns) {
     if (!issueMap.has(Number(state.issueNumber))) {
@@ -245,7 +250,8 @@ export function dashboardStatus(root, existing = {}, options = {}) {
     readyIssues: issues.filter((issue) => issue.status === LABELS.ready || issue.status === 'agent-ready'),
     controller: {
       claimsEnabled: runtime.claimsEnabled === true,
-      dependencyApiAvailable: issues.every((issue) => !issue.dependencyUnavailable),
+      repositoryIssueApiAvailable: repository.available,
+      dependencyApiAvailable: repository.available && issues.every((issue) => !issue.dependencyUnavailable),
       pollIntervalSeconds: Number(config.pollIntervalSeconds || 120),
       ...model,
     },
