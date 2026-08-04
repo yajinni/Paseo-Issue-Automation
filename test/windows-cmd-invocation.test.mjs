@@ -12,7 +12,7 @@ test('Windows cmd shims receive the outer quote pair required by cmd /s /c', () 
   assert.deepEqual(invocation.args.slice(0, 4), ['/d', '/s', '/v:off', '/c']);
   assert.equal(
     invocation.args[4],
-    String.raw`""C:\Users\Yajinni\AppData\Local\Programs\Paseo\resources\bin\paseo.cmd" "daemon" "status" "--json""`,
+    String.raw`""C:\Users\Yajinni\AppData\Local\Programs\Paseo\resources\bin\paseo.cmd" "daemon" "status" "--json""`.replaceAll('\\"', '"'),
   );
   assert.doesNotMatch(invocation.args[4], /\\"C:/, 'the executable quote must not be escaped into a literal backslash-quote');
 });
@@ -26,6 +26,6 @@ test('Windows cmd invocation protects spaces in executable paths and arguments',
 
   assert.equal(
     invocation.args[4],
-    String.raw`""C:\Program Files\Paseo\paseo.cmd" "workspace" "create" "--title" "Issue Coding Automation""`,
+    String.raw`""C:\Program Files\Paseo\paseo.cmd" "workspace" "create" "--title" "Issue Coding Automation""`.replaceAll('\\"', '"'),
   );
 });
