@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -110,6 +110,69 @@ export function buildWindowsCmdInvocation(executable, args = [], env = process.e
   };
 }
 
+function findGitMarker(cwd) {
+  let current = path.resolve(cwd || process.cwd());
+  for (;;) {
+    const marker = path.join(current, '.git');
+    if (existsSync(marker)) return marker;
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+function gitCommonDirectory(cwd) {
+  try {
+    const marker = findGitMarker(cwd);
+    if (!marker) return null;
+    let gitDirectory = marker;
+    if (!statSync(marker).isDirectory()) {
+      const match = /^gitdir:\s*(.+)$/im.exec(readFileSync(marker, 'utf8'));
+      if (!match) return null;
+      gitDirectory = path.resolve(path.dirname(marker), match[1].trim());
+    }
+    const commonFile = path.join(gitDirectory, 'commondir');
+    if (!existsSync(commonFile)) return gitDirectory;
+    return path.resolve(gitDirectory, readFileSync(commonFile, 'utf8').trim());
+  } catch {
+    return null;
+  }
+}
+
+function automationConfig(cwd) {
+  try {
+    const commonDirectory = gitCommonDirectory(cwd);
+    if (!commonDirectory) return null;
+    const file = path.join(commonDirectory, 'paseo-issue-automation', 'config.json');
+    if (!existsSync(file)) return null;
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function runRole(args) {
+  const titleIndex = args.indexOf('--title');
+  const title = titleIndex >= 0 ? String(args[titleIndex + 1] || '') : '';
+  if (/\breviewer\b/i.test(title)) return 'reviewer';
+  if (/\bcoder\b|\bfix(?:es)?\b/i.test(title)) return 'coder';
+  return null;
+}
+
+export function paseoRunArgsWithThinking(args = [], options = {}) {
+  const next = [...args];
+  if (next[0] !== 'run' || next.includes('--thinking')) return next;
+  const role = runRole(next);
+  if (!role) return next;
+  const config = options.config || automationConfig(options.cwd);
+  const thinking = String(config?.models?.[`${role}Thinking`] || '').trim();
+  if (!thinking || /\s/.test(thinking)) return next;
+  const providerIndex = next.indexOf('--provider');
+  const insertionIndex = providerIndex >= 0 ? providerIndex + 2 : 1;
+  next.splice(insertionIndex, 0, '--thinking', thinking);
+  return next;
+}
+
 function resolvedSpawn(command, args, options) {
   const env = options.env || process.env;
   const resolution = process.platform === 'win32' && String(command).toLowerCase() === 'paseo'
@@ -129,7 +192,10 @@ function resolvedSpawn(command, args, options) {
 export function run(command, args = [], options = {}) {
   const timeoutMs = commandTimeout(options);
   const env = options.env || process.env;
-  const resolved = resolvedSpawn(command, args, { ...options, env });
+  const effectiveArgs = String(command).toLowerCase() === 'paseo'
+    ? paseoRunArgsWithThinking(args, { cwd: options.cwd })
+    : [...args];
+  const resolved = resolvedSpawn(command, effectiveArgs, { ...options, env });
   const result = spawnSync(resolved.executable, resolved.args, {
     cwd: options.cwd,
     env,
@@ -159,9 +225,9 @@ export function run(command, args = [], options = {}) {
     const detail = timedOut
       ? `timed out after ${timeoutMs}ms`
       : output.stderr || output.stdout || output.error?.message || `exit ${output.exitCode}`;
-    const error = new Error(`${command} ${args.join(' ')} failed: ${detail}`);
+    const error = new Error(`${command} ${effectiveArgs.join(' ')} failed: ${detail}`);
     error.command = command;
-    error.args = [...args];
+    error.args = [...effectiveArgs];
     error.exitCode = output.exitCode;
     error.timedOut = timedOut;
     error.timeoutMs = timeoutMs;
