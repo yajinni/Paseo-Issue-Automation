@@ -1,5 +1,5 @@
 import { runJson } from './process.mjs';
-import { discoverSetupOptions } from './setup-discovery.mjs';
+import { discoverSetupOptions } from './setup-catalog.mjs';
 import { buildSetupSnapshot, clearSetupSnapshotCache } from './setup-snapshot.mjs';
 import {
   clearSetupRequirementCache,
