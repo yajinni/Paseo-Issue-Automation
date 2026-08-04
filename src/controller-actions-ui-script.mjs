@@ -4,6 +4,10 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
     return Boolean(data.config && data.config.setupComplete && data.checks && data.checks.ready);
   }
 
+  function repositoryIsReadable(data) {
+    return Boolean(data.requirements && data.requirements.git && data.requirements.githubAuthenticated && data.requirements.remote);
+  }
+
   function updateActionButton(button, options) {
     if (!button) return;
     button.textContent = options.text;
@@ -27,6 +31,7 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
     const controller = data.automation && data.automation.controller || {};
     const capacity = controller.capacity || { active: 0, maximum: data.config.maxActive };
     const operational = controllerIsOperational(data);
+    const repositoryReadable = repositoryIsReadable(data);
     const claimsEnabled = Boolean(controller.claimsEnabled);
     const dependencyApiAvailable = Boolean(controller.dependencyApiAvailable);
 
@@ -40,17 +45,18 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
     const actionBar = document.getElementById('controller-actions');
     const actionState = document.getElementById('controller-action-state');
     const toggle = document.getElementById('claims-toggle-button');
-    const runNow = document.getElementById('run-now-button');
     const reconcile = document.getElementById('reconcile-button');
 
     if (actionBar) {
       actionBar.classList.remove('hidden');
-      actionBar.dataset.state = operational ? (claimsEnabled ? 'running' : 'paused') : 'setup-required';
+      actionBar.dataset.state = operational ? (claimsEnabled ? 'running' : 'paused') : repositoryReadable ? 'read-only' : 'setup-required';
     }
 
     if (actionState) {
-      actionState.textContent = operational ? (claimsEnabled ? 'Controller running' : 'Controller paused') : 'Setup required';
-      actionState.className = 'chip ' + (operational ? (claimsEnabled ? 'good' : 'warn') : 'bad');
+      actionState.textContent = operational
+        ? (claimsEnabled ? 'Controller running' : 'Controller paused')
+        : repositoryReadable ? 'Read-only discovery' : 'Setup required';
+      actionState.className = 'chip ' + (operational ? (claimsEnabled ? 'good' : 'warn') : repositoryReadable ? 'info' : 'bad');
     }
 
     updateActionButton(toggle, operational ? {
@@ -65,23 +71,18 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
       title: 'Finish setup before enabling claims.',
     });
 
-    updateActionButton(runNow, {
-      text: 'Run now',
-      disabled: !operational,
-      className: 'secondary',
-      title: operational ? 'Run one scheduling pass now.' : 'Finish setup before running the controller.',
-    });
-
     updateActionButton(reconcile, {
       text: 'Reconcile dependencies',
       disabled: !operational || !dependencyApiAvailable,
       className: 'secondary',
-      title: !operational ? 'Finish setup before reconciling dependencies.' : dependencyApiAvailable ? 'Refresh native GitHub dependency relationships.' : 'The native GitHub dependency API is unavailable.',
+      title: !operational ? 'Finish setup before changing issue readiness.' : dependencyApiAvailable ? 'Refresh native GitHub dependency relationships and readiness labels.' : 'The native GitHub dependency API is unavailable.',
     });
 
     document.getElementById('subtitle').textContent = operational
       ? 'Autonomous GitHub issue coding through Paseo · Base ' + data.config.baseBranch
-      : 'Complete setup to enable autonomous issue execution.';
+      : repositoryReadable
+        ? 'Repository issues and native dependencies are available read-only. Complete setup to enable autonomous execution.'
+        : 'Connect the GitHub repository to load issues and dependencies.';
   };
 
   renderHealth = window.renderHealth;
