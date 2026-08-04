@@ -1,4 +1,4 @@
-import { dependencyNumbers, detectDependencyCycles, executionWaves } from './dependencies.mjs';
+import { dependencyNumbers, detectDependencyCycles, executionWaves, relationshipNodes } from './dependencies.mjs';
 import { activeFixJobs } from './fix-jobs.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { LABELS, listRuns, loadConfig, loadRuntime } from './state.mjs';
@@ -221,7 +221,7 @@ export function dashboardStatus(root, existing = {}, options = {}) {
       phase: attempt?.phase || null,
       dependencies: declared.numbers,
       dependencyUnavailable: declared.unavailable === true,
-      blocking: Array.isArray(issue.blocking) ? issue.blocking.map((item) => Number(item.number)).filter(Number.isInteger) : [],
+      blocking: (relationshipNodes(issue.blocking) || []).map((item) => Number(item.number)).filter(Number.isInteger),
       skipped: skipped.has(Number(issue.number)),
       branchExists: existingReadyByIssue.get(Number(issue.number))?.branchExists === true,
       branch: attempt?.branch || null,
