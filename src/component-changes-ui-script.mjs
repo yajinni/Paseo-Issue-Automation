@@ -1,7 +1,7 @@
 export function shouldInstallSystemBrowserDependencies(data, requirementsText = '') {
   const modulePath = String(data?.browser?.library?.modulePath || '');
   const combined = `${modulePath}\n${requirementsText}`;
-  if (/^[A-Za-z]:[\\/]/m.test(combined)) return false;
+  if (/[A-Za-z]:[\\/]/.test(combined)) return false;
   if (/\/Users\//.test(combined) || /\/Applications\//.test(combined)) return false;
   return true;
 }
@@ -18,7 +18,7 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     'Finish setup': 'Mark setup complete after every required check and component is ready.',
     'Save settings': 'Save the PR review configuration for this project only.',
     'Install Chromium': 'Install the Playwright Chromium browser and automatically add operating-system dependencies when the server requires them.',
-    'Launch browser': 'Open the dedicated ChatGPT browser profile so you can sign in and choose this project\'s review conversation.',
+    'Launch browser': 'Open the dedicated ChatGPT browser profile so you can sign in and choose the review conversation for this project.',
     'Use current conversation': 'Save the currently open ChatGPT conversation as the review destination for this project only.',
     'Test destination': 'Open the saved project conversation and verify that ChatGPT is authenticated and its message composer is available without sending a message.',
     'Send harmless test': 'Verify the saved project conversation and send a small test message asking ChatGPT to reply with OK.',
