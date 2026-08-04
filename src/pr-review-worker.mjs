@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { browserPaths, loadBrowserConfig } from './browser-profile.mjs';
+import { browserPaths } from './browser-profile.mjs';
 import { releaseLease, startLeaseHeartbeat } from './durable-lease.mjs';
 import { submitReviewPrompt } from './browser-service.mjs';
 import { findManaged, findReviewJob, loadPrReviewStore } from './pr-review-store.mjs';
@@ -10,17 +10,15 @@ import { PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
 
 const GLOBAL_REVIEW_TTL_MS = 180_000;
 
-export function resolveConversationUrl(store, managed, job, globalConfig = loadBrowserConfig()) {
+export function resolveConversationUrl(store, managed, job) {
   return job.conversationUrlOverride
     || managed.conversationUrlOverride
     || store.config.browserReview.projectConversationUrl
-    || globalConfig.globalConversationUrl
     || null;
 }
 
 export async function executeReviewSubmission(root, jobId, {
   submitter = submitReviewPrompt,
-  globalConfig = loadBrowserConfig(),
 } = {}) {
   const store = loadPrReviewStore(root);
   const job = findReviewJob(store, jobId);
@@ -29,8 +27,8 @@ export async function executeReviewSubmission(root, jobId, {
   const managed = findManaged(store, job.managedPullRequestId);
   if (!managed) throw new Error(`Managed PR ${job.managedPullRequestId} was not found.`);
   if (managed.currentHeadSha !== job.headSha) throw new Error('The PR head changed before browser submission began.');
-  const conversationUrl = resolveConversationUrl(store, managed, job, globalConfig);
-  if (!conversationUrl) throw new Error('No ChatGPT conversation is configured for this PR, project, or global profile.');
+  const conversationUrl = resolveConversationUrl(store, managed, job);
+  if (!conversationUrl) throw new Error('No ChatGPT conversation is configured for this PR or project.');
   const prompt = renderReviewPrompt({
     template: store.config.browserReview.reviewPromptTemplate,
     reviewPromptVersion: job.promptVersion,
