@@ -7,6 +7,7 @@ import { DASHBOARD_POLL_SCRIPT } from './dashboard-poll-script.mjs';
 import { PR_REVIEW_DASHBOARD_SCRIPT } from './pr-review-dashboard-script.mjs';
 import { PR_REVIEW_DASHBOARD_STYLE } from './pr-review-dashboard-style.mjs';
 import { PR_REVIEW_PANEL } from './pr-review-panel.mjs';
+import { SETUP_CATALOG_FEEDBACK_SCRIPT } from './setup-catalog-feedback-script.mjs';
 import { SETUP_CONTROLS_SCRIPT } from './setup-controls-script.mjs';
 import { SETUP_REFRESH_SCRIPT } from './setup-refresh-script.mjs';
 
@@ -136,6 +137,7 @@ ${integratedDashboardShell()}
 <script>${CONTROL_CENTER_SCRIPT_WITHOUT_MAINTENANCE}</script>
 <script>${SETUP_CONTROLS_SCRIPT}</script>
 <script>${SETUP_REFRESH_SCRIPT}</script>
+<script>${SETUP_CATALOG_FEEDBACK_SCRIPT}</script>
 <script>${COMPONENTS_UI_SCRIPT}</script>
 <script>${CONTROLLER_ACTIONS_UI_SCRIPT}</script>
 <script>${PR_REVIEW_DASHBOARD_SCRIPT}</script>
