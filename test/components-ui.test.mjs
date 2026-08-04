@@ -47,6 +47,9 @@ test('maintenance tab and maintenance controls are not rendered', () => {
   assert.doesNotMatch(html, /Guided uninstall/);
   assert.doesNotMatch(html, /Remove safe labels/);
   assert.doesNotMatch(html, /Force remove all/);
+  assert.doesNotMatch(html, /function uninstallPayload/);
+  assert.doesNotMatch(html, /state-path/);
+  assert.doesNotMatch(html, /npm-uninstall-command/);
 });
 
 test('component action switches to safe component-only uninstall when healthy', () => {
