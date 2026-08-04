@@ -5,12 +5,16 @@ import {
   detectDependencyCycles,
   evaluateIssueDependencies,
   executionWaves,
+  relationshipNodes,
 } from '../src/dependencies.mjs';
 
-test('native dependencies are the only dependency source', () => {
+test('native dependencies accept the GitHub CLI connection shape', () => {
   const issue = {
     body: 'Blocked by #99',
-    blockedBy: [{ number: 12, title: 'Foundation', state: 'OPEN' }],
+    blockedBy: {
+      nodes: [{ number: 12, title: 'Foundation', state: 'OPEN' }],
+      totalCount: 1,
+    },
   };
   assert.deepEqual(dependencyNumbers(issue), {
     source: 'native',
@@ -26,6 +30,17 @@ test('native dependencies are the only dependency source', () => {
     unavailable: false,
     reason: null,
   });
+});
+
+test('legacy array relationship fixtures remain supported', () => {
+  assert.deepEqual(relationshipNodes([{ number: 12 }]), [{ number: 12 }]);
+  assert.deepEqual(dependencyNumbers({ blockedBy: [{ number: 12 }] }).numbers, [12]);
+});
+
+test('an empty GitHub CLI relationship connection is available with no dependencies', () => {
+  const result = dependencyNumbers({ blockedBy: { nodes: [], totalCount: 0 } });
+  assert.equal(result.unavailable, false);
+  assert.deepEqual(result.numbers, []);
 });
 
 test('issue-body dependency text is never used as a fallback', () => {
@@ -56,7 +71,10 @@ test('closed coding dependencies require a merged PR present in the base branch'
   const issue = {
     number: 20,
     body: '',
-    blockedBy: [{ number: 10, title: 'Foundation', state: 'CLOSED' }],
+    blockedBy: {
+      nodes: [{ number: 10, title: 'Foundation', state: 'CLOSED' }],
+      totalCount: 1,
+    },
   };
   const jsonRunner = (command, args) => {
     const joined = args.join(' ');
@@ -93,7 +111,10 @@ test('closed without merged implementation does not unlock downstream work', () 
   const issue = {
     number: 20,
     body: '',
-    blockedBy: [{ number: 10, title: 'Foundation', state: 'CLOSED' }],
+    blockedBy: {
+      nodes: [{ number: 10, title: 'Foundation', state: 'CLOSED' }],
+      totalCount: 1,
+    },
   };
   const jsonRunner = (command, args) => {
     if (args.join(' ').includes('issue view 10')) {
