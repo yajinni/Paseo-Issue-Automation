@@ -20,3 +20,12 @@ test('dashboard installs the Issues Map layout script', () => {
   assert.match(html, /issues-map-layout-style/);
   assert.match(html, /issues-map-primary/);
 });
+
+test('PR browser configuration exposes only the project conversation action', () => {
+  const html = dashboardHtml();
+  assert.match(html, />Use current conversation<\/button>/);
+  assert.match(html, /browser\/use-current'\),\{scope:'project'\}/);
+  assert.doesNotMatch(html, /Use current for project/);
+  assert.doesNotMatch(html, /Use current globally/);
+  assert.doesNotMatch(html, /scope:'global'/);
+});
