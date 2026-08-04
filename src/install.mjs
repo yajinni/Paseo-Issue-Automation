@@ -44,6 +44,17 @@ function paseoOverrideFromRequirements(req) {
   };
 }
 
+function synchronizeSetupCompletion(root, snapshot) {
+  const setupComplete = snapshot.checks.ready === true;
+  if (snapshot.config.setupComplete === setupComplete) return snapshot;
+  const config = saveConfig(root, {
+    ...snapshot.config,
+    setupComplete,
+    workspace: snapshot.workspace || snapshot.config.workspace,
+  });
+  return { ...snapshot, config };
+}
+
 export function setupSnapshot(root, options = {}) {
   const force = options.forceDiscovery === true;
   const req = setupRequirements(root, { force: options.forceRequirements === true });
@@ -51,11 +62,11 @@ export function setupSnapshot(root, options = {}) {
     force,
     paseoOverride: paseoOverrideFromRequirements(req),
   });
-  const snapshot = buildSetupSnapshot(root, {
+  const snapshot = synchronizeSetupCompletion(root, buildSetupSnapshot(root, {
     requirements: req,
     branches: setupOptions.branches?.branches || [],
     forceIntegration: options.forceIntegration === true || force,
-  });
+  }));
   return {
     ...snapshot,
     setupOptions,
@@ -63,6 +74,8 @@ export function setupSnapshot(root, options = {}) {
   };
 }
 
+// Retained for compatibility with older clients. Setup completion is now
+// synchronized automatically whenever the setup snapshot is evaluated.
 export function finishSetup(root) {
   const snapshot = setupSnapshot(root, {
     forceDiscovery: true,
@@ -72,7 +85,7 @@ export function finishSetup(root) {
   if (!snapshot.checks.ready) {
     throw new Error('Setup cannot finish until every required setup check passes.');
   }
-  return saveConfig(root, { ...snapshot.config, setupComplete: true, workspace: snapshot.workspace });
+  return snapshot.config;
 }
 
 export function runSetupSelfTest(root) {
