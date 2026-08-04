@@ -193,24 +193,6 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     return window.prReviewPost('/api/pr-reviews/browser/install', { withSystemDependencies });
   };
 
-  const originalSave = window.savePrReviewSettings;
-  window.savePrReviewSettings = function() {
-    const ids = ['pr-debounce', 'pr-active-interval', 'pr-idle-interval'];
-    const originalValues = ids.map(function(id) { return document.getElementById(id)?.value; });
-    ids.forEach(function(id) {
-      const input = document.getElementById(id);
-      if (input) input.value = String(Math.round(Number(input.value || 0) * 1000));
-    });
-    try {
-      return originalSave();
-    } finally {
-      ids.forEach(function(id, index) {
-        const input = document.getElementById(id);
-        if (input) input.value = originalValues[index];
-      });
-    }
-  };
-
   const originalRefresh = window.refreshPrReviews;
   window.refreshPrReviews = function(force) {
     return Promise.resolve(originalRefresh(force)).then(function(data) {
