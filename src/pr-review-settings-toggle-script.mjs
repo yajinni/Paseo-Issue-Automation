@@ -52,7 +52,7 @@ export const PR_REVIEW_SETTINGS_TOGGLE_SCRIPT = String.raw`
     }
 
     if (!document.getElementById('automatic-pr-review-card')) {
-      container.innerHTML = [
+      container.insertAdjacentHTML('afterbegin', [
         '<article class="card" id="automatic-pr-review-card">',
         '<label class="automatic-pr-review-toggle" title="Enable or disable automatic ChatGPT review for pull requests created by this project.">',
         '<input id="automatic-pr-review-enabled" type="checkbox" role="switch" aria-controls="pr-review-settings-grid">',
@@ -60,16 +60,23 @@ export const PR_REVIEW_SETTINGS_TOGGLE_SCRIPT = String.raw`
         '<span class="automatic-pr-review-copy"><strong>Automatic PR Review With ChatGPT</strong><small>When enabled, Paseo queues pull requests from this project for review using its dedicated ChatGPT browser.</small></span>',
         '</label>',
         '<p id="automatic-pr-review-status" aria-live="polite">Loading PR review status…</p>',
-        '</article>',
-        '<div class="grid two" id="pr-review-settings-grid" hidden></div>'
-      ].join('');
+        '</article>'
+      ].join(''));
     }
 
-    const grid = document.getElementById('pr-review-settings-grid');
+    let grid = document.getElementById('pr-review-settings-grid');
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.className = 'grid two';
+      grid.id = 'pr-review-settings-grid';
+      grid.hidden = true;
+      container.appendChild(grid);
+    }
+
     const projectCard = projectSettingsCard();
     const browserCard = browserSettingsCard();
-    if (grid && projectCard && projectCard.parentElement !== grid) grid.appendChild(projectCard);
-    if (grid && browserCard && browserCard.parentElement !== grid) grid.appendChild(browserCard);
+    if (projectCard && projectCard.parentElement !== grid) grid.appendChild(projectCard);
+    if (browserCard && browserCard.parentElement !== grid) grid.appendChild(browserCard);
     hideLegacyEnableControls();
 
     const toggle = document.getElementById('automatic-pr-review-enabled');
