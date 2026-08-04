@@ -1,8 +1,8 @@
 import { run } from './process.mjs';
 
-const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
-const DEFAULT_CATALOG_COMMAND_TIMEOUT_MS = 4_000;
-const DEFAULT_CATALOG_TOTAL_TIMEOUT_MS = 12_000;
+const DEFAULT_PROBE_TIMEOUT_MS = 6_000;
+const DEFAULT_CATALOG_COMMAND_TIMEOUT_MS = 12_000;
+const DEFAULT_CATALOG_TOTAL_TIMEOUT_MS = 35_000;
 
 function parseJsonOutput(output) {
   const text = String(output || '').trim();
@@ -36,7 +36,7 @@ function normalizedEnabled(value) {
 
 function normalizedAvailable(value) {
   const text = String(value ?? '').trim().toLowerCase();
-  return ['ready', 'available', 'connected', 'enabled'].includes(text);
+  return !['error', 'unavailable', 'disabled'].includes(text);
 }
 
 export function probePaseo(root, { runner = run, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS } = {}) {
@@ -135,6 +135,9 @@ function providerRows(data) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.data)) return data.data;
   if (Array.isArray(data?.entries)) return data.entries;
+  if (Array.isArray(data?.providers)) return data.providers;
+  if (Array.isArray(data?.result?.data)) return data.result.data;
+  if (Array.isArray(data?.result?.entries)) return data.result.entries;
   return [];
 }
 
@@ -142,6 +145,9 @@ function modelRows(data) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.data)) return data.data;
   if (Array.isArray(data?.models)) return data.models;
+  if (Array.isArray(data?.entries)) return data.entries;
+  if (Array.isArray(data?.result?.data)) return data.result.data;
+  if (Array.isArray(data?.result?.models)) return data.result.models;
   return [];
 }
 
@@ -162,17 +168,30 @@ export function discoverPaseoCatalog(root, {
     return {
       providers: [],
       errors: [commandMessage(listed.result, 'Could not list Paseo providers.')],
+      skipped: false,
       complete: false,
       elapsedMs: Date.now() - startedAt,
     };
   }
 
+  const rows = providerRows(listed.data);
   const providers = [];
   const errors = [];
-  const eligible = providerRows(listed.data).filter((row) => {
+  if (!rows.length) errors.push('Paseo provider ls returned no provider records.');
+
+  const eligible = rows.filter((row) => {
     const id = String(row.provider || row.id || '').trim();
     return id && normalizedEnabled(row.enabled) && normalizedAvailable(row.status);
   });
+
+  const excluded = rows.filter((row) => {
+    const id = String(row.provider || row.id || '').trim();
+    return id && !eligible.includes(row);
+  });
+  for (const row of excluded) {
+    const id = String(row.provider || row.id || '').trim();
+    errors.push(`${id}: provider is ${String(row.status || 'unavailable')} and ${normalizedEnabled(row.enabled) ? 'enabled' : 'disabled'}.`);
+  }
 
   for (const row of eligible) {
     const id = String(row.provider || row.id || '').trim();
@@ -180,7 +199,7 @@ export function discoverPaseoCatalog(root, {
       errors.push(`Catalog refresh reached its ${totalTimeoutMs}ms safety limit before ${id} could be queried.`);
       break;
     }
-    const modelsResult = runJsonCommand(runner, 'paseo', ['provider', 'models', id, '--json'], {
+    const modelsResult = runJsonCommand(runner, 'paseo', ['provider', 'models', id, '--thinking', '--json'], {
       cwd: root,
       timeoutMs: commandTimeout(),
     });
@@ -218,14 +237,16 @@ export function discoverPaseoCatalog(root, {
       defaultMode: row.defaultMode || row.defaultModeId || null,
       modes: row.modes || [],
       models,
-      error: null,
+      error: models.length ? null : `${id}: Paseo reported no models.`,
     });
+    if (!models.length) errors.push(`${id}: Paseo reported no models.`);
   }
 
   providers.sort((left, right) => left.label.localeCompare(right.label));
   return {
     providers,
     errors,
+    skipped: false,
     complete: providers.length === eligible.length && errors.length === 0,
     elapsedMs: Date.now() - startedAt,
   };
