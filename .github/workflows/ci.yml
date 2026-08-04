@@ -23,6 +23,17 @@ jobs:
       - run: npm run check
       - run: npm pack --dry-run
 
+  windows-cmd:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Execute Windows cmd shim regression
+        run: node --test test/windows-cmd-invocation.test.mjs
+      - run: npm run check
+
   packed-install:
     runs-on: ubuntu-latest
     steps:
