@@ -98,13 +98,15 @@ function quoteCmdArgument(value) {
 }
 
 export function buildWindowsCmdInvocation(executable, args = [], env = process.env) {
-  const inner = [executable, ...args].map(quoteCmdArgument).join(' ');
-  // With `cmd /s /c`, a quoted executable must be wrapped in a second pair
-  // of quotes so cmd removes only the outer pair and preserves the path quotes.
-  const commandLine = `"${inner}"`;
+  const commandLine = `call ${[executable, ...args].map(quoteCmdArgument).join(' ')}`;
   return {
     executable: env.ComSpec || env.COMSPEC || 'cmd.exe',
     args: ['/d', '/s', '/v:off', '/c', commandLine],
+    // Node otherwise re-escapes the quotes in the /c payload before handing it
+    // to cmd.exe. Passing the command line verbatim keeps the quoted path and
+    // arguments intact. Starting with `call` also avoids cmd's special handling
+    // for a /c payload whose first character is a quote.
+    windowsVerbatimArguments: true,
   };
 }
 
@@ -133,6 +135,7 @@ export function run(command, args = [], options = {}) {
     env,
     encoding: 'utf8',
     windowsHide: true,
+    windowsVerbatimArguments: resolved.windowsVerbatimArguments === true,
     stdio: options.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
     timeout: timeoutMs,
     killSignal: 'SIGTERM',
