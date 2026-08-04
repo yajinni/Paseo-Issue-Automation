@@ -1,6 +1,7 @@
 import { CONTROL_CENTER_SCRIPT } from './control-center-script.mjs';
 import { CONTROL_CENTER_SHELL } from './control-center-shell.mjs';
 import { CONTROL_CENTER_STYLE } from './control-center-style.mjs';
+import { DASHBOARD_POLL_SCRIPT } from './dashboard-poll-script.mjs';
 import { SETUP_CONTROLS_SCRIPT } from './setup-controls-script.mjs';
 import { SETUP_REFRESH_SCRIPT } from './setup-refresh-script.mjs';
 
@@ -26,6 +27,7 @@ ${shellWithPrReviews()}
 <script>${CONTROL_CENTER_SCRIPT}</script>
 <script>${SETUP_CONTROLS_SCRIPT}</script>
 <script>${SETUP_REFRESH_SCRIPT}</script>
+<script>${DASHBOARD_POLL_SCRIPT}</script>
 </body>
 </html>`;
 }
