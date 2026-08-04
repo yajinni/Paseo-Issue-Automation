@@ -7,30 +7,33 @@ function source(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
+function componentsPanel() {
+  return dashboardHtml().match(/<article class="card setup-step" id="installation-card"[\s\S]*?<\/article>/)?.[0] || '';
+}
+
 test('settings renders one compact Components panel without the JSON preview', () => {
-  const html = dashboardHtml();
+  const panel = componentsPanel();
 
-  assert.match(html, /<h2>Components<\/h2>/);
-  assert.match(html, /id="components-action"[^>]*>Install components<\/button>/);
-  assert.doesNotMatch(html, /Refresh preview/);
-  assert.doesNotMatch(html, /Install shown components/);
-  assert.doesNotMatch(html, /<pre id="install-preview"/);
+  assert.match(panel, /<h2>Components<\/h2>/);
+  assert.match(panel, /id="components-action"[^>]*>Install components<\/button>/);
+  assert.doesNotMatch(panel, /Refresh preview/);
+  assert.doesNotMatch(panel, /Install shown components/);
+  assert.doesNotMatch(panel, /<pre id="install-preview"/);
 
-  assert.match(html, /id="component-issue-template"/);
-  assert.match(html, /id="component-paseo-service"/);
-  assert.match(html, /id="component-github-labels"/);
-  assert.match(html, /id="component-workspace"/);
-  assert.equal((html.match(/>Reinstall<\/button>/g) || []).length, 4);
+  assert.match(panel, /id="component-issue-template"/);
+  assert.match(panel, /id="component-paseo-service"/);
+  assert.match(panel, /id="component-github-labels"/);
+  assert.match(panel, /id="component-workspace"/);
+  assert.equal((panel.match(/>Reinstall<\/button>/g) || []).length, 4);
 });
 
 test('GitHub labels are summarized as one status card', () => {
-  const html = dashboardHtml();
-  const componentsPanel = html.match(/<article class="card setup-step" id="installation-card"[\s\S]*?<\/article>/)?.[0] || '';
+  const panel = componentsPanel();
 
-  assert.match(componentsPanel, /<strong>GitHub lifecycle labels<\/strong>/);
-  assert.equal((componentsPanel.match(/id="component-github-labels"/g) || []).length, 1);
-  assert.doesNotMatch(componentsPanel, /Remove label/);
-  assert.doesNotMatch(componentsPanel, /Install or repair missing labels/);
+  assert.match(panel, /<strong>GitHub lifecycle labels<\/strong>/);
+  assert.equal((panel.match(/id="component-github-labels"/g) || []).length, 1);
+  assert.doesNotMatch(panel, /Remove label/);
+  assert.doesNotMatch(panel, /Install or repair missing labels/);
 });
 
 test('component action switches to safe component-only uninstall when healthy', () => {
