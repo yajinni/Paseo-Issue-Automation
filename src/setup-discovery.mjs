@@ -1,5 +1,9 @@
 import { run } from './process.mjs';
 
+const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
+const DEFAULT_CATALOG_COMMAND_TIMEOUT_MS = 4_000;
+const DEFAULT_CATALOG_TOTAL_TIMEOUT_MS = 12_000;
+
 function parseJsonOutput(output) {
   const text = String(output || '').trim();
   if (!text) return null;
@@ -15,6 +19,7 @@ function parseJsonOutput(output) {
 }
 
 function commandMessage(result, fallback) {
+  if (result?.timedOut) return `${fallback || 'Command'} timed out after ${result.timeoutMs}ms.`;
   return String(result?.stderr || result?.stdout || result?.error?.message || fallback || '').trim();
 }
 
@@ -34,9 +39,9 @@ function normalizedAvailable(value) {
   return ['ready', 'available', 'connected', 'enabled'].includes(text);
 }
 
-export function probePaseo(root, { runner = run } = {}) {
+export function probePaseo(root, { runner = run, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS } = {}) {
   const attempts = [];
-  const daemon = runJsonCommand(runner, 'paseo', ['daemon', 'status', '--json'], { cwd: root, timeoutMs: 15_000 });
+  const daemon = runJsonCommand(runner, 'paseo', ['daemon', 'status', '--json'], { cwd: root, timeoutMs });
   attempts.push({ command: 'paseo daemon status --json', ok: daemon.result?.ok === true, message: commandMessage(daemon.result) });
 
   if (daemon.data && typeof daemon.data === 'object' && !Array.isArray(daemon.data)) {
@@ -56,13 +61,12 @@ export function probePaseo(root, { runner = run } = {}) {
     }
   }
 
-  // Compatibility probes for Paseo versions that predate `daemon status --json`.
   const fallbacks = [
     ['workspace', 'ls', '--json'],
     ['ls', '-a', '-g', '--json'],
   ];
   for (const args of fallbacks) {
-    const probe = runJsonCommand(runner, 'paseo', args, { cwd: root, timeoutMs: 15_000 });
+    const probe = runJsonCommand(runner, 'paseo', args, { cwd: root, timeoutMs });
     attempts.push({ command: `paseo ${args.join(' ')}`, ok: probe.result?.ok === true, message: commandMessage(probe.result) });
     if (probe.result?.ok && probe.data !== null) {
       return {
@@ -94,9 +98,9 @@ function branchLines(result) {
 }
 
 export function discoverBranches(root, { runner = run } = {}) {
-  const currentResult = runner('git', ['branch', '--show-current'], { cwd: root, allowFailure: true });
-  const localResult = runner('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], { cwd: root, allowFailure: true });
-  const remoteResult = runner('git', ['for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin'], { cwd: root, allowFailure: true });
+  const currentResult = runner('git', ['branch', '--show-current'], { cwd: root, allowFailure: true, timeoutMs: 5_000 });
+  const localResult = runner('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], { cwd: root, allowFailure: true, timeoutMs: 5_000 });
+  const remoteResult = runner('git', ['for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin'], { cwd: root, allowFailure: true, timeoutMs: 5_000 });
   const current = currentResult?.ok ? String(currentResult.stdout || '').trim() : '';
   const records = new Map();
 
@@ -141,32 +145,54 @@ function modelRows(data) {
   return [];
 }
 
-export function discoverPaseoCatalog(root, { runner = run } = {}) {
-  const listed = runJsonCommand(runner, 'paseo', ['provider', 'ls', '--json'], { cwd: root, timeoutMs: 30_000 });
+export function discoverPaseoCatalog(root, {
+  runner = run,
+  commandTimeoutMs = DEFAULT_CATALOG_COMMAND_TIMEOUT_MS,
+  totalTimeoutMs = DEFAULT_CATALOG_TOTAL_TIMEOUT_MS,
+} = {}) {
+  const startedAt = Date.now();
+  const remaining = () => Math.max(0, totalTimeoutMs - (Date.now() - startedAt));
+  const commandTimeout = () => Math.max(1, Math.min(commandTimeoutMs, remaining()));
+
+  const listed = runJsonCommand(runner, 'paseo', ['provider', 'ls', '--json'], {
+    cwd: root,
+    timeoutMs: commandTimeout(),
+  });
   if (!listed.result?.ok || !listed.data) {
     return {
       providers: [],
       errors: [commandMessage(listed.result, 'Could not list Paseo providers.')],
+      complete: false,
+      elapsedMs: Date.now() - startedAt,
     };
   }
 
   const providers = [];
   const errors = [];
-  for (const row of providerRows(listed.data)) {
+  const eligible = providerRows(listed.data).filter((row) => {
     const id = String(row.provider || row.id || '').trim();
-    if (!id || !normalizedEnabled(row.enabled) || !normalizedAvailable(row.status)) continue;
+    return id && normalizedEnabled(row.enabled) && normalizedAvailable(row.status);
+  });
+
+  for (const row of eligible) {
+    const id = String(row.provider || row.id || '').trim();
+    if (remaining() <= 0) {
+      errors.push(`Catalog refresh reached its ${totalTimeoutMs}ms safety limit before ${id} could be queried.`);
+      break;
+    }
     const modelsResult = runJsonCommand(runner, 'paseo', ['provider', 'models', id, '--json'], {
       cwd: root,
-      timeoutMs: 60_000,
+      timeoutMs: commandTimeout(),
     });
     if (!modelsResult.result?.ok || !modelsResult.data) {
-      errors.push(`${id}: ${commandMessage(modelsResult.result, 'Could not list models.')}`);
+      const error = `${id}: ${commandMessage(modelsResult.result, 'Could not list models.')}`;
+      errors.push(error);
       providers.push({
         id,
         label: String(row.label || id),
         status: String(row.status || 'available'),
         models: [],
-        error: errors.at(-1),
+        error,
       });
       continue;
     }
@@ -197,15 +223,31 @@ export function discoverPaseoCatalog(root, { runner = run } = {}) {
   }
 
   providers.sort((left, right) => left.label.localeCompare(right.label));
-  return { providers, errors };
+  return {
+    providers,
+    errors,
+    complete: providers.length === eligible.length && errors.length === 0,
+    elapsedMs: Date.now() - startedAt,
+  };
 }
 
 export function discoverSetupOptions(root, options = {}) {
-  const paseo = probePaseo(root, options);
+  const paseo = options.paseoOverride || probePaseo(root, options);
   const branches = discoverBranches(root, options);
-  const catalog = paseo.reachable
-    ? discoverPaseoCatalog(root, options)
-    : { providers: [], errors: [paseo.message] };
+  let catalog;
+  if (!options.includeCatalog) {
+    catalog = {
+      providers: [],
+      errors: paseo.reachable ? [] : [paseo.message],
+      skipped: true,
+      complete: false,
+      elapsedMs: 0,
+    };
+  } else {
+    catalog = paseo.reachable
+      ? discoverPaseoCatalog(root, options)
+      : { providers: [], errors: [paseo.message], skipped: false, complete: false, elapsedMs: 0 };
+  }
   return {
     generatedAt: new Date().toISOString(),
     paseo,

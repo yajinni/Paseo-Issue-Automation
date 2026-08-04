@@ -1,4 +1,4 @@
-import { commandAvailable, resolveCommand, runJson } from './process.mjs';
+import { resolveCommand, runJson } from './process.mjs';
 import { discoverSetupOptions, probePaseo } from './setup-discovery.mjs';
 import { loadConfig, saveConfig } from './state.mjs';
 import * as legacy from './install-legacy.mjs';
@@ -8,12 +8,21 @@ export * from './install-legacy.mjs';
 const discoveryCache = new Map();
 const DISCOVERY_CACHE_MS = 60_000;
 
-function cachedSetupOptions(root, { force = false } = {}) {
+function cachedSetupOptions(root, { force = false, paseoOverride = null } = {}) {
   const cached = discoveryCache.get(root);
   if (!force && cached && Date.now() - cached.at < DISCOVERY_CACHE_MS) return cached.value;
-  const value = discoverSetupOptions(root);
-  discoveryCache.set(root, { at: Date.now(), value });
-  return value;
+
+  const discovered = discoverSetupOptions(root, {
+    includeCatalog: force,
+    paseoOverride,
+  });
+
+  if (!force && cached?.value?.catalog && !cached.value.catalog.skipped) {
+    discovered.catalog = cached.value.catalog;
+  }
+
+  discoveryCache.set(root, { at: Date.now(), value: discovered });
+  return discovered;
 }
 
 export function requirements(root) {
@@ -44,6 +53,16 @@ export function requirements(root) {
   };
 }
 
+function paseoOverrideFromRequirements(req) {
+  return {
+    reachable: req.paseoReachable === true,
+    method: req.paseoProbe?.method || 'unknown',
+    message: req.paseoMessage || 'No Paseo diagnostic is available.',
+    status: req.paseoProbe?.status || null,
+    attempts: Array.isArray(req.paseoProbe?.attempts) ? req.paseoProbe.attempts : [],
+  };
+}
+
 export function setupSnapshot(root, options = {}) {
   const snapshot = legacy.setupSnapshot(root);
   const req = requirements(root);
@@ -65,7 +84,10 @@ export function setupSnapshot(root, options = {}) {
     ...snapshot,
     requirements: req,
     checks: { ...snapshot.checks, ready },
-    setupOptions: cachedSetupOptions(root, { force: options.forceDiscovery === true }),
+    setupOptions: cachedSetupOptions(root, {
+      force: options.forceDiscovery === true,
+      paseoOverride: paseoOverrideFromRequirements(req),
+    }),
     setupCheckedAt: new Date().toISOString(),
   };
 }
