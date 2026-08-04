@@ -173,10 +173,10 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
   function tooltipFor(node) {
     const text = textOf(node);
     if (!text) return '';
-    if (node.matches('button')) return BUTTON_HELP[text] || `${text}. This action applies to the current project dashboard.`;
+    if (node.matches('button')) return BUTTON_HELP[text] || text + '. This action applies to the current project dashboard.';
     const cardHead = node.closest('.card-head, .split-header');
     const description = textOf(cardHead?.querySelector('p'));
-    return description || `${text}. Open this section to review its current-project status and controls.`;
+    return description || text + '. Open this section to review its current-project status and controls.';
   }
 
   function applyHelp(root) {
