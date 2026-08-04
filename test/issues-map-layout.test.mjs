@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ISSUES_MAP_LAYOUT_UI_SCRIPT } from '../src/issues-map-layout-ui-script.mjs';
+import { PR_REVIEW_PANEL } from '../src/pr-review-panel.mjs';
 import { dashboardHtml } from '../src/ui.mjs';
 
 test('Graph health is placed above Execution waves', () => {
@@ -22,10 +23,9 @@ test('dashboard installs the Issues Map layout script', () => {
 });
 
 test('PR browser configuration exposes only the project conversation action', () => {
-  const html = dashboardHtml();
-  assert.match(html, />Use current conversation<\/button>/);
-  assert.match(html, /browser\/use-current'\),\{scope:'project'\}/);
-  assert.doesNotMatch(html, /Use current for project/);
-  assert.doesNotMatch(html, /Use current globally/);
-  assert.doesNotMatch(html, /scope:'global'/);
+  assert.match(PR_REVIEW_PANEL, />Use current conversation<\/button>/);
+  assert.match(PR_REVIEW_PANEL, /browser\/use-current',\{scope:'project'\}\)/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Use current for project/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Use current globally/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /scope:'global'/);
 });
