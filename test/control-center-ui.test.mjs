@@ -16,19 +16,28 @@ test('dashboard exposes operations, dependency, activity, settings, and PR revie
   assert.match(html, /Issue execution board/);
 });
 
-test('controller actions always render as one stable action bar', () => {
+test('controller actions render one stable action bar without manual dispatch', () => {
   const html = dashboardHtml();
   assert.match(html, /id="controller-action-state"/);
   assert.match(html, /id="claims-toggle-button"/);
-  assert.match(html, /id="run-now-button"/);
   assert.match(html, /id="reconcile-button"/);
+  assert.doesNotMatch(html, /id="run-now-button"/);
+  assert.doesNotMatch(html, /\/api\/run-now/);
+  assert.doesNotMatch(html, />Run now</);
   assert.match(html, /Controller loading/);
+  assert.match(html, /Read-only discovery/);
   assert.match(html, /Setup required/);
   assert.match(html, /Pause claims/);
   assert.match(html, /Resume claims/);
   assert.doesNotMatch(html, /id="resume-button"/);
   assert.doesNotMatch(html, /id="pause-button"/);
   assert.doesNotMatch(html, /classList\.toggle\('hidden', !operational\)/);
+});
+
+test('setup does not hide read-only repository views', () => {
+  const html = dashboardHtml();
+  assert.doesNotMatch(html, /showView\('settings'\).*setupComplete/);
+  assert.match(html, /Repository issues and native dependencies are available read-only/);
 });
 
 test('dashboard presents deterministic controller configuration without an Orchestrator model field', () => {
