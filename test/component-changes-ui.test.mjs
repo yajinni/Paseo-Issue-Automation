@@ -4,6 +4,7 @@ import {
   COMPONENT_CHANGES_UI_SCRIPT,
   shouldInstallSystemBrowserDependencies,
 } from '../src/component-changes-ui-script.mjs';
+import { PR_REVIEW_PANEL } from '../src/pr-review-panel.mjs';
 import {
   PR_REVIEW_SETTINGS_SAVE_SCRIPT,
   prReviewSecondsToMilliseconds,
@@ -12,22 +13,26 @@ import { PR_REVIEW_SETTINGS_TOGGLE_SCRIPT } from '../src/pr-review-settings-togg
 import { resolveConversationUrl } from '../src/pr-review-worker.mjs';
 import { dashboardHtml } from '../src/ui.mjs';
 
-test('PR Reviews navigation is opt-in and project controls use the approved source markup', () => {
+test('PR Reviews navigation is opt-in and the save behavior is installed', () => {
   const html = dashboardHtml();
   assert.match(html, /<button[^>]*class="nav-tab hidden"[^>]*id="pr-reviews-nav"/);
   assert.match(html, /moveComponents\(\)/);
   assert.match(html, /movePrSettings\(\)/);
   assert.match(html, /Enable PR Reviews/);
   assert.match(html, /Review debounce in seconds/);
-  assert.match(html, /Use current conversation/);
-  assert.match(html, /Uninstall browser/);
   assert.match(html, /id="pr-save-settings"[^>]*type="button"/);
   assert.match(html, /installPrReviewBrowser/);
-  assert.doesNotMatch(html, /Install dependencies \+ Chromium/);
-  assert.doesNotMatch(html, /Use current for project/);
-  assert.doesNotMatch(html, /Use current globally/);
-  assert.doesNotMatch(html, /Uninstall browser state/);
-  assert.doesNotMatch(html, /Reset and uninstall remove only machine-local browser state/);
+});
+
+test('PR review panel uses only the approved browser controls and wording', () => {
+  assert.match(PR_REVIEW_PANEL, /Install Chromium/);
+  assert.match(PR_REVIEW_PANEL, /Use current conversation/);
+  assert.match(PR_REVIEW_PANEL, /Uninstall browser/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Install dependencies \+ Chromium/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Use current for project/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Use current globally/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Uninstall browser state/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Reset and uninstall remove only machine-local browser state/);
 });
 
 test('component changes keep automatic Chromium dependency selection without wrapping settings saves', () => {
@@ -64,7 +69,7 @@ test('browser dependency installation is selected from the server environment', 
 });
 
 test('PR review conversation resolution does not use a machine-global fallback', () => {
-  const store = { config: { browserReview: { projectConversationUrl: null } } };
+  const store = { config: { browserReview: { projectConversationUrl: null } };
   const managed = { conversationUrlOverride: null };
   const job = { conversationUrlOverride: null };
   assert.equal(resolveConversationUrl(store, managed, job, { globalConversationUrl: 'https://chatgpt.com/c/global' }), null);
