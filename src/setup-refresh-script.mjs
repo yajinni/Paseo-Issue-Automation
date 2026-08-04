@@ -170,8 +170,13 @@ export const SETUP_REFRESH_SCRIPT = String.raw`
         }
       }
 
-      fullData = await apiWithTimeout('/api/status?_=' + Date.now(), 20_000);
-      render(fullData);
+      if (typeof window.refreshStatus === 'function') {
+        fullData = await window.refreshStatus({ force: true });
+      } else {
+        fullData = await apiWithTimeout('/api/status?_=' + Date.now(), 20_000);
+        render(fullData);
+      }
+      if (!fullData) throw new Error('Could not load the setup snapshot.');
       wireButtons();
       improveCatalogStatus(fullData);
       toast('Git, GitHub, Paseo, and remote requirements were checked.');
