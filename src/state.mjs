@@ -20,7 +20,13 @@ export const DEFAULT_CONFIG = Object.freeze({
   maxActive: 1,
   maxReviewRounds: 4,
   controller: { type: 'deterministic' },
-  models: { orchestrator: '', coder: '', reviewer: '' },
+  models: {
+    orchestrator: '',
+    coder: '',
+    coderThinking: '',
+    reviewer: '',
+    reviewerThinking: '',
+  },
   workspace: { id: null, title: WORKSPACE_TITLE },
 });
 
@@ -90,6 +96,15 @@ function normalizedModel(value, label) {
   return selection;
 }
 
+function normalizedThinking(value, label) {
+  const selection = String(value || '').trim();
+  if (!selection) return '';
+  if (selection.length > 100 || /\s/.test(selection)) {
+    throw new Error(`${label} must be a valid Paseo thinking option ID.`);
+  }
+  return selection;
+}
+
 function normalizedBranch(value) {
   const branch = String(value || '').trim();
   if (!branch) return '';
@@ -102,6 +117,8 @@ function normalizedBranch(value) {
 export function validateConfig(input = {}) {
   const coder = normalizedModel(input.models?.coder, 'Coder model');
   const reviewer = normalizedModel(input.models?.reviewer, 'Reviewer model');
+  const coderThinking = normalizedThinking(input.models?.coderThinking, 'Coder thinking level');
+  const reviewerThinking = normalizedThinking(input.models?.reviewerThinking, 'Reviewer thinking level');
   const legacyOrchestrator = normalizedModel(input.models?.orchestrator, 'Legacy Orchestrator model') || coder;
   return {
     version: 2,
@@ -116,7 +133,9 @@ export function validateConfig(input = {}) {
       // The Issue Execution Controller never launches this model.
       orchestrator: legacyOrchestrator,
       coder,
+      coderThinking,
       reviewer,
+      reviewerThinking,
     },
     workspace: { id: input.workspace?.id ? String(input.workspace.id) : null, title: WORKSPACE_TITLE },
   };

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { dashboardHtml } from '../src/ui.mjs';
 
-test('dashboard exposes operations, dependency, activity, settings, and PR review views', () => {
+test('dashboard exposes operations, issue map, activity, settings, and PR review views', () => {
   const html = dashboardHtml();
   for (const view of ['overview', 'issues', 'dependencies', 'activity', 'settings', 'pr-reviews']) {
     assert.match(html, new RegExp(`data-view="${view}"`));
@@ -10,6 +10,7 @@ test('dashboard exposes operations, dependency, activity, settings, and PR revie
   }
   assert.doesNotMatch(html, /data-view="maintenance"/);
   assert.doesNotMatch(html, /id="view-maintenance"/);
+  assert.match(html, />Issues Map<\/button>/);
   assert.match(html, /Needs your review/);
   assert.match(html, /Execution waves/);
   assert.match(html, /Dependency map/);
@@ -21,7 +22,7 @@ test('controller actions always render as one stable action bar', () => {
   assert.match(html, /id="controller-action-state"/);
   assert.match(html, /id="claims-toggle-button"/);
   assert.match(html, /id="run-now-button"/);
-  assert.match(html, /id="reconcile-button"/);
+  assert.doesNotMatch(html, /id="reconcile-button"/);
   assert.match(html, /Controller loading/);
   assert.match(html, /Setup required/);
   assert.match(html, /Pause claims/);
@@ -36,10 +37,12 @@ test('dashboard presents deterministic controller configuration without an Orche
   assert.match(html, /Issue Execution Controller/);
   assert.match(html, /Coder model/);
   assert.match(html, /Independent Reviewer model/);
+  assert.match(html, /coderThinking/);
+  assert.match(html, /reviewerThinking/);
   assert.doesNotMatch(html, /Orchestrator model/);
 });
 
-test('setup replaces free-text configuration with discovered branch, harness, and model selectors', () => {
+test('setup replaces free-text configuration with discovered branch, harness, model, and thinking selectors', () => {
   const html = dashboardHtml();
   assert.match(html, /refresh-setup-options/);
   assert.match(html, /transformBaseBranch\(\)/);
@@ -47,6 +50,7 @@ test('setup replaces free-text configuration with discovered branch, harness, an
   assert.match(html, /transformModelControl\('reviewer', 'Independent Reviewer'\)/);
   assert.match(html, /Refresh branches and models/);
   assert.match(html, /Models are loaded from the selected Paseo harness/);
+  assert.match(html, /thinkingOptionIds/);
 });
 
 test('requirements have detail dialogs and a forced uncached refresh', () => {

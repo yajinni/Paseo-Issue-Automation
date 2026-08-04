@@ -41,7 +41,6 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
     const actionState = document.getElementById('controller-action-state');
     const toggle = document.getElementById('claims-toggle-button');
     const runNow = document.getElementById('run-now-button');
-    const reconcile = document.getElementById('reconcile-button');
 
     if (actionBar) {
       actionBar.classList.remove('hidden');
@@ -62,21 +61,14 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
       text: 'Claims unavailable',
       disabled: true,
       className: 'secondary',
-      title: 'Finish setup before enabling claims.',
+      title: 'Complete the required setup checks before enabling claims.',
     });
 
     updateActionButton(runNow, {
       text: 'Run now',
       disabled: !operational,
       className: 'secondary',
-      title: operational ? 'Run one scheduling pass now.' : 'Finish setup before running the controller.',
-    });
-
-    updateActionButton(reconcile, {
-      text: 'Reconcile dependencies',
-      disabled: !operational || !dependencyApiAvailable,
-      className: 'secondary',
-      title: !operational ? 'Finish setup before reconciling dependencies.' : dependencyApiAvailable ? 'Refresh native GitHub dependency relationships.' : 'The native GitHub dependency API is unavailable.',
+      title: operational ? 'Run one scheduling pass now.' : 'Complete the required setup checks before running the controller.',
     });
 
     document.getElementById('subtitle').textContent = operational

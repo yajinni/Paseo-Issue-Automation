@@ -5,9 +5,11 @@ import { CONTROL_CENTER_SCRIPT } from './control-center-script.mjs';
 import { CONTROL_CENTER_SHELL } from './control-center-shell.mjs';
 import { CONTROL_CENTER_STYLE } from './control-center-style.mjs';
 import { DASHBOARD_POLL_SCRIPT } from './dashboard-poll-script.mjs';
+import { MODEL_THINKING_UI_SCRIPT } from './model-thinking-ui-script.mjs';
 import { PR_REVIEW_DASHBOARD_SCRIPT } from './pr-review-dashboard-script.mjs';
 import { PR_REVIEW_DASHBOARD_STYLE } from './pr-review-dashboard-style.mjs';
 import { PR_REVIEW_PANEL } from './pr-review-panel.mjs';
+import { PR_REVIEW_SETTINGS_TOGGLE_SCRIPT } from './pr-review-settings-toggle-script.mjs';
 import { SETUP_CATALOG_FEEDBACK_SCRIPT } from './setup-catalog-feedback-script.mjs';
 import { SETUP_CONTROLS_SCRIPT } from './setup-controls-script.mjs';
 import { SETUP_REFRESH_SCRIPT } from './setup-refresh-script.mjs';
@@ -29,7 +31,6 @@ const CONTROLLER_ACTIONS_PANEL = String.raw`      <div class="header-actions con
         <span class="chip info" id="controller-action-state">Controller loading</span>
         <button id="claims-toggle-button" class="secondary" onclick="toggleClaims()" disabled>Claims unavailable</button>
         <button id="run-now-button" class="secondary" onclick="postAction('/api/run-now')" disabled>Run now</button>
-        <button id="reconcile-button" class="secondary" onclick="postAction('/api/reconcile')" disabled>Reconcile dependencies</button>
       </div>`;
 
 const COMPONENTS_PANEL = String.raw`
@@ -102,7 +103,15 @@ function integratedDashboardShell() {
       CONTROLLER_ACTIONS_PANEL,
     )
     .replace(
+      '    <button class="nav-tab" data-view="dependencies" onclick="showView(\'dependencies\')">Dependencies</button>\n',
+      '    <button class="nav-tab" data-view="dependencies" onclick="showView(\'dependencies\')">Issues Map</button>\n',
+    )
+    .replace(
       '    <button class="nav-tab" data-view="maintenance" onclick="showView(\'maintenance\')">Maintenance</button>\n',
+      '',
+    )
+    .replace(
+      '<button class="secondary" onclick="postAction(\'/api/finish\')">Finish setup</button>',
       '',
     )
     .replace(
@@ -137,12 +146,14 @@ export function dashboardHtml() {
 ${integratedDashboardShell()}
 <script>${CONTROL_CENTER_SCRIPT_WITHOUT_MAINTENANCE}</script>
 <script>${SETUP_CONTROLS_SCRIPT}</script>
+<script>${MODEL_THINKING_UI_SCRIPT}</script>
 <script>${SETUP_REFRESH_SCRIPT}</script>
 <script>${SETUP_CATALOG_FEEDBACK_SCRIPT}</script>
 <script>${COMPONENTS_UI_SCRIPT}</script>
 <script>${CONTROLLER_ACTIONS_UI_SCRIPT}</script>
 <script>${PR_REVIEW_DASHBOARD_SCRIPT}</script>
 <script>${COMPONENT_CHANGES_UI_SCRIPT}</script>
+<script>${PR_REVIEW_SETTINGS_TOGGLE_SCRIPT}</script>
 <script>${DASHBOARD_POLL_SCRIPT}</script>
 </body>
 </html>`;
