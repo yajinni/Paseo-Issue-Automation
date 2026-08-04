@@ -21,7 +21,7 @@ export function setupCatalogFeedback(data) {
   const harnessNames = providers.map((provider) => {
     const id = String(provider?.id || '').trim();
     const label = String(provider?.label || id || 'Unnamed harness').trim();
-    return id && label.toLowerCase() !== id.toLowerCase()
+    return id && label !== id
       ? `${label} (${id})`
       : label;
   });
