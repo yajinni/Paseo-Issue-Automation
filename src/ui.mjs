@@ -1,3 +1,4 @@
+import { COMPONENT_CHANGES_UI_SCRIPT } from './component-changes-ui-script.mjs';
 import { COMPONENTS_UI_SCRIPT } from './components-ui-script.mjs';
 import { CONTROLLER_ACTIONS_UI_SCRIPT } from './controller-actions-ui-script.mjs';
 import { CONTROL_CENTER_SCRIPT } from './control-center-script.mjs';
@@ -106,7 +107,7 @@ function integratedDashboardShell() {
     )
     .replace(
       '</nav>',
-      '    <button class="nav-tab" data-view="pr-reviews" onclick="showView(\'pr-reviews\')">PR Reviews</button>\n  </nav>',
+      '    <button class="nav-tab hidden" id="pr-reviews-nav" data-view="pr-reviews" onclick="showView(\'pr-reviews\')">PR Reviews</button>\n  </nav>',
     )
     .replace(
       /<article class="card setup-step" id="installation-card"[\s\S]*?<\/article>/,
@@ -141,6 +142,7 @@ ${integratedDashboardShell()}
 <script>${COMPONENTS_UI_SCRIPT}</script>
 <script>${CONTROLLER_ACTIONS_UI_SCRIPT}</script>
 <script>${PR_REVIEW_DASHBOARD_SCRIPT}</script>
+<script>${COMPONENT_CHANGES_UI_SCRIPT}</script>
 <script>${DASHBOARD_POLL_SCRIPT}</script>
 </body>
 </html>`;
