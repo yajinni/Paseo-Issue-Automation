@@ -19,7 +19,7 @@ const CONTROL_CENTER_SCRIPT_WITHOUT_MAINTENANCE = CONTROL_CENTER_SCRIPT
   )
   .replace("  document.getElementById('state-path').textContent = data.stateDirectory || 'Unknown';\n", '')
   .replace("  document.getElementById('npm-uninstall-command').textContent = data.npmUninstallCommand || '';\n", '')
-  .replace(" && currentView !== 'maintenance'", '')
+  .replace("  if (!(data.config.setupComplete && data.checks && data.checks.ready) && currentView !== 'maintenance') showView('settings');\n", '')
   .replace(
     /\nfunction renderHealth\(data\) \{[\s\S]*?\n\}\n\nfunction renderCounts/,
     '\nfunction renderCounts',
@@ -28,7 +28,6 @@ const CONTROL_CENTER_SCRIPT_WITHOUT_MAINTENANCE = CONTROL_CENTER_SCRIPT
 const CONTROLLER_ACTIONS_PANEL = String.raw`      <div class="header-actions controller-action-bar" id="controller-actions" data-state="loading">
         <span class="chip info" id="controller-action-state">Controller loading</span>
         <button id="claims-toggle-button" class="secondary" onclick="toggleClaims()" disabled>Claims unavailable</button>
-        <button id="run-now-button" class="secondary" onclick="postAction('/api/run-now')" disabled>Run now</button>
         <button id="reconcile-button" class="secondary" onclick="postAction('/api/reconcile')" disabled>Reconcile dependencies</button>
       </div>`;
 
