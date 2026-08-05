@@ -69,14 +69,15 @@ export const PR_REVIEW_PANEL = String.raw`
         <article class="card">
           <div class="card-head"><div><h2>Dedicated ChatGPT browser</h2><p>Verify Chromium and the saved chat used by serial PR review.</p></div></div>
           <div id="pr-browser-status" class="component-list" aria-live="polite">
-            <div class="component"><div class="component-head"><strong>Chromium Installed</strong><span class="status-dot"></span></div><p>Checking…</p></div>
-            <div class="component"><div class="component-head"><strong>PR Review Chat URL</strong><span class="status-dot"></span></div><p>Checking…</p></div>
+            <div class="component" id="pr-chromium-requirement" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px">
+              <div><strong>Chromium Installed</strong><p id="pr-chromium-status" style="margin:4px 0 0">Checking…</p></div>
+              <div class="actions"><span id="pr-chromium-badge"><span class="status-dot"></span></span><button id="pr-install-chromium" type="button" onclick="installPrReviewBrowser(this)">Install Chromium</button></div>
+            </div>
+            <div class="component" id="pr-chat-url-requirement" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px">
+              <div><strong>PR Review Chat URL</strong><p id="pr-chat-url-status" style="margin:4px 0 0">Checking…</p><p id="pr-browser-test-result" class="muted" aria-live="polite" style="margin:4px 0 0"></p></div>
+              <div class="actions"><span id="pr-chat-url-badge"><span class="status-dot"></span></span><button id="pr-test-browser" class="secondary" type="button" onclick="testPrReviewBrowserSetup(this)" disabled>Test</button></div>
+            </div>
           </div>
-          <div class="actions pr-review-section">
-            <button id="pr-install-chromium" type="button" onclick="installPrReviewBrowser(this)">Install Chromium</button>
-            <button id="pr-test-browser" class="secondary" type="button" onclick="testPrReviewBrowserSetup(this)" disabled>Test</button>
-          </div>
-          <p id="pr-browser-test-result" class="muted" aria-live="polite" style="margin:10px 0 0"></p>
           <div class="actions pr-review-section">
             <button id="pr-reset-browser-profile" class="danger" onclick="openPrReviewConfirm('Reset dedicated profile','RESET','/api/pr-reviews/browser/reset')">Reset profile</button>
             <button id="pr-uninstall-chromium" class="danger" onclick="openPrReviewConfirm('Uninstall Chromium','UNINSTALL','/api/pr-reviews/browser/uninstall')">Uninstall Chromium</button>
