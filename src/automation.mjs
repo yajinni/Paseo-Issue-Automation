@@ -1,5 +1,6 @@
 import { LABELS, loadConfig, loadRun, loadRuntime, saveRun, saveRuntime } from './state.mjs';
 import { run, runJson } from './process.mjs';
+import { appendControllerLog } from './controller-log.mjs';
 
 const REQUIRED_SECTIONS = [
   'Objective',
@@ -8,6 +9,14 @@ const REQUIRED_SECTIONS = [
   'Validation and checks',
   'Stop conditions',
 ];
+
+function safeIssueLog(root, input) {
+  try { return appendControllerLog(root, { category: 'issues', source: 'automation', ...input }); }
+  catch (error) {
+    console.error(JSON.stringify({ subsystem: 'controller-log', error: error.message }));
+    return null;
+  }
+}
 
 export function slugify(value) {
   return String(value || '')
@@ -63,7 +72,14 @@ function issueList(root, label) {
 }
 
 export function setClaimsEnabled(root, enabled) {
-  return saveRuntime(root, { ...loadRuntime(root), claimsEnabled: enabled });
+  const runtime = saveRuntime(root, { ...loadRuntime(root), claimsEnabled: enabled });
+  safeIssueLog(root, {
+    action: enabled ? 'resume-issues-processing' : 'stop-issues-processing',
+    status: 'success',
+    message: enabled ? 'Issues Processing was resumed.' : 'Issues Processing was stopped.',
+    details: { claimsEnabled: runtime.claimsEnabled },
+  });
+  return runtime;
 }
 
 function requireRun(root, issueNumber) {
@@ -79,21 +95,44 @@ export function recordEvent(root, issueNumber, event) {
     const maximum = loadConfig(root).maxReviewRounds;
     if (completedRounds >= maximum) throw new Error(`Maximum review rounds (${maximum}) reached.`);
   }
+  const recorded = { ...event, at: new Date().toISOString() };
   const next = {
     ...state,
-    events: [...(state.events || []), { ...event, at: new Date().toISOString() }],
+    events: [...(state.events || []), recorded],
     updatedAt: new Date().toISOString(),
   };
-  return saveRun(root, issueNumber, next);
+  const saved = saveRun(root, issueNumber, next);
+  safeIssueLog(root, {
+    level: String(event.result || '').toUpperCase() === 'FAIL' ? 'error' : 'info',
+    action: `issue-${String(event.event || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    status: String(event.result || '').toUpperCase() === 'FAIL' ? 'failed' : 'success',
+    message: `Issue #${Number(issueNumber)} recorded ${event.event || 'an automation event'}${event.result ? `: ${event.result}` : ''}.`,
+    details: {
+      issueNumber: Number(issueNumber),
+      event: recorded,
+      phase: saved.phase || null,
+      branch: saved.branch || saved.branchName || null,
+      pullRequestNumber: saved.prNumber || saved.pullRequestNumber || null,
+    },
+  });
+  return saved;
 }
 
 export function heartbeat(root, issueNumber, phase) {
   const state = requireRun(root, issueNumber);
-  return saveRun(root, issueNumber, {
+  const saved = saveRun(root, issueNumber, {
     ...state,
     phase: String(phase || state.phase || 'running'),
     heartbeatAt: new Date().toISOString(),
   });
+  safeIssueLog(root, {
+    level: 'debug',
+    action: 'issue-heartbeat',
+    status: 'success',
+    message: `Issue #${Number(issueNumber)} heartbeat: ${saved.phase}.`,
+    details: { issueNumber: Number(issueNumber), phase: saved.phase, heartbeatAt: saved.heartbeatAt },
+  });
+  return saved;
 }
 
 function prChecksPass(root, prNumber, commit) {
@@ -136,7 +175,7 @@ export function markHumanReview(root, issueNumber, prNumber) {
   run('gh', ['issue', 'comment', String(issueNumber), '--body', `NEEDS HUMAN REVIEW FOR PR #${prNumber}`], {
     cwd: root,
   });
-  return saveRun(root, issueNumber, {
+  const saved = saveRun(root, issueNumber, {
     ...state,
     status: LABELS.humanReview,
     phase: 'human-review',
@@ -144,6 +183,17 @@ export function markHumanReview(root, issueNumber, prNumber) {
     approvedCommit: validation.commit,
     completedAt: new Date().toISOString(),
   });
+  safeIssueLog(root, {
+    action: 'issue-human-review',
+    status: 'success',
+    message: `Issue #${Number(issueNumber)} is ready for human review on PR #${Number(prNumber)}.`,
+    details: {
+      issueNumber: Number(issueNumber),
+      pullRequestNumber: Number(prNumber),
+      approvedCommit: validation.commit,
+    },
+  });
+  return saved;
 }
 
 export function terminalState(root, issueNumber, status, reason) {
@@ -154,13 +204,21 @@ export function terminalState(root, issueNumber, status, reason) {
     remove: [LABELS.running, LABELS.ready, LABELS.humanReview, status === 'blocked' ? LABELS.failed : LABELS.blocked],
   });
   run('gh', ['issue', 'comment', String(issueNumber), '--body', `Automation ${status}: ${reason}`], { cwd: root });
-  return saveRun(root, issueNumber, {
+  const saved = saveRun(root, issueNumber, {
     ...state,
     status: label,
     phase: status,
     reason,
     completedAt: new Date().toISOString(),
   });
+  safeIssueLog(root, {
+    level: status === 'failed' ? 'error' : 'warn',
+    action: status === 'blocked' ? 'issue-blocked' : 'issue-failed',
+    status: status === 'blocked' ? 'waiting' : 'failed',
+    message: `Issue #${Number(issueNumber)} was ${status}: ${reason}`,
+    details: { issueNumber: Number(issueNumber), status, reason },
+  });
+  return saved;
 }
 
 export function automationStatus(root) {
