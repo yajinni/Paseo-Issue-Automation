@@ -57,7 +57,8 @@ function entry(root) {
 }
 
 function fresh(current, id) {
-  const checkedAt = current.checked.get(id) || 0;
+  if (!current.checked.has(id)) return false;
+  const checkedAt = current.checked.get(id);
   return Date.now() - checkedAt < REQUIREMENT_CACHE_MS;
 }
 
