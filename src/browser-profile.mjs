@@ -140,7 +140,7 @@ export function resetBrowserProfile(options = {}) {
     lastConversationUrl: null,
     lastAuthenticatedAt: null,
   }, options);
-  return { reset: true, authenticationCleared: true };
+  return { reset: true };
 }
 
 export function uninstallBrowserState(options = {}) {
