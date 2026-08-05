@@ -273,7 +273,7 @@ test('cancel restores focus without leaking that trigger into a later install', 
   assert.equal(harness.document.activeElement, installTrigger, 'a completed install must not focus the old uninstall button');
 });
 
-test('uninstall failure remains visible, releases the lock, and can be closed safely', async () => {
+test('uninstall failure remains visible, releases the lock, and can be retried safely', async () => {
   const harness = createHarness();
   const { progress } = startConfirmedUninstall(harness);
   harness.resolveNextFetch({
@@ -292,8 +292,16 @@ test('uninstall failure remains visible, releases the lock, and can be closed sa
   assert.equal(harness.document.activeElement, close);
   assert.equal(harness.document.body.inert, false);
 
-  close.click();
-  assert.equal(progress.hidden, true);
+  harness.uninstallButton.click();
+  const confirmation = harness.document.getElementById('browser-uninstall-confirm');
+  const input = harness.document.getElementById('browser-uninstall-input');
+  const cancel = harness.document.getElementById('browser-uninstall-cancel');
+  assert.equal(progress.hidden, true, 'retry must dismiss the prior error panel');
+  assert.equal(confirmation.hidden, false, 'retry confirmation must be visible above the cleared error state');
+  assert.equal(harness.document.activeElement, input);
+
+  cancel.click();
+  assert.equal(confirmation.hidden, true);
   assert.equal(harness.document.activeElement, harness.uninstallButton);
 
   harness.window.installPrReviewBrowser();
