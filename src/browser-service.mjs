@@ -113,21 +113,65 @@ function runPlaywrightCommand(args, {
   return { ...result, resolvedCommand: invocation.resolvedCommand };
 }
 
-export function uninstallPlaywrightBrowsers(options = {}) {
-  if (!playwrightLibraryStatus().installed) {
-    return { removed: false, reason: 'playwright is not installed' };
-  }
-  const result = runPlaywrightCommand(['playwright', 'uninstall'], options);
-  if (result.error?.code === 'ETIMEDOUT') throw new Error('Playwright browser uninstall timed out.');
-  if (result.error) throw new Error(`Unable to run Playwright: ${result.error.message}`);
-  if (result.status !== 0) throw new Error(String(result.stderr || result.stdout || 'Playwright browser uninstall failed.').trim());
-  return { removed: true, stdout: String(result.stdout || '').trim() };
-}
-
 export function playwrightLibraryStatus() {
   let modulePath = null;
   try { modulePath = require.resolve('playwright'); } catch {}
   return { installed: Boolean(modulePath), modulePath };
+}
+
+export function playwrightChromiumStatus() {
+  let executablePath = null;
+  try {
+    executablePath = require('playwright').chromium.executablePath();
+  } catch {}
+  return {
+    installed: Boolean(executablePath && existsSync(executablePath)),
+    executablePath,
+  };
+}
+
+function resolvedChromiumStatus(options = {}) {
+  return typeof options.chromiumStatus === 'function'
+    ? options.chromiumStatus()
+    : playwrightChromiumStatus();
+}
+
+export function uninstallPlaywrightBrowsers(options = {}) {
+  if (!playwrightLibraryStatus().installed) {
+    return {
+      removed: false,
+      reason: 'playwright is not installed',
+      command: [playwrightCommand(options.platform || process.platform), 'playwright', 'uninstall'],
+    };
+  }
+  const profile = options.profileStatus || browserProfileStatus(options);
+  if (profile.locked) {
+    throw new Error('Close the dedicated ChatGPT browser before uninstalling Chromium.');
+  }
+
+  const platform = options.platform || process.platform;
+  const args = ['playwright', 'uninstall'];
+  const result = runPlaywrightCommand(args, { ...options, platform });
+  if (result.error?.code === 'ETIMEDOUT') throw new Error('Chromium uninstall timed out.');
+  if (result.error) throw new Error(`Unable to run Playwright: ${result.error.message}`);
+  if (result.status !== 0) {
+    const output = String(result.stderr || result.stdout || 'Playwright could not uninstall Chromium.').trim();
+    const commandHint = result.resolvedCommand ? ` Command: ${result.resolvedCommand}.` : '';
+    throw new Error(`Chromium uninstall failed.${commandHint} ${output}`.trim());
+  }
+
+  const chromium = resolvedChromiumStatus(options);
+  if (chromium.installed) {
+    throw new Error(`Chromium uninstall command completed, but the browser executable still exists at ${chromium.executablePath || 'the expected Playwright location'}.`);
+  }
+  saveBrowserConfig({ browserInstalledAt: null }, options);
+  return {
+    removed: true,
+    command: [playwrightCommand(platform), ...args],
+    resolvedCommand: result.resolvedCommand,
+    stdout: String(result.stdout || '').trim(),
+    chromium,
+  };
 }
 
 export function installPlaywrightChromium(options = {}) {
@@ -147,11 +191,18 @@ export function installPlaywrightChromium(options = {}) {
     const commandHint = result.resolvedCommand ? ` Command: ${result.resolvedCommand}.` : '';
     throw new Error(`Chromium installation failed.${hint}${commandHint} ${output}`.trim());
   }
-  saveBrowserConfig({ browserInstalledAt: new Date().toISOString() });
+
+  const chromium = resolvedChromiumStatus(options);
+  if (!chromium.installed) {
+    throw new Error(`Chromium install command completed, but no browser executable was found${chromium.executablePath ? ` at ${chromium.executablePath}` : ''}.`);
+  }
+  saveBrowserConfig({ browserInstalledAt: new Date().toISOString() }, options);
   return {
     installed: true,
     command: [playwrightCommand(platform), ...args],
+    resolvedCommand: result.resolvedCommand,
     stdout: String(result.stdout || '').trim(),
+    chromium,
   };
 }
 
@@ -340,6 +391,7 @@ export function browserDoctor() {
   const library = playwrightLibraryStatus();
   return {
     library: { installed: library.installed, modulePath: library.modulePath },
+    chromium: playwrightChromiumStatus(),
     profile: browserProfileStatus(),
     config: loadBrowserConfig(),
   };
