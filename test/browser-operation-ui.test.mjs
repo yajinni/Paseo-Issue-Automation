@@ -19,6 +19,15 @@ test('Chromium install and uninstall use a visible command progress dialog', () 
   assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /profile and login will be preserved/);
 });
 
+test('Chromium button setup cannot create a self-triggering DOM mutation loop', () => {
+  assert.match(
+    BROWSER_OPERATION_UI_SCRIPT,
+    /if \(text === 'uninstall browser'\) button\.textContent = 'Uninstall Chromium'/,
+  );
+  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /new MutationObserver\(renameUninstallControl\)/);
+  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /observer\.observe\(document\.body/);
+});
+
 test('dashboard refresh callers share the same in-flight setup snapshot promise', () => {
   assert.match(DASHBOARD_POLL_SCRIPT, /if \(pollInFlight\) return pollInFlight/);
   assert.match(DASHBOARD_POLL_SCRIPT, /pollInFlight = \(async function\(\)/);
