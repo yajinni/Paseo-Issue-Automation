@@ -127,10 +127,24 @@ The installed GitHub CLI must expose native `blockedBy` relationship data. If th
 
 ## Development installation
 
+Install an explicitly reviewed commit rather than the floating default branch:
+
 ```bash
-npm install --save-dev github:yajinni/Paseo-Issue-Automation
+npm install --save-dev github:yajinni/Paseo-Issue-Automation#<approved-commit-sha>
 npx paseo-issue-automation setup
 ```
+
+## Updating the package
+
+Choose the exact newer commit you intend to adopt, then install that immutable revision:
+
+```bash
+npm install --save-dev github:yajinni/Paseo-Issue-Automation#<approved-commit-sha>
+```
+
+The resulting `package.json` and lockfile changes are setup-managed files. For an already configured repository, the controller detects those changes and opens a dedicated setup PR. Review and merge that PR in GitHub; setup continues automatically after the local base branch synchronizes.
+
+Do not use a floating `github:yajinni/Paseo-Issue-Automation` dependency in an automated repository. A floating dependency can rewrite the lockfile merely because `main` changed.
 
 ## Commands
 
