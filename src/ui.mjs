@@ -32,7 +32,10 @@ const CONTROL_CENTER_SCRIPT_WITHOUT_MAINTENANCE = CONTROL_CENTER_SCRIPT
     '\nfunction renderCounts',
   )
   .replace('Native dependency API', 'GitHub Issues API')
-  .replace('Structured GitHub blocked-by data is available.', "GitHub issue\\'s structure read and accessible.")
+  .replace(
+    "'Structured GitHub blocked-by data is available.'",
+    '"GitHub issue\'s structure read and accessible."',
+  )
   .replace('Execution is blocked where relationship data is unavailable.', 'GitHub issue structure or blocked-by relationships are unavailable.');
 
 const PR_REVIEW_DASHBOARD_SCRIPT_WITH_BROWSER_REQUIREMENTS = PR_REVIEW_DASHBOARD_SCRIPT
