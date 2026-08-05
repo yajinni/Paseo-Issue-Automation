@@ -9,7 +9,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     const style = document.createElement('style');
     style.id = 'browser-operation-style';
     style.textContent = [
-      '#browser-operation-dialog{width:min(380px,calc(100vw - 28px));padding:0;overflow:hidden}',
+      '#browser-operation-dialog{position:fixed;inset:24px auto auto 50%;transform:translateX(-50%);width:min(380px,calc(100vw - 28px));margin:0;padding:0;overflow:hidden;z-index:1000}',
       '#browser-operation-dialog .browser-operation-body{display:grid;justify-items:center;gap:14px;padding:24px;text-align:center}',
       '#browser-operation-dialog .browser-operation-spinner{width:28px;height:28px;border:3px solid rgba(88,166,255,.25);border-top-color:var(--accent);border-radius:50%;animation:browser-operation-spin .8s linear infinite}',
       '#browser-operation-dialog[data-state="failed"] .browser-operation-spinner{display:none}',
@@ -38,9 +38,6 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     document.getElementById('browser-operation-close').addEventListener('click', function() {
       if (!operationActive) dialog.close();
     });
-    dialog.addEventListener('cancel', function(event) {
-      if (operationActive) event.preventDefault();
-    });
     return dialog;
   }
 
@@ -59,7 +56,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     error.hidden = true;
     error.textContent = '';
     close.hidden = true;
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) dialog.show();
     return dialog;
   }
 
@@ -91,7 +88,14 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
 
     const installing = path === INSTALL_PATH;
     operationActive = true;
-    const dialog = prepareDialog(installing);
+    let dialog;
+    try {
+      dialog = prepareDialog(installing);
+    } catch (error) {
+      operationActive = false;
+      toast('Could not open the Chromium progress window: ' + String(error && error.message || error), true);
+      return null;
+    }
 
     try {
       const response = await fetch(path, {
@@ -135,8 +139,18 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       confirm.disabled = input.value !== 'UNINSTALL';
     };
     confirm.onclick = function() {
-      dialog.close();
-      return runBrowserOperation(UNINSTALL_PATH);
+      confirm.disabled = true;
+      const startUninstall = function() {
+        setTimeout(function() {
+          runBrowserOperation(UNINSTALL_PATH);
+        }, 0);
+      };
+      if (dialog.open) {
+        dialog.addEventListener('close', startUninstall, { once: true });
+        dialog.close();
+      } else {
+        startUninstall();
+      }
     };
     dialog.showModal();
     input.focus();
