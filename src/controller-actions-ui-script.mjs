@@ -23,35 +23,9 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
   }
 
   function normalizeChatGptBrowserControls(data) {
-    const panel = document.getElementById('view-pr-reviews');
-    const resetCredentials = buttonByText(panel, 'Reset profile') || buttonByText(panel, 'Reset ChatGPT Credentials');
-    if (resetCredentials) {
-      resetCredentials.textContent = 'Reset ChatGPT Credentials';
-      resetCredentials.title = 'Delete the dedicated browser profile, including its saved ChatGPT login credentials and local session data.';
-      resetCredentials.setAttribute('onclick', "openPrReviewConfirm('Reset ChatGPT Credentials','RESET','/api/pr-reviews/browser/reset')");
+    if (data && typeof window.renderPrReviewBrowserSetup === 'function') {
+      window.renderPrReviewBrowserSetup(data);
     }
-
-    const conversation = data && data.config && data.config.browserReview
-      ? data.config.browserReview.projectConversationUrl || null
-      : null;
-    const chip = document.getElementById('pr-conversation-chip');
-    if (chip && data) {
-      chip.textContent = conversation ? 'GPT chat selected' : 'GPT chat not selected';
-      chip.className = 'chip ' + (conversation ? 'good' : 'bad');
-    }
-
-    const status = document.getElementById('pr-browser-status');
-    if (!status) return;
-    Array.from(status.querySelectorAll('span')).forEach(function(item) {
-      const text = String(item.textContent || '').replace(/\s+/g, ' ').trim();
-      if (/^Profile:/.test(text)) {
-        item.remove();
-        return;
-      }
-      if (/^(Project conversation|GPT Chat Selected):/.test(text)) {
-        item.innerHTML = 'GPT Chat Selected: <strong>' + (conversation ? 'Yes' : 'No') + '</strong>';
-      }
-    });
   }
 
   function replaceVisibleClaimsLanguage(value) {
@@ -127,14 +101,12 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
     const operational = controllerIsOperational(data);
     const repositoryReadable = repositoryIsReadable(data);
     const claimsEnabled = Boolean(controller.claimsEnabled);
-    const dependencyApiAvailable = Boolean(controller.dependencyApiAvailable);
 
     setChip('health-claims', operational ? (claimsEnabled ? 'Issues Processing running' : 'Issues Processing stopped') : 'Issues Processing unavailable', operational ? (claimsEnabled ? 'good' : 'warn') : 'bad');
     setChip('health-capacity', 'Capacity ' + capacity.active + ' / ' + capacity.maximum, operational && capacity.active < capacity.maximum ? 'good' : 'info');
     setChip('health-poll', controller.nextPollAt ? 'Next poll ' + formatRelative(controller.nextPollAt) : 'Next poll pending', 'info');
     setChip('health-github', data.requirements.githubAuthenticated ? 'GitHub connected' : 'GitHub disconnected', data.requirements.githubAuthenticated ? 'good' : 'bad');
     setChip('health-paseo', data.requirements.paseoReachable ? 'Paseo connected' : 'Paseo unavailable', data.requirements.paseoReachable ? 'good' : 'bad');
-    setChip('health-dependencies', dependencyApiAvailable ? 'Native dependencies available' : 'Dependency API unavailable', dependencyApiAvailable ? 'good' : 'bad');
 
     const actionBar = document.getElementById('controller-actions');
     const actionState = document.getElementById('controller-action-state');
@@ -167,7 +139,7 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
     document.getElementById('subtitle').textContent = operational
       ? 'Autonomous GitHub issue coding through Paseo · Base ' + data.config.baseBranch
       : repositoryReadable
-        ? 'Repository issues and native dependencies are available read-only. Complete setup to enable autonomous execution.'
+        ? 'Repository issues and GitHub issue relationships are available read-only. Complete setup to enable autonomous execution.'
         : 'Connect the GitHub repository to load issues and dependencies.';
   };
 
