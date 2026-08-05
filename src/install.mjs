@@ -5,13 +5,24 @@ import {
   clearSetupRequirementCache,
   setupRequirements,
 } from './setup-requirements.mjs';
-import { saveConfig } from './state.mjs';
+import {
+  createSetupPullRequest,
+  loadSetupPullRequest,
+  preflightSetupPullRequest,
+  reconcileSetupPullRequest,
+  saveSetupPullRequest,
+  setupChangeStatus,
+  setupPullRequestBlocksSetup,
+} from './setup-pr.mjs';
+import { loadConfig, loadIntegration, saveConfig } from './state.mjs';
 import * as legacy from './install-legacy.mjs';
 
 export * from './install-legacy.mjs';
 
 const discoveryCache = new Map();
+const setupPullRequestWorkers = new Map();
 const DISCOVERY_CACHE_MS = 5 * 60_000;
+const SETUP_PULL_REQUEST_POLL_MS = 15_000;
 
 function cachedSetupOptions(root, { force = false, paseoOverride = null } = {}) {
   const cached = discoveryCache.get(root);
@@ -32,6 +43,14 @@ function cachedSetupOptions(root, { force = false, paseoOverride = null } = {}) 
 
 export function requirements(root, _existing = null, options = {}) {
   return setupRequirements(root, { force: options.force === true });
+}
+
+export function installRepositoryIntegration(root) {
+  preflightSetupPullRequest(root);
+  const components = legacy.installRepositoryIntegration(root);
+  const setupPullRequest = createSetupPullRequest(root);
+  ensureSetupPullRequestWorker(root);
+  return { ...components, setupPullRequest };
 }
 
 function paseoOverrideFromRequirements(req) {
@@ -55,18 +74,98 @@ function synchronizeSetupCompletion(root, snapshot) {
   return { ...snapshot, config };
 }
 
+function existingInstallationCanBeRecovered(root, setupPullRequest, repositoryChanges) {
+  if (setupPullRequest?.state === 'open' || setupPullRequest?.state === 'merged') return false;
+  const config = loadConfig(root);
+  const integration = loadIntegration(root);
+  const labels = Object.values(integration.labels || {});
+  return repositoryChanges.available
+    && repositoryChanges.expectedFiles.length > 0
+    && repositoryChanges.unexpectedFiles.length === 0
+    && repositoryChanges.currentBranch === config.baseBranch
+    && integration.issueTemplate?.createdByPackage === true
+    && integration.paseoJson?.serviceAddedByPackage === true
+    && labels.length > 0
+    && Boolean(config.workspace?.id);
+}
+
+export function tickSetupPullRequest(root) {
+  let setupPullRequest = reconcileSetupPullRequest(root);
+  const repositoryChanges = setupChangeStatus(root);
+  if (!existingInstallationCanBeRecovered(root, setupPullRequest, repositoryChanges)) {
+    return { setupPullRequest, repositoryChanges, recovered: false };
+  }
+  try {
+    const submission = createSetupPullRequest(root);
+    setupPullRequest = submission.pullRequest || setupPullRequest;
+    return {
+      setupPullRequest,
+      repositoryChanges: setupChangeStatus(root),
+      recovered: submission.created === true,
+    };
+  } catch (error) {
+    setupPullRequest = saveSetupPullRequest(root, {
+      state: 'failed',
+      error: error.message,
+      checkedAt: new Date().toISOString(),
+    });
+    return { setupPullRequest, repositoryChanges, recovered: false, error: error.message };
+  }
+}
+
+function runSetupPullRequestTick(root) {
+  try {
+    tickSetupPullRequest(root);
+  } catch (error) {
+    saveSetupPullRequest(root, {
+      state: 'failed',
+      error: error.message,
+      checkedAt: new Date().toISOString(),
+    });
+    console.error(JSON.stringify({ subsystem: 'setup-pull-request', error: error.message }));
+  }
+}
+
+export function ensureSetupPullRequestWorker(root) {
+  if (setupPullRequestWorkers.has(root)) return setupPullRequestWorkers.get(root);
+  const initial = setTimeout(() => runSetupPullRequestTick(root), 0);
+  const timer = setInterval(() => runSetupPullRequestTick(root), SETUP_PULL_REQUEST_POLL_MS);
+  initial.unref?.();
+  timer.unref?.();
+  const worker = { initial, timer };
+  setupPullRequestWorkers.set(root, worker);
+  return worker;
+}
+
 export function setupSnapshot(root, options = {}) {
+  ensureSetupPullRequestWorker(root);
   const force = options.forceDiscovery === true;
+  const setupPullRequest = loadSetupPullRequest(root);
+  const repositoryChanges = setupChangeStatus(root);
   const req = setupRequirements(root, { force: options.forceRequirements === true });
   const setupOptions = cachedSetupOptions(root, {
     force,
     paseoOverride: paseoOverrideFromRequirements(req),
   });
-  const snapshot = synchronizeSetupCompletion(root, buildSetupSnapshot(root, {
+  const built = buildSetupSnapshot(root, {
     requirements: req,
     branches: setupOptions.branches?.branches || [],
     forceIntegration: options.forceIntegration === true || force,
-  }));
+  });
+  const setupPullRequestReady = !setupPullRequestBlocksSetup(setupPullRequest);
+  const setupFilesCommitted = repositoryChanges.expectedFiles.length === 0;
+  const snapshot = synchronizeSetupCompletion(root, {
+    ...built,
+    setupPullRequest,
+    setupSubmissionError: setupPullRequest?.state === 'failed' ? setupPullRequest.error || 'Automatic setup PR creation failed.' : null,
+    repositoryChanges,
+    checks: {
+      ...built.checks,
+      setupPullRequestReady,
+      setupFilesCommitted,
+      ready: Boolean(built.checks.ready && setupPullRequestReady && setupFilesCommitted),
+    },
+  });
   return {
     ...snapshot,
     setupOptions,
@@ -109,6 +208,8 @@ export function runSetupSelfTest(root) {
     ['Automation workspace available', Boolean(snapshot.workspace?.id)],
     ['Base branch exists', snapshot.checks.baseBranchExists],
     ['Coder and Reviewer models configured', snapshot.checks.modelsConfigured],
+    ['Setup repository files committed', snapshot.checks.setupFilesCommitted],
+    ['Setup pull request merged and synchronized', snapshot.checks.setupPullRequestReady],
     ['GitHub pull-request metadata readable', Array.isArray(prProbe)],
   ].map(([name, pass]) => ({ name, pass: Boolean(pass) }));
   return {
