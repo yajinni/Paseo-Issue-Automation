@@ -56,7 +56,7 @@ async function configureConversation(root, { scope = 'project', url = null } = {
 }
 
 export async function runBrowserCommand(root, command, options = {}) {
-  if (command === 'install') return installPlaywrightChromium({ withSystemDependencies: options.deps === true });
+  if (command === 'install') return installPlaywrightChromium();
   if (command === 'login') return manualLogin();
   if (command === 'configure') return configureConversation(root, { scope: options.scope || 'project', url: options.url || null });
   if (command === 'doctor') return browserDoctor();
@@ -77,8 +77,8 @@ export async function runBrowserCommand(root, command, options = {}) {
   if (command === 'uninstall') return { browsers: uninstallPlaywrightBrowsers(), state: uninstallBrowserState() };
   if (command === 'setup') {
     const library = playwrightLibraryStatus();
-    if (!library.installed) throw new Error('playwright-core is unavailable. Reinstall with optional dependencies enabled.');
-    installPlaywrightChromium({ withSystemDependencies: options.deps === true });
+    if (!library.installed) throw new Error('Playwright is unavailable. Reinstall Paseo Issue Automation.');
+    installPlaywrightChromium();
     await manualLogin();
     const destination = await configureConversation(root, { scope: options.scope || 'project', url: options.url || null });
     const test = await inspectConversation({ conversationUrl: destination.conversationUrl, headless: true, sendTestPrompt: options.send === true });

@@ -50,3 +50,6 @@ jobs:
           npm init -y >/dev/null
           npm install "../$PACKAGE_TGZ"
           npx paseo-issue-automation help
+          test -x node_modules/.bin/playwright
+          ./node_modules/.bin/playwright --version
+          node -e "import('playwright').then(module => { if (!module.chromium) process.exit(1); })"

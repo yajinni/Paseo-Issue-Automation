@@ -17,66 +17,74 @@ const require = createRequire(import.meta.url);
 const BROWSER_LEASE_TTL_MS = 180_000;
 const BROWSER_COMMAND_TIMEOUT_MS = 15 * 60_000;
 
-function playwrightCliPath() {
-  try { return require.resolve('playwright-core/cli'); } catch { return null; }
+export function playwrightCommand(platform = process.platform) {
+  return platform === 'win32' ? 'npx.cmd' : 'npx';
 }
 
-function startProfileHeartbeat(leaseId, metadata) {
-  let error = null;
-  const timer = setInterval(() => {
-    try { renewBrowserProfileLease(leaseId, { ttlMs: BROWSER_LEASE_TTL_MS, metadata }); }
-    catch (caught) { error = caught; clearInterval(timer); }
-  }, 45_000);
-  timer.unref?.();
-  return {
-    stop() { clearInterval(timer); },
-    error() { return error; },
-  };
+export function playwrightInstallArgs(platform = process.platform) {
+  return platform === 'linux'
+    ? ['playwright', 'install', '--with-deps', 'chromium']
+    : ['playwright', 'install', 'chromium'];
 }
 
-export function uninstallPlaywrightBrowsers() {
-  const cli = playwrightCliPath();
-  if (!cli) return { removed: false, reason: 'playwright-core is not installed' };
-  const result = spawnSync(process.execPath, [cli, 'uninstall'], {
-    encoding: 'utf8', stdio: 'pipe', timeout: BROWSER_COMMAND_TIMEOUT_MS, killSignal: 'SIGTERM',
+function runPlaywrightCommand(args, {
+  platform = process.platform,
+  cwd = process.cwd(),
+  spawn = spawnSync,
+} = {}) {
+  return spawn(playwrightCommand(platform), args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    timeout: BROWSER_COMMAND_TIMEOUT_MS,
+    killSignal: 'SIGTERM',
   });
+}
+
+export function uninstallPlaywrightBrowsers(options = {}) {
+  if (!playwrightLibraryStatus().installed) {
+    return { removed: false, reason: 'playwright is not installed' };
+  }
+  const result = runPlaywrightCommand(['playwright', 'uninstall'], options);
   if (result.error?.code === 'ETIMEDOUT') throw new Error('Playwright browser uninstall timed out.');
+  if (result.error) throw new Error(`Unable to run Playwright: ${result.error.message}`);
   if (result.status !== 0) throw new Error(String(result.stderr || result.stdout || 'Playwright browser uninstall failed.').trim());
   return { removed: true, stdout: String(result.stdout || '').trim() };
 }
 
 export function playwrightLibraryStatus() {
   let modulePath = null;
-  try { modulePath = require.resolve('playwright-core'); } catch {}
-  return { installed: Boolean(modulePath), modulePath, cliPath: playwrightCliPath() };
+  try { modulePath = require.resolve('playwright'); } catch {}
+  return { installed: Boolean(modulePath), modulePath };
 }
 
-export function installPlaywrightChromium({ withSystemDependencies = false } = {}) {
-  const cli = playwrightCliPath();
-  if (!cli) throw new Error('playwright-core is not installed. Reinstall this package with optional dependencies enabled.');
-  const commands = [];
-  if (withSystemDependencies) commands.push(['install-deps', 'chromium']);
-  commands.push(['install', 'chromium']);
-  const results = [];
-  for (const args of commands) {
-    const result = spawnSync(process.execPath, [cli, ...args], {
-      encoding: 'utf8', stdio: 'pipe', timeout: BROWSER_COMMAND_TIMEOUT_MS, killSignal: 'SIGTERM',
-    });
-    results.push({ args, status: result.status, stdout: String(result.stdout || '').trim(), stderr: String(result.stderr || '').trim() });
-    if (result.error?.code === 'ETIMEDOUT') throw new Error(`Playwright ${args.join(' ')} timed out.`);
-    if (result.status !== 0) {
-      const elevated = args[0] === 'install-deps';
-      const hint = elevated ? ' Installing operating-system dependencies may require elevated privileges.' : '';
-      throw new Error(`Playwright ${args.join(' ')} failed.${hint} ${results.at(-1).stderr || results.at(-1).stdout}`.trim());
-    }
+export function installPlaywrightChromium(options = {}) {
+  if (!playwrightLibraryStatus().installed) {
+    throw new Error('Playwright is unavailable. Reinstall Paseo Issue Automation so its required dependencies are installed.');
+  }
+  const platform = options.platform || process.platform;
+  const args = playwrightInstallArgs(platform);
+  const result = runPlaywrightCommand(args, { ...options, platform });
+  if (result.error?.code === 'ETIMEDOUT') throw new Error('Chromium installation timed out.');
+  if (result.error) throw new Error(`Unable to run Playwright: ${result.error.message}`);
+  if (result.status !== 0) {
+    const output = String(result.stderr || result.stdout || 'Playwright could not install Chromium.').trim();
+    const hint = platform === 'linux'
+      ? ' Installing Linux browser dependencies may require administrator privileges.'
+      : '';
+    throw new Error(`Chromium installation failed.${hint} ${output}`.trim());
   }
   saveBrowserConfig({ browserInstalledAt: new Date().toISOString() });
-  return { installed: true, results };
+  return {
+    installed: true,
+    command: [playwrightCommand(platform), ...args],
+    stdout: String(result.stdout || '').trim(),
+  };
 }
 
 async function loadPlaywright() {
-  try { return await import('playwright-core'); }
-  catch { throw new Error('playwright-core is unavailable. Run the browser install command first.'); }
+  try { return await import('playwright'); }
+  catch { throw new Error('Playwright is unavailable. Reinstall Paseo Issue Automation, then run Install Chromium.'); }
 }
 
 function composerCandidates(page) {
@@ -258,8 +266,21 @@ export async function submitReviewPrompt({ conversationUrl, prompt, reviewReques
 export function browserDoctor() {
   const library = playwrightLibraryStatus();
   return {
-    library: { installed: library.installed },
+    library: { installed: library.installed, modulePath: library.modulePath },
     profile: browserProfileStatus(),
     config: loadBrowserConfig(),
+  };
+}
+
+function startProfileHeartbeat(leaseId, metadata) {
+  let error = null;
+  const timer = setInterval(() => {
+    try { renewBrowserProfileLease(leaseId, { ttlMs: BROWSER_LEASE_TTL_MS, metadata }); }
+    catch (caught) { error = caught; clearInterval(timer); }
+  }, 45_000);
+  timer.unref?.();
+  return {
+    stop() { clearInterval(timer); },
+    error() { return error; },
   };
 }
