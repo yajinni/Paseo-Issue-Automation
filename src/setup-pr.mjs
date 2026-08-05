@@ -1,13 +1,13 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { run, runJson } from './process.mjs';
 import {
+  atomicWrite,
   loadConfig,
-  loadIntegration,
   loadRuntime,
   saveConfig,
-  saveIntegration,
   saveRuntime,
+  statePaths,
 } from './state.mjs';
 
 export const SETUP_PULL_REQUEST_BRANCH = 'ai/install-paseo-automation';
@@ -24,6 +24,26 @@ export const SETUP_COMMIT_FILES = Object.freeze([
 ]);
 
 const SETUP_COMMIT_FILE_SET = new Set(SETUP_COMMIT_FILES);
+
+function setupPullRequestFile(root) {
+  return path.join(statePaths(root).root, 'setup-pull-request.json');
+}
+
+export function loadSetupPullRequest(root) {
+  const file = setupPullRequestFile(root);
+  if (!existsSync(file)) return null;
+  try {
+    const value = JSON.parse(readFileSync(file, 'utf8'));
+    return value && typeof value === 'object' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSetupPullRequest(root, value) {
+  atomicWrite(setupPullRequestFile(root), `${JSON.stringify(value, null, 2)}\n`);
+  return value;
+}
 
 function normalizedPath(value) {
   return String(value || '').replaceAll('\\', '/').replace(/^\.\//, '');
@@ -116,7 +136,7 @@ export function preflightSetupPullRequest(root, { runner = run } = {}) {
   if (changes.unexpectedFiles.length) {
     throw new Error(`Automatic setup PR creation stopped because unrelated working-tree changes are present: ${changes.unexpectedFiles.join(', ')}.`);
   }
-  const existing = loadIntegration(root).setupPullRequest;
+  const existing = loadSetupPullRequest(root);
   if (existing && existing.state === 'open') {
     throw new Error(`Setup PR #${existing.number} is already open.`);
   }
@@ -142,8 +162,7 @@ function normalizePrSnapshot(pr, previous = {}) {
 }
 
 export function reconcileSetupPullRequest(root, { runner = run, jsonRunner = runJson } = {}) {
-  const integration = loadIntegration(root);
-  const existing = integration.setupPullRequest;
+  const existing = loadSetupPullRequest(root);
   if (!existing?.number) return null;
   const pr = jsonRunner('gh', [
     'pr', 'view', String(existing.number),
@@ -156,9 +175,7 @@ export function reconcileSetupPullRequest(root, { runner = run, jsonRunner = run
     const status = setupChangeStatus(root, { runner });
     const branch = status.currentBranch;
     if (status.available && status.changedFiles.length === 0 && [next.baseBranch, next.branch].includes(branch)) {
-      if (branch === next.branch) {
-        runner('git', ['switch', next.baseBranch], { cwd: root });
-      }
+      if (branch === next.branch) runner('git', ['switch', next.baseBranch], { cwd: root });
       const pull = runner('git', ['pull', '--ff-only', 'origin', next.baseBranch], { cwd: root, allowFailure: true });
       if (pull.ok) {
         next.syncedAt = new Date().toISOString();
@@ -173,8 +190,7 @@ export function reconcileSetupPullRequest(root, { runner = run, jsonRunner = run
     }
   }
 
-  saveIntegration(root, { ...integration, setupPullRequest: next });
-  return next;
+  return saveSetupPullRequest(root, next);
 }
 
 export function createSetupPullRequest(root, {
@@ -237,8 +253,7 @@ export function createSetupPullRequest(root, {
     ], { cwd: root });
     if (!pr?.number || !pr?.url) throw new Error('GitHub created the setup PR, but its metadata could not be read.');
 
-    const integration = loadIntegration(root);
-    const setupPullRequest = {
+    const setupPullRequest = saveSetupPullRequest(root, {
       ...normalizePrSnapshot(pr),
       branch,
       baseBranch,
@@ -247,8 +262,7 @@ export function createSetupPullRequest(root, {
       createdAt: new Date().toISOString(),
       syncedAt: null,
       syncError: null,
-    };
-    saveIntegration(root, { ...integration, setupPullRequest });
+    });
     saveRuntime(root, { ...loadRuntime(root), claimsEnabled: false });
     saveConfig(root, { ...loadConfig(root), setupComplete: false });
 
@@ -276,8 +290,4 @@ export function createSetupPullRequest(root, {
 export function setupPullRequestBlocksSetup(setupPullRequest) {
   if (!setupPullRequest) return false;
   return setupPullRequest.state !== 'merged' || !setupPullRequest.syncedAt;
-}
-
-export function expectedSetupFileExists(root, file) {
-  return existsSync(path.join(root, file));
 }
