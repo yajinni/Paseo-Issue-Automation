@@ -69,7 +69,7 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
     if (pr) {
       const link = pr.url ? '<a href="' + escapeHtml(pr.url) + '" target="_blank" rel="noreferrer">Setup PR #' + Number(pr.number) + '</a>' : 'Setup PR #' + Number(pr.number);
       if (pr.state === 'open') {
-        status.innerHTML = link + ' is waiting to merge. Issues Processing stays disabled until it merges and the base branch synchronizes.';
+        status.innerHTML = link + ' is ready. Review the changes and merge it in GitHub. Setup will continue automatically after the merge.';
         return;
       }
       if (pr.state === 'merged' && !pr.syncedAt) {
