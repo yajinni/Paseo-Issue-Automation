@@ -14,6 +14,12 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
       return label.present && !label.canRepair;
     });
     const workspaceHealthy = Boolean(data.workspace && data.workspace.id);
+    const setupPullRequest = data.setupPullRequest || null;
+    const repositoryChanges = data.repositoryChanges || { expectedFiles: [], unexpectedFiles: [] };
+    const setupPending = Boolean(setupPullRequest && (
+      setupPullRequest.state === 'open'
+      || (setupPullRequest.state === 'merged' && !setupPullRequest.syncedAt)
+    ));
     return {
       issue: issue,
       paseo: paseo,
@@ -22,6 +28,10 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
       paseoHealthy: paseoHealthy,
       labelsHealthy: labelsHealthy,
       workspaceHealthy: workspaceHealthy,
+      setupPullRequest: setupPullRequest,
+      repositoryChanges: repositoryChanges,
+      setupSubmissionError: data.setupSubmissionError || null,
+      setupPending: setupPending,
       allHealthy: issueHealthy && paseoHealthy && labelsHealthy && workspaceHealthy
     };
   }
@@ -38,6 +48,56 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
     }
   }
 
+  function ensureSetupPrStatus(card) {
+    let status = document.getElementById('setup-pr-status');
+    if (status || !card) return status;
+    status = document.createElement('p');
+    status.id = 'setup-pr-status';
+    status.className = 'muted';
+    status.style.margin = '10px 0 0';
+    status.setAttribute('aria-live', 'polite');
+    const head = card.querySelector('.card-head');
+    if (head) head.insertAdjacentElement('afterend', status);
+    else card.prepend(status);
+    return status;
+  }
+
+  function renderSetupPrStatus(card, state) {
+    const status = ensureSetupPrStatus(card);
+    if (!status) return;
+    const pr = state.setupPullRequest;
+    if (pr) {
+      const link = pr.url ? '<a href="' + escapeHtml(pr.url) + '" target="_blank" rel="noreferrer">Setup PR #' + Number(pr.number) + '</a>' : 'Setup PR #' + Number(pr.number);
+      if (pr.state === 'open') {
+        status.innerHTML = link + ' is waiting to merge. Issues Processing stays disabled until it merges and the base branch synchronizes.';
+        return;
+      }
+      if (pr.state === 'merged' && !pr.syncedAt) {
+        status.innerHTML = link + ' merged, but the local base branch has not synchronized yet.' + (pr.syncError ? ' ' + escapeHtml(pr.syncError) : '');
+        return;
+      }
+      if (pr.state === 'merged') {
+        status.innerHTML = link + ' merged and the local base branch is synchronized.';
+        return;
+      }
+      status.innerHTML = link + ' closed without merging. Install components again to create a replacement setup PR.';
+      return;
+    }
+    if (state.setupSubmissionError) {
+      status.textContent = 'Automatic setup PR creation needs attention: ' + state.setupSubmissionError;
+      return;
+    }
+    if (state.repositoryChanges.unexpectedFiles && state.repositoryChanges.unexpectedFiles.length) {
+      status.textContent = 'Automatic setup PR creation is waiting for unrelated working-tree changes to be committed, stashed, or removed.';
+      return;
+    }
+    if (state.repositoryChanges.expectedFiles && state.repositoryChanges.expectedFiles.length) {
+      status.textContent = 'Submitting package-managed setup files through a dedicated pull request…';
+      return;
+    }
+    status.textContent = '';
+  }
+
   function renderComponents(data) {
     latestData = data;
     const state = componentState(data);
@@ -45,10 +105,11 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
     const card = document.getElementById('installation-card');
     const labelsStatus = document.getElementById('labels-status');
 
-    setComponentStatus('issue-template-badge', 'reinstall-issue-template', state.issueHealthy);
-    setComponentStatus('paseo-json-badge', 'reinstall-paseo-service', state.paseoHealthy);
+    setComponentStatus('issue-template-badge', 'reinstall-issue-template', state.issueHealthy || state.setupPending);
+    setComponentStatus('paseo-json-badge', 'reinstall-paseo-service', state.paseoHealthy || state.setupPending);
     setComponentStatus('labels-badge', 'reinstall-labels', state.labelsHealthy);
     setComponentStatus('workspace-badge', 'reinstall-workspace', state.workspaceHealthy);
+    renderSetupPrStatus(card, state);
 
     if (labelsStatus) {
       const present = state.labels.filter(function(label) { return label.present; }).length;
@@ -63,12 +124,21 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
     }
 
     if (action) {
-      action.textContent = state.allHealthy ? 'Uninstall components' : 'Install components';
-      action.className = state.allHealthy ? 'danger' : '';
-      action.disabled = operationInFlight;
-      action.dataset.mode = state.allHealthy ? 'uninstall' : 'install';
+      if (state.setupPending) {
+        action.textContent = state.setupPullRequest.state === 'open'
+          ? 'Setup PR #' + Number(state.setupPullRequest.number) + ' pending'
+          : 'Synchronizing setup PR…';
+        action.className = 'warning';
+        action.disabled = true;
+        action.dataset.mode = 'pending';
+      } else {
+        action.textContent = state.allHealthy ? 'Uninstall components' : 'Install components';
+        action.className = state.allHealthy ? 'danger' : '';
+        action.disabled = operationInFlight;
+        action.dataset.mode = state.allHealthy ? 'uninstall' : 'install';
+      }
     }
-    if (card) card.classList.toggle('done', state.allHealthy);
+    if (card) card.classList.toggle('done', state.allHealthy && !state.setupPending);
   }
 
   async function post(path, body) {
@@ -103,7 +173,7 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
   }
 
   async function installComponents() {
-    return runOperation('Installing…', 'Components installed or reconnected.', async function() {
+    return runOperation('Installing…', 'Components installed and setup changes submitted through a pull request.', async function() {
       await post('/api/install');
       return post('/api/workspace');
     });
@@ -125,6 +195,7 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
   window.componentsAction = function() {
     if (!latestData || operationInFlight) return;
     const state = componentState(latestData);
+    if (state.setupPending) return;
     if (state.allHealthy) {
       openActionDialog(
         'Uninstall components',
@@ -139,7 +210,7 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
     openActionDialog(
       'Install components',
       'Install or reconnect the issue template, Paseo service, GitHub labels, and permanent workspace.',
-      '<p class="muted">Existing matching components are reused. Unrelated repository content is preserved.</p>',
+      '<p class="muted">Package-managed repository files are committed on a dedicated branch and submitted through a setup PR. Existing matching components are reused and unrelated repository content is preserved.</p>',
       'Install components',
       installComponents,
       false
@@ -149,6 +220,7 @@ export const COMPONENTS_UI_SCRIPT = String.raw`
   window.reinstallComponent = function(name) {
     if (!latestData || operationInFlight) return;
     const state = componentState(latestData);
+    if (state.setupPending) return;
     if (name === 'issueTemplate') {
       return runOperation('Repairing…', 'Issue template reinstalled.', function() {
         return post(state.issue.canRepair ? '/api/repair/issue-template' : '/api/install/issue-template');
