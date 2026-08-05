@@ -20,7 +20,9 @@ import * as legacy from './install-legacy.mjs';
 export * from './install-legacy.mjs';
 
 const discoveryCache = new Map();
+const setupPullRequestWorkers = new Map();
 const DISCOVERY_CACHE_MS = 5 * 60_000;
+const SETUP_PULL_REQUEST_POLL_MS = 15_000;
 
 function cachedSetupOptions(root, { force = false, paseoOverride = null } = {}) {
   const cached = discoveryCache.get(root);
@@ -47,6 +49,7 @@ export function installRepositoryIntegration(root) {
   preflightSetupPullRequest(root);
   const components = legacy.installRepositoryIntegration(root);
   const setupPullRequest = createSetupPullRequest(root);
+  ensureSetupPullRequestWorker(root);
   return { ...components, setupPullRequest };
 }
 
@@ -110,7 +113,32 @@ export function tickSetupPullRequest(root) {
   }
 }
 
+function runSetupPullRequestTick(root) {
+  try {
+    tickSetupPullRequest(root);
+  } catch (error) {
+    saveSetupPullRequest(root, {
+      state: 'failed',
+      error: error.message,
+      checkedAt: new Date().toISOString(),
+    });
+    console.error(JSON.stringify({ subsystem: 'setup-pull-request', error: error.message }));
+  }
+}
+
+export function ensureSetupPullRequestWorker(root) {
+  if (setupPullRequestWorkers.has(root)) return setupPullRequestWorkers.get(root);
+  const initial = setTimeout(() => runSetupPullRequestTick(root), 0);
+  const timer = setInterval(() => runSetupPullRequestTick(root), SETUP_PULL_REQUEST_POLL_MS);
+  initial.unref?.();
+  timer.unref?.();
+  const worker = { initial, timer };
+  setupPullRequestWorkers.set(root, worker);
+  return worker;
+}
+
 export function setupSnapshot(root, options = {}) {
+  ensureSetupPullRequestWorker(root);
   const force = options.forceDiscovery === true;
   const setupPullRequest = loadSetupPullRequest(root);
   const repositoryChanges = setupChangeStatus(root);
