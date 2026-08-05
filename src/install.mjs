@@ -5,6 +5,11 @@ import {
   clearSetupRequirementCache,
   setupRequirements,
 } from './setup-requirements.mjs';
+import {
+  reconcileSetupPullRequest,
+  setupChangeStatus,
+  setupPullRequestBlocksSetup,
+} from './setup-pr.mjs';
 import { saveConfig } from './state.mjs';
 import * as legacy from './install-legacy.mjs';
 
@@ -57,16 +62,31 @@ function synchronizeSetupCompletion(root, snapshot) {
 
 export function setupSnapshot(root, options = {}) {
   const force = options.forceDiscovery === true;
+  const setupPullRequest = reconcileSetupPullRequest(root);
+  const repositoryChanges = setupChangeStatus(root);
   const req = setupRequirements(root, { force: options.forceRequirements === true });
   const setupOptions = cachedSetupOptions(root, {
     force,
     paseoOverride: paseoOverrideFromRequirements(req),
   });
-  const snapshot = synchronizeSetupCompletion(root, buildSetupSnapshot(root, {
+  const built = buildSetupSnapshot(root, {
     requirements: req,
     branches: setupOptions.branches?.branches || [],
     forceIntegration: options.forceIntegration === true || force,
-  }));
+  });
+  const setupPullRequestReady = !setupPullRequestBlocksSetup(setupPullRequest);
+  const setupFilesCommitted = repositoryChanges.expectedFiles.length === 0;
+  const snapshot = synchronizeSetupCompletion(root, {
+    ...built,
+    setupPullRequest,
+    repositoryChanges,
+    checks: {
+      ...built.checks,
+      setupPullRequestReady,
+      setupFilesCommitted,
+      ready: Boolean(built.checks.ready && setupPullRequestReady && setupFilesCommitted),
+    },
+  });
   return {
     ...snapshot,
     setupOptions,
@@ -109,6 +129,8 @@ export function runSetupSelfTest(root) {
     ['Automation workspace available', Boolean(snapshot.workspace?.id)],
     ['Base branch exists', snapshot.checks.baseBranchExists],
     ['Coder and Reviewer models configured', snapshot.checks.modelsConfigured],
+    ['Setup repository files committed', snapshot.checks.setupFilesCommitted],
+    ['Setup pull request merged and synchronized', snapshot.checks.setupPullRequestReady],
     ['GitHub pull-request metadata readable', Array.isArray(prProbe)],
   ].map(([name, pass]) => ({ name, pass: Boolean(pass) }));
   return {
