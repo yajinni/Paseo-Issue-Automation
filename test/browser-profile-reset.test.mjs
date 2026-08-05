@@ -26,7 +26,7 @@ test('reset browser profile clears authentication metadata while preserving conf
     const result = resetBrowserProfile(options);
     const config = loadBrowserConfig(options);
 
-    assert.deepEqual(result, { reset: true, authenticationCleared: true });
+    assert.deepEqual(result, { reset: true });
     assert.equal(existsSync(path.join(paths.profile, 'session-cookie')), false);
     assert.equal(config.lastConversationUrl, null);
     assert.equal(config.lastAuthenticatedAt, null);
