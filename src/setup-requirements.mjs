@@ -10,7 +10,7 @@ export const SETUP_REQUIREMENT_IDS = Object.freeze([
   'remote',
 ]);
 
-const REQUIREMENT_CACHE_MS = 5 * 60_000;
+const REQUIREMENT_CACHE_MS = Number.POSITIVE_INFINITY;
 const cache = new Map();
 
 function defaultRequirements() {
