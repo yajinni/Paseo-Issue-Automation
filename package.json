@@ -24,8 +24,8 @@
     "start": "node ./bin/paseo-issue-automation.mjs start",
     "status": "node ./bin/paseo-issue-automation.mjs status"
   },
-  "optionalDependencies": {
-    "playwright-core": "^1.61.1"
+  "dependencies": {
+    "playwright": "^1.61.1"
   },
   "engines": {
     "node": ">=20"
