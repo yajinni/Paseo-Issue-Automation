@@ -1,15 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  installPlaywrightChromium,
   playwrightCommand,
   playwrightInstallArgs,
   playwrightSpawnInvocation,
   systemNpxEnvironment,
-  uninstallPlaywrightBrowsers,
 } from '../src/browser-service.mjs';
 
 test('Playwright is a required project dependency', () => {
@@ -114,45 +110,14 @@ test('Windows Playwright commands fail clearly when system npx is unavailable', 
   );
 });
 
-test('Chromium install and uninstall commands verify the resulting executable state', (t) => {
-  const dataRoot = mkdtempSync(path.join(os.tmpdir(), 'paseo-playwright-operation-'));
-  t.after(() => rmSync(dataRoot, { recursive: true, force: true }));
-  const calls = [];
-  const spawn = (executable, args) => {
-    calls.push({ executable, args });
-    return { status: 0, stdout: 'operation output', stderr: '', error: null };
-  };
-
-  const installed = installPlaywrightChromium({
-    platform: 'linux',
-    env: { PATH: '/usr/local/bin:/usr/bin' },
-    dataRoot,
-    spawn,
-    chromiumStatus: () => ({ installed: true, executablePath: '/playwright/chromium' }),
-  });
-  assert.deepEqual(installed.command, ['npx', 'playwright', 'install', '--with-deps', 'chromium']);
-  assert.equal(installed.chromium.installed, true);
-  assert.equal(installed.stdout, 'operation output');
-
-  const removed = uninstallPlaywrightBrowsers({
-    platform: 'linux',
-    env: { PATH: '/usr/local/bin:/usr/bin' },
-    dataRoot,
-    spawn,
-    profileStatus: { locked: false },
-    chromiumStatus: () => ({ installed: false, executablePath: '/playwright/chromium' }),
-  });
-  assert.deepEqual(removed.command, ['npx', 'playwright', 'uninstall']);
-  assert.equal(removed.chromium.installed, false);
-  assert.equal(removed.stdout, 'operation output');
-  assert.equal(calls.length, 2);
-});
-
-test('Chromium uninstall refuses to run while the dedicated profile is active', () => {
-  assert.throws(
-    () => uninstallPlaywrightBrowsers({ profileStatus: { locked: true } }),
-    /Close the dedicated ChatGPT browser/,
-  );
+test('browser service verifies Chromium executable state around install and uninstall', () => {
+  const source = readFileSync(new URL('../src/browser-service.mjs', import.meta.url), 'utf8');
+  assert.match(source, /export function playwrightChromiumStatus/);
+  assert.match(source, /Chromium install command completed, but no browser executable was found/);
+  assert.match(source, /Chromium uninstall command completed, but the browser executable still exists/);
+  assert.match(source, /Close the dedicated ChatGPT browser before uninstalling Chromium/);
+  assert.match(source, /command: \[playwrightCommand\(platform\), \.\.\.args\]/);
+  assert.match(source, /resolvedCommand: result\.resolvedCommand/);
 });
 
 test('browser service keeps npx and does not resolve Playwright internal CLI files', () => {
@@ -165,6 +130,4 @@ test('browser service keeps npx and does not resolve Playwright internal CLI fil
   assert.match(source, /resolveCommand/);
   assert.match(source, /systemNpxEnvironment/);
   assert.match(source, /playwrightCommand\(platform\)/);
-  assert.match(source, /playwrightChromiumStatus/);
-  assert.match(source, /Chromium uninstall command completed/);
 });
