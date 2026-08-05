@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  COMPONENT_CHANGES_UI_SCRIPT,
-  shouldInstallSystemBrowserDependencies,
-} from '../src/component-changes-ui-script.mjs';
+import { COMPONENT_CHANGES_UI_SCRIPT } from '../src/component-changes-ui-script.mjs';
 import { PR_REVIEW_PANEL } from '../src/pr-review-panel.mjs';
 import {
   PR_REVIEW_SETTINGS_SAVE_SCRIPT,
@@ -35,9 +32,11 @@ test('PR review panel uses only the approved browser controls and wording', () =
   assert.doesNotMatch(PR_REVIEW_PANEL, /Reset and uninstall remove only machine-local browser state/);
 });
 
-test('component changes keep automatic Chromium dependency selection without wrapping settings saves', () => {
-  assert.match(COMPONENT_CHANGES_UI_SCRIPT, /withSystemDependencies/);
-  assert.match(COMPONENT_CHANGES_UI_SCRIPT, /shouldInstallDependencies/);
+test('component changes use one standard server-side Chromium install action', () => {
+  assert.match(COMPONENT_CHANGES_UI_SCRIPT, /prReviewPost\('\/api\/pr-reviews\/browser\/install', \{\}\)/);
+  assert.doesNotMatch(COMPONENT_CHANGES_UI_SCRIPT, /withSystemDependencies/);
+  assert.doesNotMatch(COMPONENT_CHANGES_UI_SCRIPT, /shouldInstallDependencies/);
+  assert.doesNotMatch(COMPONENT_CHANGES_UI_SCRIPT, /modulePath/);
   assert.doesNotMatch(COMPONENT_CHANGES_UI_SCRIPT, /const originalSave/);
   assert.doesNotMatch(COMPONENT_CHANGES_UI_SCRIPT, /Math\.round\(Number\(input\.value/);
 });
@@ -59,13 +58,6 @@ test('automatic PR review toggle preserves the existing settings cards', () => {
   assert.doesNotMatch(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /container\.innerHTML\s*=/);
   assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /grid\.appendChild\(projectCard\)/);
   assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /grid\.appendChild\(browserCard\)/);
-});
-
-test('browser dependency installation is selected from the server environment', () => {
-  assert.equal(shouldInstallSystemBrowserDependencies({ browser: { library: { modulePath: 'C:\\project\\node_modules\\playwright-core' } } }), false);
-  assert.equal(shouldInstallSystemBrowserDependencies({ browser: { library: { modulePath: '/Users/julie/project/node_modules/playwright-core' } } }), false);
-  assert.equal(shouldInstallSystemBrowserDependencies({ browser: { library: { modulePath: '/home/julie/project/node_modules/playwright-core' } } }), true);
-  assert.equal(shouldInstallSystemBrowserDependencies({}, 'Paseo CLI C:\\Programs\\Paseo\\paseo.cmd'), false);
 });
 
 test('PR review conversation resolution does not use a machine-global fallback', () => {
