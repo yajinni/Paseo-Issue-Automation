@@ -9,6 +9,7 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
   let lastPollStartedAt = 0;
   let lastSuccessfulPollAt = 0;
   let consecutiveFailures = 0;
+  let consecutiveStaleResponses = 0;
   let followUpTimer = null;
   let lastWarningKey = null;
 
@@ -47,8 +48,15 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
 
   function maybeWarnAboutStaleData(data) {
     const meta = data && data.statusMeta || {};
-    const oldEnough = Number(meta.remoteAgeMs) >= STALE_WARNING_MS;
-    if (!['stale', 'failed'].includes(meta.state) || (!oldEnough && meta.state !== 'failed')) return;
+    if (!['stale', 'failed'].includes(meta.state)) {
+      consecutiveStaleResponses = 0;
+      if (meta.state === 'fresh') lastWarningKey = null;
+      return;
+    }
+    consecutiveStaleResponses += 1;
+    const oldEnough = Number.isFinite(Number(meta.remoteAgeMs))
+      && Number(meta.remoteAgeMs) >= STALE_WARNING_MS;
+    if (consecutiveStaleResponses < 2 && !oldEnough) return;
     const key = [meta.state, meta.lastError || '', meta.remoteUpdatedAt || 'none'].join('|');
     if (key === lastWarningKey) return;
     lastWarningKey = key;
@@ -132,7 +140,7 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
       } catch (error) {
         consecutiveFailures += 1;
         const timedOut = error && error.name === 'AbortError';
-        const staleFor = lastSuccessfulPollAt ? Date.now() - lastSuccessfulPollAt : Number.POSITIVE_INFINITY;
+        const staleFor = lastSuccessfulPollAt ? Date.now() - lastSuccessfulPollAt : 0;
         setFreshnessChip(timedOut ? 'Status request timed out · retrying' : 'Status request failed · retrying', 'warn');
         if (consecutiveFailures >= 2 || staleFor >= STALE_WARNING_MS) {
           const message = timedOut
