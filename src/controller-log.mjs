@@ -19,7 +19,8 @@ const MAX_ARRAY_LENGTH = 100;
 const SENSITIVE_KEY = /(authorization|cookie|credential|password|secret|token|api[-_]?key|session|prompt|messagebody|rawbody)/i;
 
 function logDirectory(root) {
-  const directory = path.join(statePaths(root).root, 'logs');
+  const stateRoot = statePaths(root).root;
+  const directory = path.join(path.dirname(stateRoot), 'paseo-issue-automation-logs');
   mkdirSync(directory, { recursive: true });
   return directory;
 }
