@@ -111,8 +111,14 @@ function synchronizeSetupCompletion(root, snapshot) {
   return { ...snapshot, config };
 }
 
+export function setupPullRequestAllowsRecovery(setupPullRequest) {
+  if (setupPullRequest?.state === 'open') return false;
+  if (setupPullRequest?.state === 'merged' && !setupPullRequest.syncedAt) return false;
+  return true;
+}
+
 function existingInstallationCanBeRecovered(root, setupPullRequest, repositoryChanges) {
-  if (setupPullRequest?.state === 'open' || setupPullRequest?.state === 'merged') return false;
+  if (!setupPullRequestAllowsRecovery(setupPullRequest)) return false;
   const config = loadConfig(root);
   const integration = loadIntegration(root);
   const labels = Object.values(integration.labels || {});
@@ -267,6 +273,17 @@ export function finishSetup(root) {
   return snapshot.config;
 }
 
+export function setupRepositoryFilesCheck(repositoryChanges = {}) {
+  const changedFiles = Array.isArray(repositoryChanges.expectedFiles)
+    ? repositoryChanges.expectedFiles
+    : [];
+  return {
+    name: 'No uncommitted setup-file changes',
+    pass: changedFiles.length === 0,
+    details: { changedFiles },
+  };
+}
+
 export function runSetupSelfTest(root) {
   const snapshot = setupSnapshot(root, {
     forceDiscovery: true,
@@ -279,25 +296,26 @@ export function runSetupSelfTest(root) {
     timeoutMs: 8_000,
   });
   const checks = [
-    ['Git repository and remote', Boolean(snapshot.requirements.git && snapshot.requirements.remote)],
-    ['GitHub CLI authenticated', snapshot.requirements.githubAuthenticated],
-    ['Paseo daemon reachable', snapshot.requirements.paseoReachable],
-    ['Issue template installed', snapshot.integration.issueTemplate],
-    ['Paseo service installed', snapshot.integration.paseoService],
-    ['Lifecycle labels present', snapshot.integration.labelsReady],
-    ['Automation workspace available', Boolean(snapshot.workspace?.id)],
-    ['Base branch exists', snapshot.checks.baseBranchExists],
-    ['Coder and Reviewer models configured', snapshot.checks.modelsConfigured],
-    ['Setup repository files committed', snapshot.checks.setupFilesCommitted],
-    ['Setup pull request merged and synchronized', snapshot.checks.setupPullRequestReady],
-    ['GitHub pull-request metadata readable', Array.isArray(prProbe)],
-  ].map(([name, pass]) => ({ name, pass: Boolean(pass) }));
+    { name: 'Git repository and remote', pass: Boolean(snapshot.requirements.git && snapshot.requirements.remote) },
+    { name: 'GitHub CLI authenticated', pass: snapshot.requirements.githubAuthenticated },
+    { name: 'Paseo daemon reachable', pass: snapshot.requirements.paseoReachable },
+    { name: 'Issue template installed', pass: snapshot.integration.issueTemplate },
+    { name: 'Paseo service installed', pass: snapshot.integration.paseoService },
+    { name: 'Lifecycle labels present', pass: snapshot.integration.labelsReady },
+    { name: 'Automation workspace available', pass: Boolean(snapshot.workspace?.id) },
+    { name: 'Base branch exists', pass: snapshot.checks.baseBranchExists },
+    { name: 'Coder and Reviewer models configured', pass: snapshot.checks.modelsConfigured },
+    setupRepositoryFilesCheck(snapshot.repositoryChanges),
+    { name: 'Setup pull request merged and synchronized', pass: snapshot.checks.setupPullRequestReady },
+    { name: 'GitHub pull-request metadata readable', pass: Array.isArray(prProbe) },
+  ].map((check) => ({ ...check, pass: Boolean(check.pass) }));
   return {
     pass: checks.every((check) => check.pass),
     destructive: false,
     note: 'No issue, branch, agent, pull request, or repository file was created by this self-test.',
     modelAvailability: 'Available harnesses and models are discovered from the running Paseo daemon; this self-test does not launch billable agents.',
     paseoMessage: snapshot.requirements.paseoMessage,
+    uncommittedSetupFiles: snapshot.repositoryChanges.expectedFiles,
     checks,
   };
 }
