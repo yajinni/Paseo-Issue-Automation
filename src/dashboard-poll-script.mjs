@@ -23,6 +23,12 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
     return Math.round(minutes / 60) + 'h ago';
   }
 
+  function remoteStatusMeta(data) {
+    return (data && data.statusMeta)
+      || (data && data.automation && data.automation.statusMeta)
+      || {};
+  }
+
   function setFreshnessChip(text, state) {
     const chip = document.getElementById('health-poll');
     if (!chip) return;
@@ -31,7 +37,7 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
   }
 
   function renderStatusFreshness(data) {
-    const meta = data && data.statusMeta || {};
+    const meta = remoteStatusMeta(data);
     if (meta.state === 'fresh') {
       setFreshnessChip('Up to date · ' + relativeAge(meta.remoteAgeMs), 'good');
     } else if (meta.state === 'refreshing') {
@@ -47,7 +53,7 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
   }
 
   function maybeWarnAboutStaleData(data) {
-    const meta = data && data.statusMeta || {};
+    const meta = remoteStatusMeta(data);
     if (!['stale', 'failed'].includes(meta.state)) {
       consecutiveStaleResponses = 0;
       if (meta.state === 'fresh') lastWarningKey = null;
@@ -66,7 +72,7 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
   }
 
   function scheduleRefreshFollowUp(data) {
-    const meta = data && data.statusMeta || {};
+    const meta = remoteStatusMeta(data);
     if (!meta.refreshing || followUpTimer) return;
     followUpTimer = setTimeout(function() {
       followUpTimer = null;
@@ -82,6 +88,7 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
       return;
     }
 
+    const incomingStatusMeta = remoteStatusMeta(data);
     dashboardData = Object.assign({}, dashboardData, {
       automation: data.automation || dashboardData.automation,
       prReviews: data.prReviews == null ? dashboardData.prReviews : data.prReviews,
@@ -89,7 +96,9 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
       config: data.config || dashboardData.config,
       requirements: data.requirements || dashboardData.requirements,
       checks: data.checks || dashboardData.checks,
-      statusMeta: data.statusMeta || dashboardData.statusMeta
+      statusMeta: Object.keys(incomingStatusMeta).length
+        ? incomingStatusMeta
+        : remoteStatusMeta(dashboardData)
     });
 
     if (!dashboardData.automation) {
