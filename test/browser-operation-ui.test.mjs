@@ -14,8 +14,9 @@ test('Chromium install and uninstall use a visible command progress dialog', () 
   assert.match(BROWSER_OPERATION_UI_SCRIPT, /npx playwright uninstall/);
   assert.match(BROWSER_OPERATION_UI_SCRIPT, /Command output/);
   assert.match(BROWSER_OPERATION_UI_SCRIPT, /Chromium installed and verified/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Chromium uninstalled and verified/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /profile and login will be preserved/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Chromium and dedicated browser state removed and verified/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /deleting the dedicated ChatGPT profile, login, selected conversation/);
+  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /profile and login will be preserved/);
 });
 
 test('dashboard refresh callers share the same in-flight setup snapshot promise', () => {
