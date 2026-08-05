@@ -70,6 +70,13 @@ import {
   returnIssueToBacklog,
   returnIssueToCodingQueue,
 } from './closed-unmerged-actions.mjs';
+import { appendControllerLog, listControllerLogs } from './controller-log.mjs';
+import {
+  logApiActionFailed,
+  logApiActionStarted,
+  logApiActionSucceeded,
+  logAutomatedAction,
+} from './server-action-log.mjs';
 
 function json(response, status, body) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -89,6 +96,31 @@ function openBrowser(url) {
   const child = spawn(command, args, { detached: true, stdio: 'ignore' });
   child.on('error', () => {});
   child.unref();
+}
+
+function safeLog(callback) {
+  try { return callback(); }
+  catch (error) {
+    console.error(JSON.stringify({ subsystem: 'controller-log', error: error.message }));
+    return null;
+  }
+}
+
+function compactAutomatedResult(result) {
+  if (result === null || result === undefined) return null;
+  if (Array.isArray(result)) return { count: result.length };
+  if (typeof result !== 'object') return result;
+  const summary = {};
+  for (const key of [
+    'claimed', 'started', 'reason', 'issueNumber', 'pullRequestNumber', 'jobId', 'jobId',
+    'reviewJobId', 'fixJobId', 'state', 'changed', 'processed', 'queued', 'failed', 'pid',
+  ]) {
+    if (result[key] !== undefined) summary[key] = result[key];
+  }
+  for (const key of ['results', 'effects', 'managedPullRequests', 'reviewJobs', 'fixJobs']) {
+    if (Array.isArray(result[key])) summary[`${key}Count`] = result[key].length;
+  }
+  return Object.keys(summary).length ? summary : result;
 }
 
 export function repositoryDiscoveryAvailable(snapshot) {
@@ -129,14 +161,40 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
   let manualBrowserSession = null;
   let closing = false;
 
+  safeLog(() => appendControllerLog(root, {
+    category: 'controller',
+    action: 'server-start',
+    status: 'started',
+    source: 'system',
+    message: 'Issue Execution Controller server is starting.',
+    details: { root },
+  }));
+
   const dispatch = () => {
     try {
       const result = dispatchAvailableIssues(root);
       updateManagedDispatch(root, result);
+      if (result?.claimed || result?.started) {
+        safeLog(() => logAutomatedAction(root, {
+          category: 'issues',
+          action: 'dispatch-issue-work',
+          status: 'success',
+          message: 'The Issues Processing scheduler started eligible work.',
+          details: compactAutomatedResult(result),
+        }));
+      }
       return result;
     } catch (error) {
       const result = { claimed: false, error: error.message };
       updateManagedDispatch(root, result);
+      safeLog(() => logAutomatedAction(root, {
+        level: 'error',
+        category: 'issues',
+        action: 'dispatch-issue-work',
+        status: 'failed',
+        message: `The Issues Processing scheduler failed: ${error.message}`,
+        details: { error },
+      }));
       throw error;
     }
   };
@@ -156,8 +214,26 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
     const store = loadPrReviewStore(root);
     reconciliationTimer = setTimeout(() => {
       try {
-        if (loadPrReviewStore(root).config.reconciliation.enabled) reconcileManagedPullRequests(root);
+        if (loadPrReviewStore(root).config.reconciliation.enabled) {
+          const result = reconcileManagedPullRequests(root);
+          safeLog(() => logAutomatedAction(root, {
+            level: 'debug',
+            category: 'pr-reviews',
+            action: 'reconcile-pr-states',
+            status: 'success',
+            message: 'Automatic PR state reconciliation completed.',
+            details: compactAutomatedResult(result),
+          }));
+        }
       } catch (error) {
+        safeLog(() => logAutomatedAction(root, {
+          level: 'error',
+          category: 'pr-reviews',
+          action: 'reconcile-pr-states',
+          status: 'failed',
+          message: `Automatic PR state reconciliation failed: ${error.message}`,
+          details: { error },
+        }));
         console.error(JSON.stringify({ subsystem: 'github-reconciliation', error: error.message }));
       } finally {
         scheduleReconciliation();
@@ -170,17 +246,56 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
     if (reviewTimer) clearInterval(reviewTimer);
     if (reconciliationTimer) clearTimeout(reconciliationTimer);
     reviewTimer = setInterval(() => {
-      try { tickReviewScheduler(root); } catch (error) { console.error(JSON.stringify({ subsystem: 'serial-review-scheduler', error: error.message })); }
+      try {
+        const result = tickReviewScheduler(root);
+        if (result?.started) {
+          safeLog(() => logAutomatedAction(root, {
+            category: 'pr-reviews',
+            action: 'start-pr-review',
+            status: 'success',
+            message: 'The serial PR Review scheduler started a review worker.',
+            details: compactAutomatedResult(result),
+          }));
+        }
+      } catch (error) {
+        safeLog(() => logAutomatedAction(root, {
+          level: 'error',
+          category: 'pr-reviews',
+          action: 'start-pr-review',
+          status: 'failed',
+          message: `The serial PR Review scheduler failed: ${error.message}`,
+          details: { error },
+        }));
+        console.error(JSON.stringify({ subsystem: 'serial-review-scheduler', error: error.message }));
+      }
     }, 5_000);
     reviewTimer.unref();
     scheduleReconciliation();
   };
 
-  try { recoverPrReviewState(root); } catch (error) {
+  try {
+    const result = recoverPrReviewState(root);
+    safeLog(() => logAutomatedAction(root, {
+      category: 'pr-reviews',
+      action: 'startup-recovery',
+      status: 'success',
+      message: 'PR Review startup recovery completed.',
+      details: compactAutomatedResult(result),
+    }));
+  } catch (error) {
+    safeLog(() => logAutomatedAction(root, {
+      level: 'error',
+      category: 'pr-reviews',
+      action: 'startup-recovery',
+      status: 'failed',
+      message: `PR Review startup recovery failed: ${error.message}`,
+      details: { error },
+    }));
     console.error(JSON.stringify({ subsystem: 'startup-recovery', error: error.message }));
   }
 
   const server = http.createServer(async (request, response) => {
+    let requestLog = null;
     try {
       const url = new URL(request.url, 'http://localhost');
       if (request.method === 'GET' && url.pathname === '/') {
@@ -212,6 +327,16 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
         json(response, 200, prReviewStatus(root));
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/api/logs') {
+        json(response, 200, listControllerLogs(root, {
+          limit: url.searchParams.get('limit'),
+          level: url.searchParams.get('level'),
+          category: url.searchParams.get('category'),
+          query: url.searchParams.get('query'),
+          before: url.searchParams.get('before'),
+        }));
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/api/preview') {
         json(response, 200, installationPreview(root));
         return;
@@ -222,6 +347,8 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
       }
 
       const body = await readBody(request);
+      requestLog = { pathname: url.pathname, body, startedAt: Date.now() };
+      safeLog(() => logApiActionStarted(root, requestLog.pathname, requestLog.body));
       let result = null;
       if (url.pathname === '/api/install') result = installRepositoryIntegration(root);
       else if (url.pathname === '/api/install/issue-template') result = installIssueTemplate(root);
@@ -308,9 +435,13 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
         json(response, 404, { error: 'Not found' });
         return;
       }
+      safeLog(() => logApiActionSucceeded(root, requestLog.pathname, requestLog.body, result, requestLog.startedAt));
       clearSetupSnapshotCache(root);
       json(response, 200, { result, snapshot: combinedSnapshot(root) });
     } catch (error) {
+      if (requestLog) {
+        safeLog(() => logApiActionFailed(root, requestLog.pathname, requestLog.body, error, requestLog.startedAt));
+      }
       json(response, 400, { error: error.message });
     }
   });
@@ -323,6 +454,14 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}`;
   console.log(`Issue Execution Controller dashboard: ${url}`);
+  safeLog(() => appendControllerLog(root, {
+    category: 'controller',
+    action: 'server-start',
+    status: 'success',
+    source: 'system',
+    message: 'Issue Execution Controller server started.',
+    details: { url, root },
+  }));
   resetCodingTimer();
   resetPrReviewTimers();
   server.on('close', async () => {
@@ -331,6 +470,14 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
     if (reviewTimer) clearInterval(reviewTimer);
     if (reconciliationTimer) clearTimeout(reconciliationTimer);
     await closeManualBrowser(manualBrowserSession).catch(() => {});
+    safeLog(() => appendControllerLog(root, {
+      category: 'controller',
+      action: 'server-stop',
+      status: 'success',
+      source: 'system',
+      message: 'Issue Execution Controller server stopped.',
+      details: { root },
+    }));
   });
   if (open) openBrowser(initialView ? `${url}#${encodeURIComponent(initialView)}` : url);
   return { server, root, url };

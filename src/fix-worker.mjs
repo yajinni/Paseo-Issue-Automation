@@ -1,10 +1,19 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { appendControllerLog } from './controller-log.mjs';
 import { appendHistory, findFixJob, findManaged, loadPrReviewStore, mutatePrReviewStore, nowIso, transitionManaged } from './pr-review-store.mjs';
 import { enqueueReviewInStore } from './pr-review-queue.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
 import { agentCommandTimeoutMs, run } from './process.mjs';
 import { loadConfig, loadRun } from './state.mjs';
+
+function safeFixLog(root, input) {
+  try { return appendControllerLog(root, { category: 'pr-reviews', source: 'automation', ...input }); }
+  catch (error) {
+    console.error(JSON.stringify({ subsystem: 'controller-log', error: error.message }));
+    return null;
+  }
+}
 
 function latestPassingValidation(state, commit) {
   return [...(state?.events || [])]
@@ -57,6 +66,19 @@ export function completeFixJob(root, fixJobId, {
   if (!job) throw new Error(`Fix job ${fixJobId} was not found.`);
   const managed = findManaged(initial, job.managedPullRequestId);
   if (!managed) throw new Error(`Managed PR ${job.managedPullRequestId} was not found.`);
+  safeFixLog(root, {
+    action: 'run-pr-fix',
+    status: 'started',
+    message: `PR fix job ${job.id} started for PR #${managed.pullRequestNumber}.`,
+    details: {
+      fixJobId: job.id,
+      managedPullRequestId: managed.id,
+      pullRequestNumber: managed.pullRequestNumber,
+      issueNumber: managed.issueNumber,
+      reviewedHeadSha: job.reviewedHeadSha,
+      coderAgentId: job.coderAgentId,
+    },
+  });
   if (waitForAgent) {
     const result = run('paseo', ['wait', String(job.coderAgentId)], {
       cwd: root,
@@ -92,19 +114,47 @@ export function completeFixJob(root, fixJobId, {
     add: [PR_REVIEW_LABELS.queued],
     remove: [PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.failed],
   });
+  safeFixLog(root, {
+    action: 'run-pr-fix',
+    status: 'success',
+    message: `PR fix job ${job.id} completed and queued a new review for PR #${managed.pullRequestNumber}.`,
+    details: {
+      fixJobId: job.id,
+      managedPullRequestId: managed.id,
+      pullRequestNumber: managed.pullRequestNumber,
+      issueNumber: managed.issueNumber,
+      newHeadSha,
+      reviewRound: result.reviewRound,
+    },
+  });
   return result;
 }
 
 async function main() {
   const [root, fixJobId] = process.argv.slice(2);
   if (!root || !fixJobId) throw new Error('Usage: fix-worker.mjs <repository-root> <fix-job-id>');
-  try { completeFixJob(path.resolve(root), fixJobId); }
+  const resolvedRoot = path.resolve(root);
+  try { completeFixJob(resolvedRoot, fixJobId); }
   catch (error) {
-    mutatePrReviewStore(path.resolve(root), (store) => {
+    let context = null;
+    mutatePrReviewStore(resolvedRoot, (store) => {
       const job = findFixJob(store, fixJobId);
       const managed = job ? findManaged(store, job.managedPullRequestId) : null;
+      context = {
+        fixJobId,
+        managedPullRequestId: managed?.id || job?.managedPullRequestId || null,
+        pullRequestNumber: managed?.pullRequestNumber || job?.pullRequestNumber || null,
+        issueNumber: managed?.issueNumber || job?.issueNumber || null,
+      };
       if (job) { job.state = 'failed'; job.lastError = error.message; job.updatedAt = nowIso(); }
       if (managed) transitionManaged(store, managed, 'failed', { reason: 'PR fix job failed.', actor: 'fix-worker', error: error.message });
+    });
+    safeFixLog(resolvedRoot, {
+      level: 'error',
+      action: 'run-pr-fix',
+      status: 'failed',
+      message: `PR fix job ${fixJobId} failed: ${error.message}`,
+      details: { ...context, error },
     });
     throw error;
   }
