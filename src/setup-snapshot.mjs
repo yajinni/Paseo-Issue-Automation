@@ -17,7 +17,7 @@ import {
   statePaths,
 } from './state.mjs';
 
-const LIVE_SETUP_CACHE_MS = 5 * 60_000;
+const LIVE_SETUP_CACHE_MS = Number.POSITIVE_INFINITY;
 const liveCache = new Map();
 
 function sha256(value) {

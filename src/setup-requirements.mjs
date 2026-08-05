@@ -10,7 +10,7 @@ export const SETUP_REQUIREMENT_IDS = Object.freeze([
   'remote',
 ]);
 
-const REQUIREMENT_CACHE_MS = 5 * 60_000;
+const REQUIREMENT_CACHE_MS = Number.POSITIVE_INFINITY;
 const cache = new Map();
 
 function defaultRequirements() {
@@ -57,7 +57,8 @@ function entry(root) {
 }
 
 function fresh(current, id) {
-  const checkedAt = current.checked.get(id) || 0;
+  if (!current.checked.has(id)) return false;
+  const checkedAt = current.checked.get(id);
   return Date.now() - checkedAt < REQUIREMENT_CACHE_MS;
 }
 
