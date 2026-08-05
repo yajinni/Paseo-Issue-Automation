@@ -15,6 +15,8 @@ function fakeNode() {
     title: '',
     value: '',
     dataset: {},
+    oninput: null,
+    onclick: null,
     classList: {
       toggle(name, enabled) { enabled ? classes.add(name) : classes.delete(name); },
       contains(name) { return classes.has(name); },
@@ -24,22 +26,31 @@ function fakeNode() {
 
 function browserUiHarness(fetchImpl) {
   const ids = [
-    'pr-chromium-status', 'pr-chat-url-status', 'pr-install-chromium', 'pr-test-browser',
-    'pr-browser-test-result', 'pr-chromium-badge', 'pr-chat-url-badge', 'pr-browser-chip',
-    'pr-conversation-chip', 'pr-project-url',
+    'pr-chromium-status', 'pr-chat-url-status', 'pr-install-chromium', 'pr-sign-in-browser',
+    'pr-test-browser', 'pr-browser-test-result', 'pr-chromium-badge', 'pr-chat-url-badge',
+    'pr-browser-chip', 'pr-conversation-chip', 'pr-project-url',
   ];
   const nodes = Object.fromEntries(ids.map((id) => [id, fakeNode()]));
   const refreshes = [];
+  const posts = [];
   const toasts = [];
   const window = {
+    latestData: null,
     refreshPrReviews(force) {
       refreshes.push(force);
       return Promise.resolve(window.latestData);
     },
+    prReviewPost(path, body) {
+      posts.push({ path, body });
+      return Promise.resolve({});
+    },
   };
   const context = {
     window,
-    document: { getElementById(id) { return nodes[id] || null; } },
+    document: {
+      getElementById(id) { return nodes[id] || null; },
+      createElement() { return fakeNode(); },
+    },
     fetch: fetchImpl,
     toast(message, bad) { toasts.push({ message, bad: bad === true }); },
     JSON,
@@ -48,10 +59,20 @@ function browserUiHarness(fetchImpl) {
     Error,
   };
   vm.runInNewContext(PR_REVIEW_BROWSER_SETUP_UI_SCRIPT, context);
-  return { context, window, nodes, refreshes, toasts };
+  return { context, window, nodes, refreshes, posts, toasts };
 }
 
-test('generated dashboard exposes only the simplified browser setup and GitHub Issues wording', () => {
+function readyData(url = 'https://chatgpt.com/c/project-review') {
+  return {
+    config: { browserReview: { projectConversationUrl: url } },
+    browser: {
+      chromium: { installed: true },
+      profile: { locked: false, lastAuthenticatedAt: null },
+    },
+  };
+}
+
+test('generated dashboard exposes the simplified setup, safe sign-in path, and GitHub Issues wording', () => {
   const html = dashboardHtml();
   assert.match(html, /PR Review Chat URL/);
   assert.match(html, /id="pr-project-url"/);
@@ -59,6 +80,9 @@ test('generated dashboard exposes only the simplified browser setup and GitHub I
   assert.match(html, /Chromium Installed/);
   assert.match(html, /id="pr-test-browser"[^>]*>Test</);
   assert.match(html, /id="pr-install-chromium"/);
+  assert.match(html, /pr-sign-in-browser/);
+  assert.match(html, /Sign in to ChatGPT/);
+  assert.match(html, /\/api\/pr-reviews\/browser\/open/);
   assert.match(html, /Reset profile/);
   assert.match(html, /Uninstall Chromium/);
 
@@ -88,17 +112,15 @@ test('generated dashboard exposes only the simplified browser setup and GitHub I
 
 test('browser requirements use actual Chromium and only the saved project chat URL', () => {
   const harness = browserUiHarness(async () => { throw new Error('unexpected fetch'); });
-  const data = {
-    config: { browserReview: { projectConversationUrl: null } },
-    browser: { chromium: { installed: true } },
-    globalConversationUrl: 'https://chatgpt.com/c/global-fallback',
-  };
+  const data = readyData(null);
+  data.globalConversationUrl = 'https://chatgpt.com/c/global-fallback';
   harness.window.latestData = data;
   harness.window.renderPrReviewBrowserSetup(data);
 
   assert.equal(harness.nodes['pr-chromium-status'].textContent, 'Installed');
   assert.equal(harness.nodes['pr-chat-url-status'].textContent, 'Missing');
   assert.equal(harness.nodes['pr-test-browser'].disabled, true);
+  assert.equal(harness.nodes['pr-sign-in-browser'].disabled, false);
   assert.match(harness.nodes['pr-conversation-chip'].textContent, /missing/i);
 
   data.config.browserReview.projectConversationUrl = 'https://chatgpt.com/c/project-review';
@@ -106,6 +128,35 @@ test('browser requirements use actual Chromium and only the saved project chat U
   assert.equal(harness.nodes['pr-chat-url-status'].textContent, 'Configured');
   assert.equal(harness.nodes['pr-test-browser'].disabled, false);
   assert.equal(harness.nodes['pr-install-chromium'].classList.contains('hidden'), true);
+});
+
+test('Sign in opens the persistent Chromium profile at the saved project URL', async () => {
+  const calls = [];
+  const harness = browserUiHarness(async (path, options) => {
+    calls.push({ path, options });
+    return { ok: true, text: async () => JSON.stringify({ opened: true }) };
+  });
+  const data = readyData();
+  harness.window.latestData = data;
+  harness.window.renderPrReviewBrowserSetup(data);
+
+  const result = await harness.window.openPrReviewBrowserForLogin();
+  assert.deepEqual(result, { opened: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, '/api/pr-reviews/browser/open');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    url: 'https://chatgpt.com/c/project-review',
+  });
+  assert.equal(harness.nodes['pr-sign-in-browser'].disabled, true);
+  assert.equal(harness.nodes['pr-test-browser'].disabled, true);
+  assert.match(harness.nodes['pr-browser-test-result'].textContent, /Complete sign-in, close the browser, then run Test/);
+
+  data.browser.profile.locked = true;
+  harness.window.renderPrReviewBrowserSetup(data);
+  data.browser.profile.locked = false;
+  harness.window.renderPrReviewBrowserSetup(data);
+  assert.equal(harness.nodes['pr-sign-in-browser'].disabled, false);
+  assert.equal(harness.nodes['pr-test-browser'].disabled, false);
 });
 
 test('Test launches the saved PR Review Chat URL visibly without sending a message or duplicating requests', async () => {
@@ -116,10 +167,7 @@ test('Test launches the saved PR Review Chat URL visibly without sending a messa
     calls.push({ path, options });
     return responsePromise;
   });
-  const data = {
-    config: { browserReview: { projectConversationUrl: 'https://chatgpt.com/c/project-review' } },
-    browser: { chromium: { installed: true } },
-  };
+  const data = readyData();
   harness.nodes['pr-project-url'].value = data.config.browserReview.projectConversationUrl;
   harness.window.latestData = data;
   harness.window.renderPrReviewBrowserSetup(data);
@@ -147,15 +195,58 @@ test('Test launches the saved PR Review Chat URL visibly without sending a messa
   assert.equal(harness.nodes['pr-project-url'].value, 'https://chatgpt.com/c/project-review');
 });
 
+test('test results clear when the saved URL or Chromium readiness changes', async () => {
+  const harness = browserUiHarness(async () => ({
+    ok: true,
+    text: async () => JSON.stringify({ result: { ok: true } }),
+  }));
+  const data = readyData();
+  harness.window.latestData = data;
+  harness.window.renderPrReviewBrowserSetup(data);
+  await harness.window.testPrReviewBrowserSetup();
+  assert.match(harness.nodes['pr-browser-test-result'].textContent, /verified/);
+
+  data.config.browserReview.projectConversationUrl = 'https://chatgpt.com/c/different-review';
+  harness.window.renderPrReviewBrowserSetup(data);
+  assert.equal(harness.nodes['pr-browser-test-result'].textContent, '');
+
+  await harness.window.testPrReviewBrowserSetup();
+  assert.match(harness.nodes['pr-browser-test-result'].textContent, /verified/);
+  data.browser.chromium.installed = false;
+  harness.window.renderPrReviewBrowserSetup(data);
+  assert.equal(harness.nodes['pr-browser-test-result'].textContent, '');
+});
+
+test('editing the URL or resetting the profile clears a displayed test result', async () => {
+  const harness = browserUiHarness(async () => ({
+    ok: true,
+    text: async () => JSON.stringify({ result: { ok: true } }),
+  }));
+  const data = readyData();
+  harness.nodes['pr-project-url'].value = data.config.browserReview.projectConversationUrl;
+  harness.window.latestData = data;
+  harness.window.renderPrReviewBrowserSetup(data);
+  await harness.window.testPrReviewBrowserSetup();
+  assert.match(harness.nodes['pr-browser-test-result'].textContent, /verified/);
+
+  harness.nodes['pr-project-url'].value = 'https://chatgpt.com/c/unsaved-change';
+  harness.nodes['pr-project-url'].oninput();
+  assert.equal(harness.nodes['pr-browser-test-result'].textContent, '');
+
+  harness.nodes['pr-project-url'].value = data.config.browserReview.projectConversationUrl;
+  await harness.window.testPrReviewBrowserSetup();
+  assert.match(harness.nodes['pr-browser-test-result'].textContent, /verified/);
+  await harness.window.prReviewPost('/api/pr-reviews/browser/reset');
+  assert.equal(harness.nodes['pr-browser-test-result'].textContent, '');
+  assert.equal(harness.posts.at(-1).path, '/api/pr-reviews/browser/reset');
+});
+
 test('failed Test restores controls and preserves the saved URL', async () => {
   const harness = browserUiHarness(async () => ({
     ok: false,
     text: async () => JSON.stringify({ error: 'ChatGPT redirected to login.' }),
   }));
-  const data = {
-    config: { browserReview: { projectConversationUrl: 'https://chatgpt.com/c/project-review' } },
-    browser: { chromium: { installed: true } },
-  };
+  const data = readyData();
   harness.nodes['pr-project-url'].value = data.config.browserReview.projectConversationUrl;
   harness.window.latestData = data;
   harness.window.renderPrReviewBrowserSetup(data);
