@@ -1,4 +1,5 @@
 import { runJson } from './process.mjs';
+import { appendControllerLog } from './controller-log.mjs';
 import { discoverSetupOptions } from './setup-discovery.mjs';
 import { buildSetupSnapshot, clearSetupSnapshotCache } from './setup-snapshot.mjs';
 import {
@@ -23,6 +24,19 @@ const discoveryCache = new Map();
 const setupPullRequestWorkers = new Map();
 const DISCOVERY_CACHE_MS = 5 * 60_000;
 const SETUP_PULL_REQUEST_POLL_MS = 15_000;
+
+function safeSetupLog(root, input) {
+  try { return appendControllerLog(root, { category: 'setup', source: 'automation', ...input }); }
+  catch (error) {
+    console.error(JSON.stringify({ subsystem: 'controller-log', error: error.message }));
+    return null;
+  }
+}
+
+function setupPullRequestKey(value) {
+  if (!value) return 'none';
+  return [value.number, value.state, value.mergedAt, value.syncedAt, value.error].map((item) => item || '').join('|');
+}
 
 function cachedSetupOptions(root, { force = false, paseoOverride = null } = {}) {
   const cached = discoveryCache.get(root);
@@ -49,6 +63,18 @@ export function installRepositoryIntegration(root) {
   preflightSetupPullRequest(root);
   const components = legacy.installRepositoryIntegration(root);
   const setupPullRequest = createSetupPullRequest(root);
+  if (setupPullRequest?.created && setupPullRequest.pullRequest) {
+    safeSetupLog(root, {
+      action: 'create-setup-pr',
+      status: 'success',
+      message: `Setup PR #${setupPullRequest.pullRequest.number} was committed, pushed, and opened automatically.`,
+      details: {
+        pullRequest: setupPullRequest.pullRequest,
+        returnedToBaseBranch: setupPullRequest.returnedToBaseBranch,
+        switchError: setupPullRequest.switchError,
+      },
+    });
+  }
   ensureSetupPullRequestWorker(root);
   return { ...components, setupPullRequest };
 }
@@ -71,6 +97,17 @@ function synchronizeSetupCompletion(root, snapshot) {
     setupComplete,
     workspace: snapshot.workspace || snapshot.config.workspace,
   });
+  safeSetupLog(root, {
+    action: setupComplete ? 'setup-ready' : 'setup-not-ready',
+    status: setupComplete ? 'success' : 'waiting',
+    message: setupComplete
+      ? 'Repository setup is complete and autonomous execution can be enabled.'
+      : 'Repository setup is not complete; autonomous execution remains disabled.',
+    details: {
+      setupPullRequestReady: snapshot.checks.setupPullRequestReady,
+      setupFilesCommitted: snapshot.checks.setupFilesCommitted,
+    },
+  });
   return { ...snapshot, config };
 }
 
@@ -90,7 +127,23 @@ function existingInstallationCanBeRecovered(root, setupPullRequest, repositoryCh
 }
 
 export function tickSetupPullRequest(root) {
+  const previous = loadSetupPullRequest(root);
   let setupPullRequest = reconcileSetupPullRequest(root);
+  if (setupPullRequestKey(previous) !== setupPullRequestKey(setupPullRequest) && setupPullRequest) {
+    safeSetupLog(root, {
+      level: setupPullRequest.state === 'failed' ? 'error' : 'info',
+      action: 'setup-pr-state',
+      status: setupPullRequest.state === 'failed' ? 'failed' : setupPullRequest.syncedAt ? 'success' : 'waiting',
+      message: setupPullRequest.syncedAt
+        ? `Setup PR #${setupPullRequest.number} merged and the local base branch synchronized.`
+        : setupPullRequest.state === 'merged'
+          ? `Setup PR #${setupPullRequest.number} merged and is waiting for local synchronization.`
+          : setupPullRequest.state === 'open'
+            ? `Setup PR #${setupPullRequest.number} is open and waiting to merge.`
+            : `Setup PR state changed to ${setupPullRequest.state}.`,
+      details: { previous, setupPullRequest },
+    });
+  }
   const repositoryChanges = setupChangeStatus(root);
   if (!existingInstallationCanBeRecovered(root, setupPullRequest, repositoryChanges)) {
     return { setupPullRequest, repositoryChanges, recovered: false };
@@ -98,6 +151,19 @@ export function tickSetupPullRequest(root) {
   try {
     const submission = createSetupPullRequest(root);
     setupPullRequest = submission.pullRequest || setupPullRequest;
+    if (submission.created) {
+      safeSetupLog(root, {
+        action: 'recover-setup-changes',
+        status: 'success',
+        message: `Existing uncommitted setup files were moved into setup PR #${setupPullRequest.number}.`,
+        details: {
+          files: setupPullRequest.files,
+          branch: setupPullRequest.branch,
+          baseBranch: setupPullRequest.baseBranch,
+          url: setupPullRequest.url,
+        },
+      });
+    }
     return {
       setupPullRequest,
       repositoryChanges: setupChangeStatus(root),
@@ -108,6 +174,13 @@ export function tickSetupPullRequest(root) {
       state: 'failed',
       error: error.message,
       checkedAt: new Date().toISOString(),
+    });
+    safeSetupLog(root, {
+      level: 'error',
+      action: 'recover-setup-changes',
+      status: 'failed',
+      message: `Automatic setup PR recovery failed: ${error.message}`,
+      details: { error, repositoryChanges },
     });
     return { setupPullRequest, repositoryChanges, recovered: false, error: error.message };
   }
@@ -121,6 +194,13 @@ function runSetupPullRequestTick(root) {
       state: 'failed',
       error: error.message,
       checkedAt: new Date().toISOString(),
+    });
+    safeSetupLog(root, {
+      level: 'error',
+      action: 'setup-pr-worker',
+      status: 'failed',
+      message: `The automatic setup PR worker failed: ${error.message}`,
+      details: { error },
     });
     console.error(JSON.stringify({ subsystem: 'setup-pull-request', error: error.message }));
   }
