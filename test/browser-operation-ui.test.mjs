@@ -251,7 +251,7 @@ test('uninstall confirmation uses the real dashboard endpoint without making the
   assert.equal(harness.toasts.at(-1).message, 'Chromium and dedicated browser state removed and verified.');
 });
 
-test('cancel closes confirmation, restores focus, and sends no uninstall request', () => {
+test('cancel restores focus without leaking that trigger into a later install', async () => {
   const harness = createHarness();
   harness.uninstallButton.click();
   const confirmation = harness.document.getElementById('browser-uninstall-confirm');
@@ -263,6 +263,14 @@ test('cancel closes confirmation, restores focus, and sends no uninstall request
   assert.equal(harness.document.activeElement, harness.uninstallButton);
   assert.equal(harness.fetchCalls.length, 0);
   assert.equal(harness.document.body.inert, false);
+
+  const installTrigger = harness.document.createElement('button');
+  installTrigger.focus();
+  harness.window.installPrReviewBrowser();
+  harness.resolveNextFetch({ ok: true, text: async () => '{"ok":true}' });
+  await settle();
+
+  assert.equal(harness.document.activeElement, installTrigger, 'a completed install must not focus the old uninstall button');
 });
 
 test('uninstall failure remains visible, releases the lock, and can be closed safely', async () => {
