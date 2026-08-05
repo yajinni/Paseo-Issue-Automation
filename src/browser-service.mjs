@@ -28,13 +28,49 @@ export function playwrightInstallArgs(platform = process.platform) {
     : ['playwright', 'install', 'chromium'];
 }
 
+function environmentPathKey(env = process.env) {
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path')
+    || (process.platform === 'win32' ? 'Path' : 'PATH');
+}
+
+function isNodeModulesBinEntry(entry) {
+  const normalized = String(entry || '')
+    .trim()
+    .replace(/^"|"$/g, '')
+    .replace(/[\\/]+$/g, '');
+  return /(?:^|[\\/])node_modules[\\/]\.bin$/i.test(normalized);
+}
+
+export function systemNpxEnvironment(env = process.env, platform = process.platform) {
+  const pathKey = environmentPathKey(env);
+  const delimiter = platform === 'win32' ? ';' : ':';
+  const entries = String(env[pathKey] || '')
+    .split(delimiter)
+    .filter((entry) => !isNodeModulesBinEntry(entry));
+  return {
+    ...env,
+    [pathKey]: entries.join(delimiter),
+  };
+}
+
 export function playwrightSpawnInvocation(args, {
   platform = process.platform,
   env = process.env,
 } = {}) {
   const command = playwrightCommand(platform);
-  if (platform === 'win32') return buildWindowsCmdInvocation(command, args, env);
-  return { executable: command, args: [...args], windowsVerbatimArguments: false };
+  const commandEnv = systemNpxEnvironment(env, platform);
+  if (platform === 'win32') {
+    return {
+      ...buildWindowsCmdInvocation(command, args, commandEnv),
+      env: commandEnv,
+    };
+  }
+  return {
+    executable: command,
+    args: [...args],
+    env: commandEnv,
+    windowsVerbatimArguments: false,
+  };
 }
 
 function runPlaywrightCommand(args, {
@@ -46,7 +82,7 @@ function runPlaywrightCommand(args, {
   const invocation = playwrightSpawnInvocation(args, { platform, env });
   return spawn(invocation.executable, invocation.args, {
     cwd,
-    env,
+    env: invocation.env,
     encoding: 'utf8',
     stdio: 'pipe',
     timeout: BROWSER_COMMAND_TIMEOUT_MS,
