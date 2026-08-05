@@ -6,17 +6,18 @@ import { dashboardHtml } from '../src/ui.mjs';
 
 test('dashboard installs a dedicated Logs tab with filters and export controls', () => {
   const html = dashboardHtml();
-  assert.match(html, /LOGS_UI_SCRIPT|controller-logs-style|logs-nav/);
-  assert.match(html, /Controller logs/);
-  assert.match(html, /data-view=\\?"logs\\?"|dataset\.view = 'logs'/);
-  assert.match(html, /id=\\?"view-logs\\?"/);
-  assert.match(html, /id=\\?"logs-query\\?"/);
-  assert.match(html, /id=\\?"logs-level\\?"/);
-  assert.match(html, /id=\\?"logs-category\\?"/);
-  assert.match(html, /id=\\?"logs-limit\\?"/);
-  assert.match(html, /Copy visible/);
-  assert.match(html, /Download JSON/);
-  assert.match(html, /Read-only refresh polling is not logged/);
+  assert.match(html, /controller-logs-style|logs-nav/);
+  assert.match(LOGS_UI_SCRIPT, /button\.id = 'logs-nav'/);
+  assert.match(LOGS_UI_SCRIPT, /button\.dataset\.view = 'logs'/);
+  assert.match(LOGS_UI_SCRIPT, /section\.id = 'view-logs'/);
+  assert.match(LOGS_UI_SCRIPT, /Controller logs/);
+  assert.match(LOGS_UI_SCRIPT, /id=\\?"logs-query\\?"/);
+  assert.match(LOGS_UI_SCRIPT, /id=\\?"logs-level\\?"/);
+  assert.match(LOGS_UI_SCRIPT, /id=\\?"logs-category\\?"/);
+  assert.match(LOGS_UI_SCRIPT, /id=\\?"logs-limit\\?"/);
+  assert.match(LOGS_UI_SCRIPT, /Copy visible/);
+  assert.match(LOGS_UI_SCRIPT, /Download JSON/);
+  assert.match(LOGS_UI_SCRIPT, /Read-only refresh polling is not logged/);
 });
 
 test('Logs tab loads filtered events and refreshes only while visible', () => {
