@@ -3,7 +3,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
   const INSTALL_PATH = '/api/pr-reviews/browser/install';
   const UNINSTALL_PATH = '/api/pr-reviews/browser/uninstall';
   let operationActive = false;
-  let uninstallTrigger = null;
+  let operationTrigger = null;
 
   function installStyles() {
     if (document.getElementById('browser-operation-style')) return;
@@ -24,8 +24,10 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     document.head.appendChild(style);
   }
 
-  function restoreUninstallFocus() {
-    if (uninstallTrigger && typeof uninstallTrigger.focus === 'function') uninstallTrigger.focus();
+  function restoreOperationFocus() {
+    const trigger = operationTrigger;
+    operationTrigger = null;
+    if (trigger && typeof trigger.focus === 'function') trigger.focus();
   }
 
   function ensureProgressPanel() {
@@ -51,7 +53,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     document.getElementById('browser-operation-close').addEventListener('click', function() {
       if (!operationActive) {
         panel.hidden = true;
-        restoreUninstallFocus();
+        restoreOperationFocus();
       }
     });
     return panel;
@@ -81,7 +83,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     document.body.appendChild(panel);
     document.getElementById('browser-uninstall-cancel').addEventListener('click', function() {
       panel.hidden = true;
-      restoreUninstallFocus();
+      restoreOperationFocus();
     });
     return panel;
   }
@@ -142,7 +144,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       panel = prepareProgressPanel(installing);
     } catch (error) {
       operationActive = false;
-      restoreUninstallFocus();
+      restoreOperationFocus();
       toast('Could not open the Chromium progress window: ' + String(error && error.message || error), true);
       return null;
     }
@@ -161,7 +163,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
 
       operationActive = false;
       panel.hidden = true;
-      restoreUninstallFocus();
+      restoreOperationFocus();
       toast(installing
         ? 'Chromium installed and verified.'
         : 'Chromium and dedicated browser state removed and verified.');
@@ -174,7 +176,8 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     }
   }
 
-  window.installPrReviewBrowser = function() {
+  window.installPrReviewBrowser = function(trigger) {
+    operationTrigger = trigger || null;
     return runBrowserOperation(INSTALL_PATH);
   };
 
@@ -183,7 +186,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       toast('A Chromium install or uninstall command is already running.', true);
       return null;
     }
-    if (trigger) uninstallTrigger = trigger;
+    operationTrigger = trigger || null;
     installStyles();
     const panel = ensureConfirmationPanel();
     const input = document.getElementById('browser-uninstall-input');
