@@ -186,6 +186,8 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       toast('A Chromium install or uninstall command is already running.', true);
       return null;
     }
+    const progress = document.getElementById('browser-operation-panel');
+    if (progress) progress.hidden = true;
     operationTrigger = trigger || null;
     installStyles();
     const panel = ensureConfirmationPanel();
