@@ -1,4 +1,3 @@
-import { BROWSER_STATUS_UI_SCRIPT } from './browser-status-ui-script.mjs';
 import { COMPONENT_CHANGES_UI_SCRIPT } from './component-changes-ui-script.mjs';
 import { COMPONENTS_UI_SCRIPT } from './components-ui-script.mjs';
 import { CONTROLLER_ACTIONS_UI_SCRIPT } from './controller-actions-ui-script.mjs';
@@ -156,7 +155,6 @@ ${integratedDashboardShell()}
 <script>${CONTROLLER_ACTIONS_UI_SCRIPT}</script>
 <script>${PR_REVIEW_DASHBOARD_SCRIPT}</script>
 <script>${COMPONENT_CHANGES_UI_SCRIPT}</script>
-<script>${BROWSER_STATUS_UI_SCRIPT}</script>
 <script>${PR_REVIEW_SETTINGS_SAVE_SCRIPT}</script>
 <script>${ISSUES_MAP_LAYOUT_UI_SCRIPT}</script>
 <script>${PR_REVIEW_SETTINGS_TOGGLE_SCRIPT}</script>
