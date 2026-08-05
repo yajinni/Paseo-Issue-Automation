@@ -143,6 +143,13 @@ export function uninstallBrowserState(options = {}) {
   const profileLease = readLease(paths.lock);
   const reviewLease = readLease(paths.reviewSchedulerLock);
   if (profileLease || reviewLease) throw new Error('The dedicated browser or serial review scheduler is currently in use.');
-  rmSync(paths.root, { recursive: true, force: true });
-  return { removed: true };
+
+  const config = saveBrowserConfig({ browserInstalledAt: null }, options);
+  return {
+    chromiumStateCleared: true,
+    profilePreserved: existsSync(paths.profile),
+    configPreserved: existsSync(paths.config),
+    credentialsPreserved: Boolean(config.lastAuthenticatedAt),
+    conversationPreserved: Boolean(config.globalConversationUrl || config.lastConversationUrl),
+  };
 }
