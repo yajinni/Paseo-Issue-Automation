@@ -2,6 +2,7 @@ import { dependencyNumbers, detectDependencyCycles, executionWaves, relationship
 import { activeFixJobs } from './fix-jobs.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { LABELS, listRuns, loadConfig, loadRuntime } from './state.mjs';
+import { cachedDashboardRemoteState } from './dashboard-status-cache.mjs';
 import { collectRemoteDashboardState } from './dashboard-status-sources.mjs';
 
 export { collectRemoteDashboardState, repositoryIssueSnapshot, summarizePrChecks } from './dashboard-status-sources.mjs';
@@ -218,16 +219,39 @@ export function composeDashboardSnapshot(local, remote, existing = {}) {
       durationMs: remote?.durationMs ?? null,
       errors: remote?.errors || [],
     },
+    statusMeta: remote?.statusMeta || {
+      state: 'fresh',
+      refreshing: false,
+      remoteUpdatedAt: remote?.collectedAt || null,
+      remoteAgeMs: 0,
+      lastAttemptAt: remote?.collectedAt || null,
+      lastError: null,
+    },
   };
 }
 
 export function dashboardStatus(root, existing = {}, options = {}) {
   const local = loadLocalDashboardState(root);
-  const remote = collectRemoteDashboardState(root, {
-    attempts: local.rawRuns,
-    baseBranch: local.config.baseBranch,
-    jsonRunner: options.jsonRunner,
-    runner: options.runner,
-  });
+  const input = { attempts: local.rawRuns, baseBranch: local.config.baseBranch };
+  if (options.live === true || options.jsonRunner || options.runner) {
+    const remote = collectRemoteDashboardState(root, {
+      ...input,
+      jsonRunner: options.jsonRunner,
+      runner: options.runner,
+    });
+    return composeDashboardSnapshot(local, remote, existing);
+  }
+
+  const cached = cachedDashboardRemoteState(root, input, { force: options.forceRemote === true });
+  const remote = cached.remote
+    ? { ...cached.remote, statusMeta: cached.statusMeta }
+    : {
+        repository: { available: false, issues: [] },
+        attemptHealth: {},
+        collectedAt: null,
+        durationMs: null,
+        errors: [],
+        statusMeta: cached.statusMeta,
+      };
   return composeDashboardSnapshot(local, remote, existing);
 }
