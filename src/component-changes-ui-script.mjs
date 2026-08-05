@@ -1,15 +1,5 @@
-export function shouldInstallSystemBrowserDependencies(data, requirementsText = '') {
-  const modulePath = String(data?.browser?.library?.modulePath || '');
-  const combined = `${modulePath}\n${requirementsText}`;
-  if (/[A-Za-z]:[\\/]/.test(combined)) return false;
-  if (/\/Users\//.test(combined) || /\/Applications\//.test(combined)) return false;
-  return true;
-}
-
 export const COMPONENT_CHANGES_UI_SCRIPT = `
-(function installComponentChanges(shouldInstallDependencies) {
-  let latestPrData = null;
-
+(function installComponentChanges() {
   const BUTTON_HELP = {
     'Install components': 'Install the package-managed issue template, Paseo service, lifecycle labels, and permanent workspace for this project.',
     'Uninstall components': 'Remove only package-managed components that can be removed safely from this project.',
@@ -17,7 +7,7 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     'Run self-test': 'Check the project integration without creating an issue, branch, agent, pull request, or repository file.',
     'Finish setup': 'Mark setup complete after every required check and component is ready.',
     'Save settings': 'Save the PR review configuration for this project only.',
-    'Install Chromium': 'Install the Playwright Chromium browser and automatically add operating-system dependencies when the server requires them.',
+    'Install Chromium': 'Use Playwright’s standard installer to add its matching Chromium browser and required Linux dependencies.',
     'Launch browser': 'Open the dedicated ChatGPT browser profile so you can sign in and choose the review conversation for this project.',
     'Use current conversation': 'Save the currently open ChatGPT conversation as the review destination for this project only.',
     'Test destination': 'Open the saved project conversation and verify that ChatGPT is authenticated and its message composer is available without sending a message.',
@@ -110,7 +100,6 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
   }
 
   function applyPrData(data) {
-    latestPrData = data;
     const enabled = data?.config?.enabled === true;
     const nav = document.getElementById('pr-reviews-nav');
     if (nav) nav.classList.toggle('hidden', !enabled);
@@ -161,9 +150,7 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
   }
 
   window.installPrReviewBrowser = function() {
-    const requirementsText = textOf(document.getElementById('requirements-card'));
-    const withSystemDependencies = shouldInstallDependencies(latestPrData, requirementsText);
-    return window.prReviewPost('/api/pr-reviews/browser/install', { withSystemDependencies });
+    return window.prReviewPost('/api/pr-reviews/browser/install', {});
   };
 
   const originalRefresh = window.refreshPrReviews;
@@ -191,5 +178,5 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     observer.observe(document.body, { childList: true, subtree: true });
     window.refreshPrReviews(true).catch(function() {});
   });
-})(${shouldInstallSystemBrowserDependencies.toString()});
+})();
 `;
