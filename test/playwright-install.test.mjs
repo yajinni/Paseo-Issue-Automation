@@ -110,6 +110,16 @@ test('Windows Playwright commands fail clearly when system npx is unavailable', 
   );
 });
 
+test('browser service verifies Chromium executable state around install and uninstall', () => {
+  const source = readFileSync(new URL('../src/browser-service.mjs', import.meta.url), 'utf8');
+  assert.match(source, /export function playwrightChromiumStatus/);
+  assert.match(source, /Chromium install command completed, but no browser executable was found/);
+  assert.match(source, /Chromium uninstall command completed, but the browser executable still exists/);
+  assert.match(source, /Close the dedicated ChatGPT browser before uninstalling Chromium/);
+  assert.match(source, /command: \[playwrightCommand\(platform\), \.\.\.args\]/);
+  assert.match(source, /resolvedCommand: result\.resolvedCommand/);
+});
+
 test('browser service keeps npx and does not resolve Playwright internal CLI files', () => {
   const source = readFileSync(new URL('../src/browser-service.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /playwright-core/);

@@ -107,18 +107,21 @@ export function releaseBrowserProfileLease(leaseId, options = {}) {
 export function browserProfileStatus(options = {}) {
   const paths = browserPaths(options);
   clearExpiredLease(paths.lock);
+  clearExpiredLease(paths.reviewSchedulerLock, { requireLiveProcess: false });
   const lease = readLease(paths.lock);
+  const reviewLease = readLease(paths.reviewSchedulerLock);
   const config = loadBrowserConfig(options);
   return {
     profileExists: existsSync(paths.profile),
     configExists: existsSync(paths.config),
-    locked: Boolean(lease),
+    locked: Boolean(lease || reviewLease),
     lease: lease ? {
       purpose: lease.purpose || null,
       acquiredAt: lease.acquiredAt || null,
       heartbeatAt: lease.heartbeatAt || null,
       expiresAt: lease.expiresAt || null,
     } : null,
+    reviewSchedulerLocked: Boolean(reviewLease),
     globalConversationConfigured: Boolean(config.globalConversationUrl),
     lastAuthenticatedAt: config.lastAuthenticatedAt,
     browserInstalledAt: config.browserInstalledAt,

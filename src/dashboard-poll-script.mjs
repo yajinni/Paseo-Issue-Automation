@@ -3,7 +3,7 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
   const MIN_BACKGROUND_POLL_MS = 60_000;
   const REQUEST_TIMEOUT_MS = 20_000;
   let initialLoaded = false;
-  let pollInFlight = false;
+  let pollInFlight = null;
   let lastPollStartedAt = 0;
 
   function renderOperationalState(data) {
@@ -36,41 +36,45 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
     renderDependencies();
   }
 
-  async function efficientRefreshStatus(options) {
+  function efficientRefreshStatus(options) {
     const force = options && options.force === true;
-    if (pollInFlight) return dashboardData;
+    if (pollInFlight) return pollInFlight;
     if (!initialLoaded && !force && location.hash === '#settings'
       && typeof window.progressiveSetupRequirements === 'function') {
-      return dashboardData;
+      return Promise.resolve(dashboardData);
     }
     if (initialLoaded && !force) {
-      if (document.hidden) return dashboardData;
-      if (Date.now() - lastPollStartedAt < MIN_BACKGROUND_POLL_MS) return dashboardData;
+      if (document.hidden) return Promise.resolve(dashboardData);
+      if (Date.now() - lastPollStartedAt < MIN_BACKGROUND_POLL_MS) return Promise.resolve(dashboardData);
     }
 
-    pollInFlight = true;
-    lastPollStartedAt = Date.now();
-    const controller = new AbortController();
-    const timeout = setTimeout(function() { controller.abort(); }, REQUEST_TIMEOUT_MS);
-    try {
-      const data = await api('/api/status?_=' + Date.now(), { signal: controller.signal });
-      if (!initialLoaded || force || !dashboardData) {
-        render(data);
-        initialLoaded = true;
-      } else {
-        renderOperationalState(data);
+    pollInFlight = (async function() {
+      lastPollStartedAt = Date.now();
+      const controller = new AbortController();
+      const timeout = setTimeout(function() { controller.abort(); }, REQUEST_TIMEOUT_MS);
+      try {
+        const data = await api('/api/status?_=' + Date.now(), { signal: controller.signal });
+        if (!initialLoaded || force || !dashboardData) {
+          render(data);
+          initialLoaded = true;
+        } else {
+          renderOperationalState(data);
+        }
+        return data;
+      } catch (error) {
+        const message = error && error.name === 'AbortError'
+          ? 'Dashboard status polling exceeded 20 seconds. The next background poll will retry.'
+          : (error && error.message ? error.message : 'Dashboard status polling failed.');
+        toast(message, true);
+        return null;
+      } finally {
+        clearTimeout(timeout);
       }
-      return data;
-    } catch (error) {
-      const message = error && error.name === 'AbortError'
-        ? 'Dashboard status polling exceeded 20 seconds. The next background poll will retry.'
-        : (error && error.message ? error.message : 'Dashboard status polling failed.');
-      toast(message, true);
-      return null;
-    } finally {
-      clearTimeout(timeout);
-      pollInFlight = false;
-    }
+    })().finally(function() {
+      pollInFlight = null;
+    });
+
+    return pollInFlight;
   }
 
   refreshStatus = efficientRefreshStatus;
