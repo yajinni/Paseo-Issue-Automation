@@ -12,6 +12,7 @@ import {
   saveBrowserConfig,
 } from './browser-profile.mjs';
 import { isLoginOrHomeUrl, normalizeChatGptConversationUrl, sameConversationUrl } from './chatgpt-url.mjs';
+import { buildWindowsCmdInvocation } from './process.mjs';
 
 const require = createRequire(import.meta.url);
 const BROWSER_LEASE_TTL_MS = 180_000;
@@ -27,17 +28,31 @@ export function playwrightInstallArgs(platform = process.platform) {
     : ['playwright', 'install', 'chromium'];
 }
 
+export function playwrightSpawnInvocation(args, {
+  platform = process.platform,
+  env = process.env,
+} = {}) {
+  const command = playwrightCommand(platform);
+  if (platform === 'win32') return buildWindowsCmdInvocation(command, args, env);
+  return { executable: command, args: [...args], windowsVerbatimArguments: false };
+}
+
 function runPlaywrightCommand(args, {
   platform = process.platform,
   cwd = process.cwd(),
+  env = process.env,
   spawn = spawnSync,
 } = {}) {
-  return spawn(playwrightCommand(platform), args, {
+  const invocation = playwrightSpawnInvocation(args, { platform, env });
+  return spawn(invocation.executable, invocation.args, {
     cwd,
+    env,
     encoding: 'utf8',
     stdio: 'pipe',
     timeout: BROWSER_COMMAND_TIMEOUT_MS,
     killSignal: 'SIGTERM',
+    windowsHide: true,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
   });
 }
 
