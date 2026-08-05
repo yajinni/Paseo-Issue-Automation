@@ -7,12 +7,14 @@ import {
 } from './setup-requirements.mjs';
 import {
   createSetupPullRequest,
+  loadSetupPullRequest,
   preflightSetupPullRequest,
   reconcileSetupPullRequest,
+  saveSetupPullRequest,
   setupChangeStatus,
   setupPullRequestBlocksSetup,
 } from './setup-pr.mjs';
-import { saveConfig } from './state.mjs';
+import { loadConfig, loadIntegration, saveConfig } from './state.mjs';
 import * as legacy from './install-legacy.mjs';
 
 export * from './install-legacy.mjs';
@@ -69,52 +71,65 @@ function synchronizeSetupCompletion(root, snapshot) {
   return { ...snapshot, config };
 }
 
-function canRecoverExistingSetupChanges(built, setupPullRequest, repositoryChanges) {
-  return !setupPullRequest
-    && repositoryChanges.available
+function existingInstallationCanBeRecovered(root, setupPullRequest, repositoryChanges) {
+  if (setupPullRequest?.state === 'open' || setupPullRequest?.state === 'merged') return false;
+  const config = loadConfig(root);
+  const integration = loadIntegration(root);
+  const labels = Object.values(integration.labels || {});
+  return repositoryChanges.available
     && repositoryChanges.expectedFiles.length > 0
     && repositoryChanges.unexpectedFiles.length === 0
-    && repositoryChanges.currentBranch === built.config.baseBranch
-    && built.integration.issueTemplate
-    && built.integration.paseoService
-    && built.integration.labelsReady
-    && Boolean(built.workspace?.id);
+    && repositoryChanges.currentBranch === config.baseBranch
+    && integration.issueTemplate?.createdByPackage === true
+    && integration.paseoJson?.serviceAddedByPackage === true
+    && labels.length > 0
+    && Boolean(config.workspace?.id);
+}
+
+export function tickSetupPullRequest(root) {
+  let setupPullRequest = reconcileSetupPullRequest(root);
+  const repositoryChanges = setupChangeStatus(root);
+  if (!existingInstallationCanBeRecovered(root, setupPullRequest, repositoryChanges)) {
+    return { setupPullRequest, repositoryChanges, recovered: false };
+  }
+  try {
+    const submission = createSetupPullRequest(root);
+    setupPullRequest = submission.pullRequest || setupPullRequest;
+    return {
+      setupPullRequest,
+      repositoryChanges: setupChangeStatus(root),
+      recovered: submission.created === true,
+    };
+  } catch (error) {
+    setupPullRequest = saveSetupPullRequest(root, {
+      state: 'failed',
+      error: error.message,
+      checkedAt: new Date().toISOString(),
+    });
+    return { setupPullRequest, repositoryChanges, recovered: false, error: error.message };
+  }
 }
 
 export function setupSnapshot(root, options = {}) {
   const force = options.forceDiscovery === true;
-  let setupPullRequest = reconcileSetupPullRequest(root);
-  let repositoryChanges = setupChangeStatus(root);
-  let setupSubmissionError = null;
+  const setupPullRequest = loadSetupPullRequest(root);
+  const repositoryChanges = setupChangeStatus(root);
   const req = setupRequirements(root, { force: options.forceRequirements === true });
   const setupOptions = cachedSetupOptions(root, {
     force,
     paseoOverride: paseoOverrideFromRequirements(req),
   });
-  const build = () => buildSetupSnapshot(root, {
+  const built = buildSetupSnapshot(root, {
     requirements: req,
     branches: setupOptions.branches?.branches || [],
     forceIntegration: options.forceIntegration === true || force,
   });
-  let built = build();
-
-  if (canRecoverExistingSetupChanges(built, setupPullRequest, repositoryChanges)) {
-    try {
-      const submission = createSetupPullRequest(root);
-      setupPullRequest = submission.pullRequest || setupPullRequest;
-      repositoryChanges = setupChangeStatus(root);
-      built = build();
-    } catch (error) {
-      setupSubmissionError = error.message;
-    }
-  }
-
   const setupPullRequestReady = !setupPullRequestBlocksSetup(setupPullRequest);
   const setupFilesCommitted = repositoryChanges.expectedFiles.length === 0;
   const snapshot = synchronizeSetupCompletion(root, {
     ...built,
     setupPullRequest,
-    setupSubmissionError,
+    setupSubmissionError: setupPullRequest?.state === 'failed' ? setupPullRequest.error || 'Automatic setup PR creation failed.' : null,
     repositoryChanges,
     checks: {
       ...built.checks,
