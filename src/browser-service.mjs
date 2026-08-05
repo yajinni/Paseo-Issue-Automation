@@ -12,7 +12,7 @@ import {
   saveBrowserConfig,
 } from './browser-profile.mjs';
 import { isLoginOrHomeUrl, normalizeChatGptConversationUrl, sameConversationUrl } from './chatgpt-url.mjs';
-import { buildWindowsCmdInvocation } from './process.mjs';
+import { buildWindowsCmdInvocation, resolveCommand } from './process.mjs';
 
 const require = createRequire(import.meta.url);
 const BROWSER_LEASE_TTL_MS = 180_000;
@@ -28,9 +28,22 @@ export function playwrightInstallArgs(platform = process.platform) {
     : ['playwright', 'install', 'chromium'];
 }
 
-function environmentPathKey(env = process.env) {
-  return Object.keys(env).find((key) => key.toLowerCase() === 'path')
-    || (process.platform === 'win32' ? 'Path' : 'PATH');
+function environmentPathKeys(env = process.env) {
+  return Object.keys(env)
+    .filter((key) => key.toLowerCase() === 'path')
+    .sort();
+}
+
+function effectivePathValue(env = process.env, platform = process.platform) {
+  const keys = environmentPathKeys(env);
+  if (!keys.length) return '';
+  if (platform === 'win32') {
+    // Node sorts duplicate Windows environment keys lexicographically and keeps
+    // the first case-insensitive match when spawning a child process.
+    return String(env[keys[0]] || '');
+  }
+  const key = keys.find((candidate) => candidate === 'PATH') || keys[0];
+  return String(env[key] || '');
 }
 
 function isNodeModulesBinEntry(entry) {
@@ -42,33 +55,40 @@ function isNodeModulesBinEntry(entry) {
 }
 
 export function systemNpxEnvironment(env = process.env, platform = process.platform) {
-  const pathKey = environmentPathKey(env);
   const delimiter = platform === 'win32' ? ';' : ':';
-  const entries = String(env[pathKey] || '')
+  const entries = effectivePathValue(env, platform)
     .split(delimiter)
     .filter((entry) => !isNodeModulesBinEntry(entry));
-  return {
-    ...env,
-    [pathKey]: entries.join(delimiter),
-  };
+  const pathKey = platform === 'win32' ? 'Path' : 'PATH';
+  const commandEnv = { ...env };
+  for (const key of environmentPathKeys(commandEnv)) delete commandEnv[key];
+  commandEnv[pathKey] = entries.join(delimiter);
+  return commandEnv;
 }
 
 export function playwrightSpawnInvocation(args, {
   platform = process.platform,
   env = process.env,
+  resolve = resolveCommand,
 } = {}) {
   const command = playwrightCommand(platform);
   const commandEnv = systemNpxEnvironment(env, platform);
   if (platform === 'win32') {
+    const resolution = resolve(command, { platform, env: commandEnv });
+    if (!resolution?.available || !resolution.path) {
+      throw new Error('System npx.cmd is unavailable. Repair or reinstall Node.js with npm support, then retry Chromium installation.');
+    }
     return {
-      ...buildWindowsCmdInvocation(command, args, commandEnv),
+      ...buildWindowsCmdInvocation(resolution.path, args, commandEnv),
       env: commandEnv,
+      resolvedCommand: resolution.path,
     };
   }
   return {
     executable: command,
     args: [...args],
     env: commandEnv,
+    resolvedCommand: command,
     windowsVerbatimArguments: false,
   };
 }
@@ -80,7 +100,7 @@ function runPlaywrightCommand(args, {
   spawn = spawnSync,
 } = {}) {
   const invocation = playwrightSpawnInvocation(args, { platform, env });
-  return spawn(invocation.executable, invocation.args, {
+  const result = spawn(invocation.executable, invocation.args, {
     cwd,
     env: invocation.env,
     encoding: 'utf8',
@@ -90,6 +110,7 @@ function runPlaywrightCommand(args, {
     windowsHide: true,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
   });
+  return { ...result, resolvedCommand: invocation.resolvedCommand };
 }
 
 export function uninstallPlaywrightBrowsers(options = {}) {
@@ -123,7 +144,8 @@ export function installPlaywrightChromium(options = {}) {
     const hint = platform === 'linux'
       ? ' Installing Linux browser dependencies may require administrator privileges.'
       : '';
-    throw new Error(`Chromium installation failed.${hint} ${output}`.trim());
+    const commandHint = result.resolvedCommand ? ` Command: ${result.resolvedCommand}.` : '';
+    throw new Error(`Chromium installation failed.${hint}${commandHint} ${output}`.trim());
   }
   saveBrowserConfig({ browserInstalledAt: new Date().toISOString() });
   return {

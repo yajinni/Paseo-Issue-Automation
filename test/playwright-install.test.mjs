@@ -23,10 +23,11 @@ test('Chromium installation uses Playwright standard commands', () => {
   assert.deepEqual(playwrightInstallArgs('linux'), ['playwright', 'install', '--with-deps', 'chromium']);
 });
 
-test('system npx environment removes package-manager injected local bin paths', () => {
+test('system npx environment canonicalizes duplicate Windows Path variables', () => {
   const env = {
     ComSpec: 'C:\\Windows\\System32\\cmd.exe',
-    Path: [
+    Path: 'C:\\Windows\\System32',
+    PATH: [
       'C:\\Users\\Yajinni\\Documents\\Coding Projects\\JuliesDashboard\\node_modules\\.bin',
       'C:\\Program Files\\nodejs',
       'C:\\Windows\\System32',
@@ -35,28 +36,53 @@ test('system npx environment removes package-manager injected local bin paths', 
   };
 
   const clean = systemNpxEnvironment(env, 'win32');
+  assert.deepEqual(
+    Object.keys(clean).filter((key) => key.toLowerCase() === 'path'),
+    ['Path'],
+  );
   assert.equal(clean.Path, 'C:\\Program Files\\nodejs;C:\\Windows\\System32');
   assert.equal(clean.KEEP_ME, 'yes');
-  assert.match(env.Path, /node_modules\\\.bin/i);
+  assert.match(env.PATH, /node_modules\\\.bin/i);
 });
 
-test('Windows Playwright commands run system npx through cmd.exe', () => {
+test('Windows Playwright commands resolve an absolute system npx through cmd.exe', () => {
   const env = {
     ComSpec: 'C:\\Windows\\System32\\cmd.exe',
-    Path: [
+    Path: 'C:\\Windows\\System32',
+    PATH: [
       'C:\\repo\\node_modules\\.bin',
       'C:\\Program Files\\nodejs',
       'C:\\Windows\\System32',
     ].join(';'),
   };
+  let resolverEnvironment = null;
   const invocation = playwrightSpawnInvocation(
     ['playwright', 'install', 'chromium'],
-    { platform: 'win32', env },
+    {
+      platform: 'win32',
+      env,
+      resolve(command, options) {
+        assert.equal(command, 'npx.cmd');
+        assert.equal(options.platform, 'win32');
+        resolverEnvironment = options.env;
+        return {
+          available: true,
+          path: 'C:\\Program Files\\nodejs\\npx.cmd',
+          source: 'path',
+        };
+      },
+    },
   );
   assert.equal(invocation.executable, 'C:\\Windows\\System32\\cmd.exe');
   assert.deepEqual(invocation.args.slice(0, 4), ['/d', '/s', '/v:off', '/c']);
-  assert.match(invocation.args[4], /^call "npx\.cmd" "playwright" "install" "chromium"$/);
+  assert.equal(
+    invocation.args[4],
+    'call "C:\\Program Files\\nodejs\\npx.cmd" "playwright" "install" "chromium"',
+  );
+  assert.equal(invocation.resolvedCommand, 'C:\\Program Files\\nodejs\\npx.cmd');
   assert.equal(invocation.env.Path, 'C:\\Program Files\\nodejs;C:\\Windows\\System32');
+  assert.equal(invocation.env.PATH, undefined);
+  assert.equal(resolverEnvironment, invocation.env);
   assert.equal(invocation.windowsVerbatimArguments, true);
 
   const linux = playwrightSpawnInvocation(
@@ -66,7 +92,22 @@ test('Windows Playwright commands run system npx through cmd.exe', () => {
   assert.equal(linux.executable, 'npx');
   assert.deepEqual(linux.args, ['playwright', 'install', '--with-deps', 'chromium']);
   assert.equal(linux.env.PATH, '/usr/local/bin:/usr/bin');
+  assert.equal(linux.resolvedCommand, 'npx');
   assert.equal(linux.windowsVerbatimArguments, false);
+});
+
+test('Windows Playwright commands fail clearly when system npx is unavailable', () => {
+  assert.throws(
+    () => playwrightSpawnInvocation(
+      ['playwright', 'install', 'chromium'],
+      {
+        platform: 'win32',
+        env: { Path: 'C:\\Windows\\System32' },
+        resolve: () => ({ available: false, path: null, source: 'missing' }),
+      },
+    ),
+    /System npx\.cmd is unavailable/,
+  );
 });
 
 test('browser service keeps npx and does not resolve Playwright internal CLI files', () => {
@@ -76,6 +117,7 @@ test('browser service keeps npx and does not resolve Playwright internal CLI fil
   assert.match(source, /import\('playwright'\)/);
   assert.match(source, /\['playwright', 'install', '--with-deps', 'chromium'\]/);
   assert.match(source, /buildWindowsCmdInvocation/);
+  assert.match(source, /resolveCommand/);
   assert.match(source, /systemNpxEnvironment/);
   assert.match(source, /playwrightCommand\(platform\)/);
 });
