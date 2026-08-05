@@ -3,6 +3,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
   const INSTALL_PATH = '/api/pr-reviews/browser/install';
   const UNINSTALL_PATH = '/api/pr-reviews/browser/uninstall';
   let operationActive = false;
+  let uninstallTrigger = null;
 
   function installStyles() {
     if (document.getElementById('browser-operation-style')) return;
@@ -23,6 +24,10 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     document.head.appendChild(style);
   }
 
+  function restoreUninstallFocus() {
+    if (uninstallTrigger && typeof uninstallTrigger.focus === 'function') uninstallTrigger.focus();
+  }
+
   function ensureProgressPanel() {
     let panel = document.getElementById('browser-operation-panel');
     if (panel) return panel;
@@ -30,19 +35,24 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     panel.id = 'browser-operation-panel';
     panel.hidden = true;
     panel.dataset.state = 'idle';
-    panel.setAttribute('role', 'status');
-    panel.setAttribute('aria-live', 'polite');
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'false');
+    panel.setAttribute('aria-labelledby', 'browser-operation-title');
+    panel.setAttribute('aria-describedby', 'browser-operation-description');
     panel.innerHTML = [
       '<div class="browser-operation-body">',
         '<div class="browser-operation-spinner" aria-hidden="true"></div>',
         '<div><h2 id="browser-operation-title" style="margin:0 0 8px">Chromium operation</h2><p id="browser-operation-description" class="muted" style="margin:0"></p></div>',
-        '<pre id="browser-operation-error" hidden></pre>',
+        '<pre id="browser-operation-error" hidden aria-live="assertive"></pre>',
         '<button id="browser-operation-close" class="secondary" type="button" hidden>Close</button>',
       '</div>'
     ].join('');
     document.body.appendChild(panel);
     document.getElementById('browser-operation-close').addEventListener('click', function() {
-      if (!operationActive) panel.hidden = true;
+      if (!operationActive) {
+        panel.hidden = true;
+        restoreUninstallFocus();
+      }
     });
     return panel;
   }
@@ -56,10 +66,11 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-modal', 'false');
     panel.setAttribute('aria-labelledby', 'browser-uninstall-title');
+    panel.setAttribute('aria-describedby', 'browser-uninstall-description');
     panel.innerHTML = [
       '<div class="browser-operation-body">',
         '<div><h2 id="browser-uninstall-title" style="margin:0 0 8px">Uninstall Chromium</h2>',
-        '<p class="muted" style="margin:0">Type UNINSTALL to continue. This also deletes the dedicated ChatGPT profile, login, selected conversation, and local browser state.</p></div>',
+        '<p id="browser-uninstall-description" class="muted" style="margin:0">Type UNINSTALL to continue. This also removes the dedicated ChatGPT browser profile and local browser state.</p></div>',
         '<label style="width:100%;text-align:left">Confirmation phrase<input id="browser-uninstall-input" autocomplete="off"></label>',
         '<div class="browser-confirm-actions">',
           '<button id="browser-uninstall-cancel" class="secondary" type="button">Cancel</button>',
@@ -70,6 +81,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     document.body.appendChild(panel);
     document.getElementById('browser-uninstall-cancel').addEventListener('click', function() {
       panel.hidden = true;
+      restoreUninstallFocus();
     });
     return panel;
   }
@@ -103,7 +115,9 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     const errorNode = document.getElementById('browser-operation-error');
     errorNode.textContent = String(error && error.message || error);
     errorNode.hidden = false;
-    document.getElementById('browser-operation-close').hidden = false;
+    const close = document.getElementById('browser-operation-close');
+    close.hidden = false;
+    if (typeof close.focus === 'function') close.focus();
   }
 
   async function refreshAfterOperation() {
@@ -128,6 +142,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       panel = prepareProgressPanel(installing);
     } catch (error) {
       operationActive = false;
+      restoreUninstallFocus();
       toast('Could not open the Chromium progress window: ' + String(error && error.message || error), true);
       return null;
     }
@@ -146,6 +161,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
 
       operationActive = false;
       panel.hidden = true;
+      restoreUninstallFocus();
       toast(installing
         ? 'Chromium installed and verified.'
         : 'Chromium and dedicated browser state removed and verified.');
@@ -162,11 +178,12 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     return runBrowserOperation(INSTALL_PATH);
   };
 
-  window.confirmChromiumUninstall = function() {
+  window.confirmChromiumUninstall = function(trigger) {
     if (operationActive) {
       toast('A Chromium install or uninstall command is already running.', true);
-      return;
+      return null;
     }
+    if (trigger) uninstallTrigger = trigger;
     installStyles();
     const panel = ensureConfirmationPanel();
     const input = document.getElementById('browser-uninstall-input');
@@ -177,30 +194,34 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       confirm.disabled = input.value !== 'UNINSTALL';
     };
     confirm.onclick = function() {
-      if (input.value !== 'UNINSTALL') return;
+      if (input.value !== 'UNINSTALL') return null;
       confirm.disabled = true;
       panel.hidden = true;
-      setTimeout(function() {
-        runBrowserOperation(UNINSTALL_PATH);
-      }, 0);
+      return runBrowserOperation(UNINSTALL_PATH);
     };
     panel.hidden = false;
     input.focus();
+    return panel;
   };
 
   function bindUninstallControl() {
-    Array.from(document.querySelectorAll('button')).forEach(function(button) {
-      const text = String(button.textContent || '').trim().toLowerCase();
-      if (text !== 'uninstall browser' && text !== 'uninstall chromium') return;
-      button.type = 'button';
-      button.textContent = 'Uninstall Chromium';
-      button.title = 'Remove Playwright Chromium and delete the dedicated ChatGPT profile, login, selected conversation, and local browser state.';
-      button.removeAttribute('onclick');
-      button.onclick = function(event) {
-        if (event && typeof event.preventDefault === 'function') event.preventDefault();
-        window.confirmChromiumUninstall();
-      };
+    const button = Array.from(document.querySelectorAll('button')).find(function(candidate) {
+      const inlineAction = String(candidate.getAttribute('onclick') || '');
+      return candidate.id === 'pr-uninstall-chromium'
+        || inlineAction.includes('/api/pr-reviews/browser/uninstall');
     });
+    if (!button) return;
+    button.id = 'pr-uninstall-chromium';
+    button.type = 'button';
+    button.textContent = 'Uninstall Chromium';
+    button.title = 'Remove Playwright Chromium and the dedicated ChatGPT browser profile and local browser state.';
+    button.setAttribute('aria-haspopup', 'dialog');
+    button.setAttribute('aria-controls', 'browser-uninstall-confirm');
+    button.removeAttribute('onclick');
+    button.onclick = function(event) {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      return window.confirmChromiumUninstall(button);
+    };
   }
 
   bindUninstallControl();
