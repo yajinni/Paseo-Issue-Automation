@@ -85,6 +85,7 @@ export function setupSnapshot(root, options = {}) {
   const force = options.forceDiscovery === true;
   let setupPullRequest = reconcileSetupPullRequest(root);
   let repositoryChanges = setupChangeStatus(root);
+  let setupSubmissionError = null;
   const req = setupRequirements(root, { force: options.forceRequirements === true });
   const setupOptions = cachedSetupOptions(root, {
     force,
@@ -98,10 +99,14 @@ export function setupSnapshot(root, options = {}) {
   let built = build();
 
   if (canRecoverExistingSetupChanges(built, setupPullRequest, repositoryChanges)) {
-    const submission = createSetupPullRequest(root);
-    setupPullRequest = submission.pullRequest || setupPullRequest;
-    repositoryChanges = setupChangeStatus(root);
-    built = build();
+    try {
+      const submission = createSetupPullRequest(root);
+      setupPullRequest = submission.pullRequest || setupPullRequest;
+      repositoryChanges = setupChangeStatus(root);
+      built = build();
+    } catch (error) {
+      setupSubmissionError = error.message;
+    }
   }
 
   const setupPullRequestReady = !setupPullRequestBlocksSetup(setupPullRequest);
@@ -109,6 +114,7 @@ export function setupSnapshot(root, options = {}) {
   const snapshot = synchronizeSetupCompletion(root, {
     ...built,
     setupPullRequest,
+    setupSubmissionError,
     repositoryChanges,
     checks: {
       ...built.checks,
