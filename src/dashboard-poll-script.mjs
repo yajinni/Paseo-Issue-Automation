@@ -2,13 +2,82 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
 (function installEfficientDashboardPolling() {
   const MIN_BACKGROUND_POLL_MS = 60_000;
   const REQUEST_TIMEOUT_MS = 20_000;
+  const REFRESH_FOLLOW_UP_MS = 2_000;
+  const STALE_WARNING_MS = 120_000;
   let initialLoaded = false;
   let pollInFlight = null;
   let lastPollStartedAt = 0;
+  let lastSuccessfulPollAt = 0;
+  let consecutiveFailures = 0;
+  let consecutiveStaleResponses = 0;
+  let followUpTimer = null;
+  let lastWarningKey = null;
+
+  function relativeAge(milliseconds) {
+    if (!Number.isFinite(milliseconds)) return 'unknown age';
+    const seconds = Math.max(0, Math.round(milliseconds / 1000));
+    if (seconds < 5) return 'just now';
+    if (seconds < 60) return seconds + 's ago';
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return minutes + 'm ago';
+    return Math.round(minutes / 60) + 'h ago';
+  }
+
+  function setFreshnessChip(text, state) {
+    const chip = document.getElementById('health-poll');
+    if (!chip) return;
+    chip.textContent = text;
+    chip.className = 'chip ' + (state || '');
+  }
+
+  function renderStatusFreshness(data) {
+    const meta = data && data.statusMeta || {};
+    if (meta.state === 'fresh') {
+      setFreshnessChip('Up to date · ' + relativeAge(meta.remoteAgeMs), 'good');
+    } else if (meta.state === 'refreshing') {
+      const suffix = meta.remoteUpdatedAt ? ' · showing ' + relativeAge(meta.remoteAgeMs) : '';
+      setFreshnessChip('Refreshing status' + suffix, 'info');
+    } else if (meta.state === 'stale') {
+      setFreshnessChip('Data may be stale · ' + relativeAge(meta.remoteAgeMs), 'warn');
+    } else if (meta.state === 'failed') {
+      setFreshnessChip('Refresh failed · showing local data', 'bad');
+    } else {
+      setFreshnessChip('Waiting for remote status', 'info');
+    }
+  }
+
+  function maybeWarnAboutStaleData(data) {
+    const meta = data && data.statusMeta || {};
+    if (!['stale', 'failed'].includes(meta.state)) {
+      consecutiveStaleResponses = 0;
+      if (meta.state === 'fresh') lastWarningKey = null;
+      return;
+    }
+    consecutiveStaleResponses += 1;
+    const oldEnough = Number.isFinite(Number(meta.remoteAgeMs))
+      && Number(meta.remoteAgeMs) >= STALE_WARNING_MS;
+    if (consecutiveStaleResponses < 2 && !oldEnough) return;
+    const key = [meta.state, meta.lastError || '', meta.remoteUpdatedAt || 'none'].join('|');
+    if (key === lastWarningKey) return;
+    lastWarningKey = key;
+    toast(meta.lastError
+      ? 'Status refresh failed; showing the last successful data. ' + meta.lastError
+      : 'Dashboard data has remained stale for more than two minutes.', true);
+  }
+
+  function scheduleRefreshFollowUp(data) {
+    const meta = data && data.statusMeta || {};
+    if (!meta.refreshing || followUpTimer) return;
+    followUpTimer = setTimeout(function() {
+      followUpTimer = null;
+      efficientRefreshStatus({ force: true, background: true });
+    }, REFRESH_FOLLOW_UP_MS);
+  }
 
   function renderOperationalState(data) {
     if (!dashboardData) {
       render(data);
+      renderStatusFreshness(data);
       initialLoaded = true;
       return;
     }
@@ -19,13 +88,15 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
       runtime: data.runtime || dashboardData.runtime,
       config: data.config || dashboardData.config,
       requirements: data.requirements || dashboardData.requirements,
-      checks: data.checks || dashboardData.checks
+      checks: data.checks || dashboardData.checks,
+      statusMeta: data.statusMeta || dashboardData.statusMeta
     });
 
     if (!dashboardData.automation) {
       dashboardData.automation = { counts: {}, issues: [], attempts: [], controller: {} };
     }
     renderHealth(dashboardData);
+    renderStatusFreshness(dashboardData);
     renderCounts(dashboardData);
     renderHumanReview();
     renderActiveExecution();
@@ -54,18 +125,33 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
       const timeout = setTimeout(function() { controller.abort(); }, REQUEST_TIMEOUT_MS);
       try {
         const data = await api('/api/status?_=' + Date.now(), { signal: controller.signal });
+        consecutiveFailures = 0;
+        lastSuccessfulPollAt = Date.now();
         if (!initialLoaded || force || !dashboardData) {
           render(data);
+          renderStatusFreshness(data);
           initialLoaded = true;
         } else {
           renderOperationalState(data);
         }
+        scheduleRefreshFollowUp(data);
+        maybeWarnAboutStaleData(data);
         return data;
       } catch (error) {
-        const message = error && error.name === 'AbortError'
-          ? 'Dashboard status polling exceeded 20 seconds. The next background poll will retry.'
-          : (error && error.message ? error.message : 'Dashboard status polling failed.');
-        toast(message, true);
+        consecutiveFailures += 1;
+        const timedOut = error && error.name === 'AbortError';
+        const staleFor = lastSuccessfulPollAt ? Date.now() - lastSuccessfulPollAt : 0;
+        setFreshnessChip(timedOut ? 'Status request timed out · retrying' : 'Status request failed · retrying', 'warn');
+        if (consecutiveFailures >= 2 || staleFor >= STALE_WARNING_MS) {
+          const message = timedOut
+            ? 'Dashboard status is temporarily unavailable. Existing data is still displayed and the next background poll will retry.'
+            : (error && error.message ? error.message : 'Dashboard status polling failed.');
+          const key = 'poll|' + message;
+          if (key !== lastWarningKey) {
+            lastWarningKey = key;
+            toast(message, true);
+          }
+        }
         return null;
       } finally {
         clearTimeout(timeout);
@@ -80,14 +166,24 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
   refreshStatus = efficientRefreshStatus;
   window.refreshStatus = efficientRefreshStatus;
 
+  startCountdown = function() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(function() {
+      if (dashboardData) renderStatusFreshness(dashboardData);
+    }, 1000);
+  };
+
   postAction = async function(path, body, successMessage) {
     try {
       const result = await api(path, { method: 'POST', body: JSON.stringify(body || {}) });
       toast(successMessage || 'Action completed.');
       if (result && result.snapshot) {
         render(result.snapshot);
+        renderStatusFreshness(result.snapshot);
         initialLoaded = true;
         lastPollStartedAt = Date.now();
+        lastSuccessfulPollAt = Date.now();
+        scheduleRefreshFollowUp(result.snapshot);
       } else {
         await efficientRefreshStatus({ force: true });
       }
@@ -101,7 +197,7 @@ export const DASHBOARD_POLL_SCRIPT = String.raw`
 
   document.addEventListener('visibilitychange', function() {
     if (!document.hidden && initialLoaded && Date.now() - lastPollStartedAt >= MIN_BACKGROUND_POLL_MS) {
-      efficientRefreshStatus();
+      efficientRefreshStatus({ background: true });
     }
   });
 })();

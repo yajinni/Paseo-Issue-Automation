@@ -10,7 +10,9 @@ test('dashboard polling is guarded, visibility-aware, and avoids full settings r
   assert.match(html, /if \(document\.hidden\)/);
   assert.match(html, /renderOperationalState\(data\)/);
   assert.match(html, /result && result\.snapshot/);
-  assert.match(html, /Dashboard status polling exceeded 20 seconds/);
+  assert.match(html, /Refreshing status/);
+  assert.match(html, /Data may be stale/);
+  assert.doesNotMatch(html, /Dashboard status polling exceeded 20 seconds/);
 });
 
 test('setup-first launch defers the competing initial status request', () => {
