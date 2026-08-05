@@ -2,7 +2,9 @@ import { dependencyNumbers, detectDependencyCycles, executionWaves, relationship
 import { activeFixJobs } from './fix-jobs.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { LABELS, listRuns, loadConfig, loadRuntime } from './state.mjs';
-import { run, runJson } from './process.mjs';
+import { collectRemoteDashboardState } from './dashboard-status-sources.mjs';
+
+export { collectRemoteDashboardState, repositoryIssueSnapshot, summarizePrChecks } from './dashboard-status-sources.mjs';
 
 const STATUS_ORDER = Object.freeze([
   ['humanReview', 'human-review'],
@@ -22,75 +24,13 @@ function issueStatus(issue) {
   return match?.[1] || 'open';
 }
 
-export function repositoryIssueSnapshot(root, { jsonRunner = runJson } = {}) {
-  const result = jsonRunner('gh', [
-    'issue', 'list', '--state', 'open', '--limit', '1000',
-    '--json', 'number,title,body,labels,state,stateReason,url,createdAt,blockedBy,blocking',
-  ], { cwd: root, allowFailure: true });
-  return {
-    available: Array.isArray(result),
-    issues: Array.isArray(result) ? result : [],
-  };
-}
-
-export function summarizePrChecks(checks = []) {
-  const normalized = (Array.isArray(checks) ? checks : []).map((check) => ({
-    name: check.name || check.context || check.workflowName || 'check',
-    state: String(check.conclusion || check.state || check.status || 'UNKNOWN').toUpperCase(),
-    url: check.detailsUrl || check.targetUrl || null,
-  }));
-  const failed = normalized.filter((check) => ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED'].includes(check.state));
-  const pending = normalized.filter((check) => ['', 'PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED', 'REQUESTED', 'WAITING', 'UNKNOWN'].includes(check.state));
-  return {
-    state: failed.length ? 'failed' : pending.length ? 'pending' : normalized.length ? 'passed' : 'none',
-    total: normalized.length,
-    failed: failed.length,
-    pending: pending.length,
-    checks: normalized,
-  };
-}
-
-function prHealth(root, state, { jsonRunner = runJson } = {}) {
-  if (!state?.prNumber && !state?.branch) return null;
-  const args = state.prNumber
-    ? ['pr', 'view', String(state.prNumber)]
-    : ['pr', 'list', '--state', 'open', '--head', String(state.branch), '--limit', '1'];
-  args.push('--json', 'number,url,isDraft,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup');
-  const result = jsonRunner('gh', args, { cwd: root, allowFailure: true });
-  const pr = Array.isArray(result) ? result[0] : result;
-  if (!pr) return null;
-  return {
-    number: Number(pr.number),
-    url: pr.url || null,
-    isDraft: pr.isDraft === true,
-    head: pr.headRefOid || null,
-    base: pr.baseRefName || null,
-    mergeable: pr.mergeable || null,
-    mergeStateStatus: pr.mergeStateStatus || null,
-    checks: summarizePrChecks(pr.statusCheckRollup),
-  };
-}
-
-function baseFreshness(root, state, baseBranch, { runner = run } = {}) {
-  if (!state?.branch && !state?.worktreePath) return { state: 'unknown', baseBranch };
-  const cwd = state.worktreePath || root;
-  const result = runner('git', ['merge-base', '--is-ancestor', `refs/remotes/origin/${baseBranch}`, 'HEAD'], {
-    cwd,
-    allowFailure: true,
-  });
-  return {
-    state: result?.ok ? 'current' : 'behind-or-unknown',
-    baseBranch,
-  };
-}
-
 function latestEvent(state, eventName, result = null) {
   return [...(state?.events || [])]
     .reverse()
     .find((event) => event.event === eventName && (!result || event.result === result)) || null;
 }
 
-function summarizeAttempt(root, state, config, options) {
+function summarizeAttempt(state, remoteHealth = null, baseBranch = '') {
   const review = latestEvent(state, 'review');
   const validation = latestEvent(state, 'validation-summary', 'PASS');
   const inspectLivePr = [LABELS.running, LABELS.humanReview, 'agent-running', 'human-review'].includes(state.status);
@@ -124,8 +64,10 @@ function summarizeAttempt(root, state, config, options) {
       at: review.at || null,
     } : null,
     approvedCommit: state.approvedCommit || null,
-    pr: inspectLivePr ? prHealth(root, state, options) : null,
-    baseFreshness: inspectLivePr ? baseFreshness(root, state, config.baseBranch, options) : { state: 'not-checked', baseBranch: config.baseBranch },
+    pr: inspectLivePr ? remoteHealth?.pr || null : null,
+    baseFreshness: inspectLivePr
+      ? remoteHealth?.baseFreshness || { state: 'behind-or-unknown', baseBranch }
+      : { state: 'not-checked', baseBranch },
     activity: state.activity || [],
     events: state.events || [],
     history: state.history || [],
@@ -189,17 +131,29 @@ export function buildExecutionModel({ issues = [], attempts = [], config, runtim
   };
 }
 
-export function dashboardStatus(root, existing = {}, options = {}) {
+export function loadLocalDashboardState(root) {
   const config = loadConfig(root);
   const runtime = loadRuntime(root);
+  const rawRuns = listRuns(root);
+  const activeFixCount = activeFixJobs(loadPrReviewStore(root)).length;
+  return {
+    config,
+    runtime,
+    rawRuns,
+    activeFixCount,
+    loadedAt: new Date().toISOString(),
+  };
+}
+
+export function composeDashboardSnapshot(local, remote, existing = {}) {
+  const { config, runtime, rawRuns, activeFixCount } = local;
   const skipped = new Set(runtime.skippedIssueNumbers || []);
-  const repository = repositoryIssueSnapshot(root, options);
+  const repository = remote?.repository || { available: false, issues: [] };
   const labelEntries = Object.entries(LABELS).map(([key, label]) => [
     key,
     repository.issues.filter((issue) => labelNames(issue).has(label)),
   ]);
   const issueMap = new Map(repository.issues.map((issue) => [Number(issue.number), issue]));
-  const rawRuns = listRuns(root);
   for (const state of rawRuns) {
     if (!issueMap.has(Number(state.issueNumber))) {
       issueMap.set(Number(state.issueNumber), {
@@ -211,7 +165,12 @@ export function dashboardStatus(root, existing = {}, options = {}) {
       });
     }
   }
-  const attempts = rawRuns.map((state) => summarizeAttempt(root, state, config, options));
+
+  const attempts = rawRuns.map((state) => summarizeAttempt(
+    state,
+    remote?.attemptHealth?.[String(Number(state.issueNumber))] || null,
+    config.baseBranch,
+  ));
   const existingReadyByIssue = new Map((existing.readyIssues || []).map((issue) => [Number(issue.number), issue]));
   const attemptsByIssue = new Map(attempts.map((attempt) => [attempt.issueNumber, attempt]));
   const issues = [...issueMap.values()].map((issue) => {
@@ -240,7 +199,6 @@ export function dashboardStatus(root, existing = {}, options = {}) {
       baseFreshness: attempt?.baseFreshness || null,
     };
   }).sort((a, b) => a.number - b.number);
-  const activeFixCount = activeFixJobs(loadPrReviewStore(root)).length;
   const model = buildExecutionModel({ issues, attempts, config, runtime, activeFixCount });
   return {
     ...existing,
@@ -255,5 +213,21 @@ export function dashboardStatus(root, existing = {}, options = {}) {
       pollIntervalSeconds: Number(config.pollIntervalSeconds || 120),
       ...model,
     },
+    remoteStatus: {
+      collectedAt: remote?.collectedAt || null,
+      durationMs: remote?.durationMs ?? null,
+      errors: remote?.errors || [],
+    },
   };
+}
+
+export function dashboardStatus(root, existing = {}, options = {}) {
+  const local = loadLocalDashboardState(root);
+  const remote = collectRemoteDashboardState(root, {
+    attempts: local.rawRuns,
+    baseBranch: local.config.baseBranch,
+    jsonRunner: options.jsonRunner,
+    runner: options.runner,
+  });
+  return composeDashboardSnapshot(local, remote, existing);
 }
