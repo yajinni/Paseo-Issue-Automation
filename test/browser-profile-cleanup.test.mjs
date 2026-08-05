@@ -25,19 +25,12 @@ test('profile reset clears an expired browser lock', (t) => {
   assert.equal(existsSync(paths.profile), true);
 });
 
-test('Chromium uninstall clears expired locks while preserving browser profile state', (t) => {
+test('browser uninstall clears expired profile and scheduler locks', (t) => {
   const dataRoot = mkdtempSync(path.join(os.tmpdir(), 'paseo-browser-uninstall-'));
   t.after(() => rmSync(dataRoot, { recursive: true, force: true }));
   const paths = browserPaths({ dataRoot });
   writeFileSync(paths.lock, expiredLock());
   writeFileSync(paths.reviewSchedulerLock, expiredLock());
-  const result = uninstallBrowserState({ dataRoot });
-  assert.equal(result.chromiumStateCleared, true);
-  assert.equal(result.profilePreserved, true);
-  assert.equal(result.configPreserved, true);
-  assert.equal(existsSync(paths.lock), false);
-  assert.equal(existsSync(paths.reviewSchedulerLock), false);
-  assert.equal(existsSync(paths.root), true);
-  assert.equal(existsSync(paths.profile), true);
-  assert.equal(existsSync(paths.config), true);
+  assert.deepEqual(uninstallBrowserState({ dataRoot }), { removed: true });
+  assert.equal(existsSync(paths.root), false);
 });
