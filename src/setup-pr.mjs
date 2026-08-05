@@ -49,10 +49,20 @@ function normalizedPath(value) {
   return String(value || '').replaceAll('\\', '/').replace(/^\.\//, '');
 }
 
+function restoreTrimmedPorcelainPrefix(line, index) {
+  const value = line.trimEnd();
+  if (index !== 0) return value;
+  // run() trims command stdout. For a first-line worktree-only change such as
+  // " M package-lock.json", that removes Git's leading status column and leaves
+  // "M package-lock.json". A valid index-only status would contain two spaces
+  // before the path ("M  package-lock.json"), so this shape is safe to repair.
+  return /^[MTADRCU] \S/.test(value) ? ` ${value}` : value;
+}
+
 export function parsePorcelainStatus(output) {
   return String(output || '')
     .split(/\r?\n/)
-    .map((line) => line.trimEnd())
+    .map(restoreTrimmedPorcelainPrefix)
     .filter(Boolean)
     .map((line) => {
       const status = line.slice(0, 2);
