@@ -4,28 +4,27 @@ import { BROWSER_OPERATION_UI_SCRIPT } from '../src/browser-operation-ui-script.
 import { DASHBOARD_POLL_SCRIPT } from '../src/dashboard-poll-script.mjs';
 import { dashboardHtml } from '../src/ui.mjs';
 
-test('Chromium install and uninstall use a visible command progress dialog', () => {
+test('Chromium install uses a compact auto-closing status dialog', () => {
   const html = dashboardHtml();
   assert.match(html, /browser-operation-dialog/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /width:min\(380px/);
   assert.match(BROWSER_OPERATION_UI_SCRIPT, /Installing Chromium/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Uninstalling Chromium/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Uninstall Chromium/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /npx playwright install chromium/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /npx playwright uninstall/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Command output/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Chromium installed and verified/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Chromium and dedicated browser state removed and verified/);
-  assert.match(BROWSER_OPERATION_UI_SCRIPT, /deleting the dedicated ChatGPT profile, login, selected conversation/);
-  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /profile and login will be preserved/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Expected install time: 30–60 seconds\./);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /dialog\.close\(\)/);
+  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /Command output/);
+  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /browser-operation-command/);
+  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /browser-operation-track/);
 });
 
-test('Chromium button setup cannot create a self-triggering DOM mutation loop', () => {
-  assert.match(
-    BROWSER_OPERATION_UI_SCRIPT,
-    /if \(text === 'uninstall browser'\) button\.textContent = 'Uninstall Chromium'/,
-  );
-  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /new MutationObserver\(renameUninstallControl\)/);
-  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /observer\.observe\(document\.body/);
+test('Chromium uninstall has a direct confirmation and progress path', () => {
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /window\.confirmChromiumUninstall/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Type UNINSTALL to continue/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /return runBrowserOperation\(UNINSTALL_PATH\)/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /button\.onclick = window\.confirmChromiumUninstall/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Uninstalling Chromium/);
+  assert.match(BROWSER_OPERATION_UI_SCRIPT, /Chromium and dedicated browser state removed and verified/);
+  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /browserOperationWrapped/);
+  assert.doesNotMatch(BROWSER_OPERATION_UI_SCRIPT, /MutationObserver/);
 });
 
 test('dashboard refresh callers share the same in-flight setup snapshot promise', () => {
