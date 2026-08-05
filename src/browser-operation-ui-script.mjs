@@ -3,29 +3,19 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
   const INSTALL_PATH = '/api/pr-reviews/browser/install';
   const UNINSTALL_PATH = '/api/pr-reviews/browser/uninstall';
   let operationActive = false;
-  let elapsedTimer = null;
 
   function installStyles() {
     if (document.getElementById('browser-operation-style')) return;
     const style = document.createElement('style');
     style.id = 'browser-operation-style';
     style.textContent = [
-      '#browser-operation-dialog{width:min(720px,calc(100vw - 28px));padding:0;overflow:hidden}',
-      '#browser-operation-dialog .browser-operation-body{display:grid;gap:14px;padding:18px}',
-      '#browser-operation-dialog .browser-operation-command{display:block;padding:12px 14px;border:1px solid var(--border);border-radius:9px;background:#070b12;color:#dbe9ff;white-space:pre-wrap;overflow-wrap:anywhere}',
-      '#browser-operation-dialog .browser-operation-state{display:flex;align-items:center;justify-content:space-between;gap:12px}',
-      '#browser-operation-dialog .browser-operation-state strong{display:flex;align-items:center;gap:8px}',
-      '#browser-operation-dialog .browser-operation-spinner{width:14px;height:14px;border:2px solid rgba(88,166,255,.25);border-top-color:var(--accent);border-radius:50%;animation:browser-operation-spin .8s linear infinite}',
-      '#browser-operation-dialog[data-state="success"] .browser-operation-spinner,#browser-operation-dialog[data-state="failed"] .browser-operation-spinner{border:0;animation:none;width:auto;height:auto}',
-      '#browser-operation-dialog[data-state="success"] .browser-operation-spinner:before{content:"✓";color:var(--success)}',
-      '#browser-operation-dialog[data-state="failed"] .browser-operation-spinner:before{content:"×";color:var(--danger)}',
-      '#browser-operation-dialog .browser-operation-track{height:8px;overflow:hidden;border-radius:999px;background:var(--panel-3)}',
-      '#browser-operation-dialog .browser-operation-track span{display:block;width:38%;height:100%;border-radius:inherit;background:var(--accent);animation:browser-operation-progress 1.35s ease-in-out infinite}',
-      '#browser-operation-dialog[data-state="success"] .browser-operation-track span{width:100%;animation:none;background:var(--success)}',
-      '#browser-operation-dialog[data-state="failed"] .browser-operation-track span{width:100%;animation:none;background:var(--danger)}',
-      '#browser-operation-output{min-height:120px;max-height:300px;margin:0;padding:12px 14px;overflow:auto;border:1px solid var(--border);border-radius:9px;background:#070b12;color:#c8d5e8;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}',
-      '@keyframes browser-operation-spin{to{transform:rotate(360deg)}}',
-      '@keyframes browser-operation-progress{0%{transform:translateX(-120%)}50%{transform:translateX(120%)}100%{transform:translateX(270%)}}'
+      '#browser-operation-dialog{width:min(380px,calc(100vw - 28px));padding:0;overflow:hidden}',
+      '#browser-operation-dialog .browser-operation-body{display:grid;justify-items:center;gap:14px;padding:24px;text-align:center}',
+      '#browser-operation-dialog .browser-operation-spinner{width:28px;height:28px;border:3px solid rgba(88,166,255,.25);border-top-color:var(--accent);border-radius:50%;animation:browser-operation-spin .8s linear infinite}',
+      '#browser-operation-dialog[data-state="failed"] .browser-operation-spinner{display:none}',
+      '#browser-operation-error{width:100%;max-height:180px;margin:0;padding:10px 12px;overflow:auto;border:1px solid var(--danger);border-radius:8px;background:#070b12;color:#ffd6d6;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}',
+      '#browser-operation-close[hidden]{display:none}',
+      '@keyframes browser-operation-spin{to{transform:rotate(360deg)}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -37,89 +27,53 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     dialog.id = 'browser-operation-dialog';
     dialog.dataset.state = 'idle';
     dialog.innerHTML = [
-      '<div class="dialog-head">',
-        '<div><h2 id="browser-operation-title">Chromium operation</h2><p class="muted" id="browser-operation-description">Preparing command…</p></div>',
-        '<button id="browser-operation-header-close" class="ghost small" type="button" disabled>Close</button>',
-      '</div>',
       '<div class="browser-operation-body">',
-        '<div><div class="muted" style="margin-bottom:6px">Command</div><code id="browser-operation-command" class="browser-operation-command"></code></div>',
-        '<div class="browser-operation-state"><strong><span class="browser-operation-spinner" aria-hidden="true"></span><span id="browser-operation-status">Starting…</span></strong><span id="browser-operation-elapsed" class="muted">0 seconds</span></div>',
-        '<div class="browser-operation-track" role="progressbar" aria-label="Chromium operation progress"><span></span></div>',
-        '<div><div class="muted" style="margin-bottom:6px">Command output</div><pre id="browser-operation-output" aria-live="polite">Waiting for the command to start…</pre></div>',
-      '</div>',
-      '<div class="dialog-footer"><button id="browser-operation-close" class="secondary" type="button" disabled>Close</button></div>'
+        '<div class="browser-operation-spinner" aria-hidden="true"></div>',
+        '<div><h2 id="browser-operation-title" style="margin:0 0 8px">Chromium operation</h2><p id="browser-operation-description" class="muted" style="margin:0"></p></div>',
+        '<pre id="browser-operation-error" hidden aria-live="polite"></pre>',
+        '<button id="browser-operation-close" class="secondary" type="button" hidden>Close</button>',
+      '</div>'
     ].join('');
     document.body.appendChild(dialog);
-
-    const close = function() {
+    document.getElementById('browser-operation-close').addEventListener('click', function() {
       if (!operationActive) dialog.close();
-    };
-    document.getElementById('browser-operation-close').addEventListener('click', close);
-    document.getElementById('browser-operation-header-close').addEventListener('click', close);
+    });
     dialog.addEventListener('cancel', function(event) {
       if (operationActive) event.preventDefault();
     });
     return dialog;
   }
 
-  function renameUninstallControl() {
-    Array.from(document.querySelectorAll('button')).forEach(function(button) {
-      const text = String(button.textContent || '').trim().toLowerCase();
-      if (text !== 'uninstall browser' && text !== 'uninstall chromium') return;
-      if (text === 'uninstall browser') button.textContent = 'Uninstall Chromium';
-      button.title = 'Remove Playwright Chromium and delete the dedicated ChatGPT profile, login, selected conversation, and local browser state.';
-      button.setAttribute('onclick', "openPrReviewConfirm('Uninstall Chromium','UNINSTALL','/api/pr-reviews/browser/uninstall')");
-    });
-  }
-
-  function initialCommand(path) {
-    return path === INSTALL_PATH
-      ? 'npx playwright install chromium'
-      : 'npx playwright uninstall';
-  }
-
-  function operationResult(path, payload) {
-    return path === UNINSTALL_PATH ? (payload && payload.browsers || payload || {}) : (payload || {});
-  }
-
-  function formatOutput(path, payload) {
-    const result = operationResult(path, payload);
-    const lines = [];
-    const command = Array.isArray(result.command) ? result.command.join(' ') : initialCommand(path);
-    lines.push('$ ' + command);
-    if (result.resolvedCommand && result.resolvedCommand !== result.command?.[0]) {
-      lines.push('Resolved npx: ' + result.resolvedCommand);
-    }
-    lines.push('');
-    lines.push(String(result.stdout || 'Command completed without additional output.').trim());
-    if (result.chromium) {
-      lines.push('');
-      lines.push(path === INSTALL_PATH
-        ? 'Verification: Chromium executable found at ' + (result.chromium.executablePath || 'the Playwright browser location') + '.'
-        : 'Verification: Chromium executable is no longer present.');
-    }
-    if (path === UNINSTALL_PATH && payload && payload.state && payload.state.removed) {
-      lines.push('Dedicated ChatGPT profile, login, conversation selection, and local browser state removed.');
-    }
-    return lines.join('\n');
-  }
-
-  function setCloseEnabled(enabled) {
+  function prepareDialog(installing) {
+    installStyles();
+    const dialog = ensureDialog();
+    dialog.dataset.state = 'running';
+    document.getElementById('browser-operation-title').textContent = installing
+      ? 'Installing Chromium'
+      : 'Uninstalling Chromium';
+    document.getElementById('browser-operation-description').textContent = installing
+      ? 'Expected install time: 30–60 seconds.'
+      : 'Removing Chromium and dedicated browser data. This usually takes a few seconds.';
+    const error = document.getElementById('browser-operation-error');
     const close = document.getElementById('browser-operation-close');
-    const headerClose = document.getElementById('browser-operation-header-close');
-    if (close) close.disabled = !enabled;
-    if (headerClose) headerClose.disabled = !enabled;
+    error.hidden = true;
+    error.textContent = '';
+    close.hidden = true;
+    if (!dialog.open) dialog.showModal();
+    return dialog;
   }
 
-  function startElapsedClock(startedAt) {
-    clearInterval(elapsedTimer);
-    const node = document.getElementById('browser-operation-elapsed');
-    const update = function() {
-      const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      if (node) node.textContent = seconds + (seconds === 1 ? ' second' : ' seconds');
-    };
-    update();
-    elapsedTimer = setInterval(update, 1000);
+  function showFailure(dialog, installing, error) {
+    operationActive = false;
+    dialog.dataset.state = 'failed';
+    document.getElementById('browser-operation-title').textContent = installing
+      ? 'Chromium installation failed'
+      : 'Chromium uninstall failed';
+    document.getElementById('browser-operation-description').textContent = 'Review the error below, then close this window and retry.';
+    const errorNode = document.getElementById('browser-operation-error');
+    errorNode.textContent = String(error && error.message || error);
+    errorNode.hidden = false;
+    document.getElementById('browser-operation-close').hidden = false;
   }
 
   async function refreshAfterOperation() {
@@ -129,34 +83,21 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     await Promise.allSettled(refreshes);
   }
 
-  async function runBrowserOperation(path, body) {
+  async function runBrowserOperation(path) {
     if (operationActive) {
       toast('A Chromium install or uninstall command is already running.', true);
       return null;
     }
-    operationActive = true;
-    installStyles();
-    const dialog = ensureDialog();
-    const installing = path === INSTALL_PATH;
-    const startedAt = Date.now();
 
-    dialog.dataset.state = 'running';
-    document.getElementById('browser-operation-title').textContent = installing ? 'Installing Chromium' : 'Uninstalling Chromium';
-    document.getElementById('browser-operation-description').textContent = installing
-      ? 'Playwright is downloading and installing its matching Chromium build.'
-      : 'Playwright is removing Chromium and deleting the dedicated ChatGPT profile, login, selected conversation, and local browser state.';
-    document.getElementById('browser-operation-command').textContent = initialCommand(path);
-    document.getElementById('browser-operation-status').textContent = installing ? 'Installing…' : 'Uninstalling…';
-    document.getElementById('browser-operation-output').textContent = '$ ' + initialCommand(path) + '\n\nCommand is running…';
-    setCloseEnabled(false);
-    startElapsedClock(startedAt);
-    if (!dialog.open) dialog.showModal();
+    const installing = path === INSTALL_PATH;
+    operationActive = true;
+    const dialog = prepareDialog(installing);
 
     try {
       const response = await fetch(path, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body || {}),
+        body: '{}',
       });
       const text = await response.text();
       let payload = {};
@@ -164,47 +105,57 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       catch { payload = { error: text || 'The server returned an unreadable response.' }; }
       if (!response.ok) throw new Error(payload.error || 'Chromium operation failed.');
 
-      const result = operationResult(path, payload);
-      const command = Array.isArray(result.command) ? result.command.join(' ') : initialCommand(path);
-      document.getElementById('browser-operation-command').textContent = command;
-      document.getElementById('browser-operation-output').textContent = formatOutput(path, payload);
-      document.getElementById('browser-operation-status').textContent = installing ? 'Chromium installed' : 'Chromium uninstalled';
-      dialog.dataset.state = 'success';
-      toast(installing ? 'Chromium installed and verified.' : 'Chromium and dedicated browser state removed and verified.');
-      await refreshAfterOperation();
+      operationActive = false;
+      dialog.close();
+      toast(installing
+        ? 'Chromium installed and verified.'
+        : 'Chromium and dedicated browser state removed and verified.');
+      refreshAfterOperation().catch(function() {});
       return payload;
     } catch (error) {
-      dialog.dataset.state = 'failed';
-      document.getElementById('browser-operation-status').textContent = installing ? 'Installation failed' : 'Uninstall failed';
-      document.getElementById('browser-operation-output').textContent = '$ ' + initialCommand(path) + '\n\n' + String(error && error.message || error);
+      showFailure(dialog, installing, error);
       toast(String(error && error.message || error), true);
       return null;
-    } finally {
-      operationActive = false;
-      clearInterval(elapsedTimer);
-      elapsedTimer = null;
-      setCloseEnabled(true);
     }
   }
 
-  function install() {
-    installStyles();
-    ensureDialog();
-    renameUninstallControl();
+  window.installPrReviewBrowser = function() {
+    return runBrowserOperation(INSTALL_PATH);
+  };
 
-    const originalPost = window.prReviewPost;
-    if (typeof originalPost === 'function' && !originalPost.browserOperationWrapped) {
-      const wrapped = function(path, body) {
-        if (path === INSTALL_PATH || path === UNINSTALL_PATH) return runBrowserOperation(path, body);
-        return originalPost(path, body);
-      };
-      wrapped.browserOperationWrapped = true;
-      window.prReviewPost = wrapped;
-      prReviewPost = wrapped;
-    }
+  window.confirmChromiumUninstall = function() {
+    const dialog = document.getElementById('pr-confirm-dialog');
+    const input = document.getElementById('pr-confirm-input');
+    const confirm = document.getElementById('pr-confirm-button');
+    document.getElementById('pr-confirm-title').textContent = 'Uninstall Chromium';
+    document.getElementById('pr-confirm-text').textContent = 'Type UNINSTALL to continue. This also deletes the dedicated ChatGPT profile, login, selected conversation, and local browser state.';
+    input.value = '';
+    confirm.disabled = true;
+    input.oninput = function() {
+      confirm.disabled = input.value !== 'UNINSTALL';
+    };
+    confirm.onclick = function() {
+      dialog.close();
+      return runBrowserOperation(UNINSTALL_PATH);
+    };
+    dialog.showModal();
+    input.focus();
+  };
+
+  function bindUninstallControl() {
+    Array.from(document.querySelectorAll('button')).forEach(function(button) {
+      const text = String(button.textContent || '').trim().toLowerCase();
+      if (text !== 'uninstall browser' && text !== 'uninstall chromium') return;
+      button.textContent = 'Uninstall Chromium';
+      button.title = 'Remove Playwright Chromium and delete the dedicated ChatGPT profile, login, selected conversation, and local browser state.';
+      button.removeAttribute('onclick');
+      button.onclick = window.confirmChromiumUninstall;
+    });
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
-  else install();
+  bindUninstallControl();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindUninstallControl, { once: true });
+  }
 })();
 `;
