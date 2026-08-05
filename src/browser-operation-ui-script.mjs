@@ -129,11 +129,12 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     await Promise.allSettled(refreshes);
   }
 
-  async function runBrowserOperation(path) {
+  async function runBrowserOperation(path, trigger) {
     if (operationActive) {
       toast('A Chromium install or uninstall command is already running.', true);
       return null;
     }
+    if (trigger !== undefined) operationTrigger = trigger || null;
 
     const installing = path === INSTALL_PATH;
     operationActive = true;
@@ -177,8 +178,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
   }
 
   window.installPrReviewBrowser = function(trigger) {
-    operationTrigger = trigger || null;
-    return runBrowserOperation(INSTALL_PATH);
+    return runBrowserOperation(INSTALL_PATH, trigger || null);
   };
 
   window.confirmChromiumUninstall = function(trigger) {
