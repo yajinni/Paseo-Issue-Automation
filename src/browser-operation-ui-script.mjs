@@ -5,12 +5,6 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
   let operationActive = false;
   let elapsedTimer = null;
 
-  function escapeHtml(value) {
-    return String(value == null ? '' : value).replace(/[&<>"']/g, function(character) {
-      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character];
-    });
-  }
-
   function installStyles() {
     if (document.getElementById('browser-operation-style')) return;
     const style = document.createElement('style');
@@ -22,9 +16,8 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       '#browser-operation-dialog .browser-operation-state{display:flex;align-items:center;justify-content:space-between;gap:12px}',
       '#browser-operation-dialog .browser-operation-state strong{display:flex;align-items:center;gap:8px}',
       '#browser-operation-dialog .browser-operation-spinner{width:14px;height:14px;border:2px solid rgba(88,166,255,.25);border-top-color:var(--accent);border-radius:50%;animation:browser-operation-spin .8s linear infinite}',
-      '#browser-operation-dialog[data-state="success"] .browser-operation-spinner{border:0;animation:none;width:auto;height:auto}',
+      '#browser-operation-dialog[data-state="success"] .browser-operation-spinner,#browser-operation-dialog[data-state="failed"] .browser-operation-spinner{border:0;animation:none;width:auto;height:auto}',
       '#browser-operation-dialog[data-state="success"] .browser-operation-spinner:before{content:"✓";color:var(--success)}',
-      '#browser-operation-dialog[data-state="failed"] .browser-operation-spinner{border:0;animation:none;width:auto;height:auto}',
       '#browser-operation-dialog[data-state="failed"] .browser-operation-spinner:before{content:"×";color:var(--danger)}',
       '#browser-operation-dialog .browser-operation-track{height:8px;overflow:hidden;border-radius:999px;background:var(--panel-3)}',
       '#browser-operation-dialog .browser-operation-track span{display:block;width:38%;height:100%;border-radius:inherit;background:var(--accent);animation:browser-operation-progress 1.35s ease-in-out infinite}',
@@ -71,13 +64,11 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
 
   function renameUninstallControl() {
     Array.from(document.querySelectorAll('button')).forEach(function(button) {
-      if (String(button.textContent || '').trim().toLowerCase() !== 'uninstall browser') return;
+      const text = String(button.textContent || '').trim().toLowerCase();
+      if (text !== 'uninstall browser' && text !== 'uninstall chromium') return;
       button.textContent = 'Uninstall Chromium';
-      button.title = 'Remove Playwright Chromium while preserving the dedicated ChatGPT profile, login, and selected conversation.';
-      button.setAttribute(
-        'onclick',
-        "openPrReviewConfirm('Uninstall Chromium','UNINSTALL','/api/pr-reviews/browser/uninstall')",
-      );
+      button.title = 'Remove Playwright Chromium and delete the dedicated ChatGPT profile, login, selected conversation, and local browser state.';
+      button.setAttribute('onclick', "openPrReviewConfirm('Uninstall Chromium','UNINSTALL','/api/pr-reviews/browser/uninstall')");
     });
   }
 
@@ -107,9 +98,8 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
         ? 'Verification: Chromium executable found at ' + (result.chromium.executablePath || 'the Playwright browser location') + '.'
         : 'Verification: Chromium executable is no longer present.');
     }
-    if (path === UNINSTALL_PATH && payload && payload.state) {
-      lines.push('ChatGPT profile preserved: ' + (payload.state.profilePreserved ? 'yes' : 'unknown') + '.');
-      lines.push('ChatGPT credentials preserved: ' + (payload.state.credentialsPreserved ? 'yes' : 'not previously verified') + '.');
+    if (path === UNINSTALL_PATH && payload && payload.state && payload.state.removed) {
+      lines.push('Dedicated ChatGPT profile, login, conversation selection, and local browser state removed.');
     }
     return lines.join('\n');
   }
@@ -148,14 +138,13 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     installStyles();
     const dialog = ensureDialog();
     const installing = path === INSTALL_PATH;
-    const title = installing ? 'Installing Chromium' : 'Uninstalling Chromium';
     const startedAt = Date.now();
 
     dialog.dataset.state = 'running';
-    document.getElementById('browser-operation-title').textContent = title;
+    document.getElementById('browser-operation-title').textContent = installing ? 'Installing Chromium' : 'Uninstalling Chromium';
     document.getElementById('browser-operation-description').textContent = installing
       ? 'Playwright is downloading and installing its matching Chromium build.'
-      : 'Playwright is removing its Chromium browser files. Your ChatGPT profile and login will be preserved.';
+      : 'Playwright is removing Chromium and deleting the dedicated ChatGPT profile, login, selected conversation, and local browser state.';
     document.getElementById('browser-operation-command').textContent = initialCommand(path);
     document.getElementById('browser-operation-status').textContent = installing ? 'Installing…' : 'Uninstalling…';
     document.getElementById('browser-operation-output').textContent = '$ ' + initialCommand(path) + '\n\nCommand is running…';
@@ -181,7 +170,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       document.getElementById('browser-operation-output').textContent = formatOutput(path, payload);
       document.getElementById('browser-operation-status').textContent = installing ? 'Chromium installed' : 'Chromium uninstalled';
       dialog.dataset.state = 'success';
-      toast(installing ? 'Chromium installed and verified.' : 'Chromium uninstalled and verified.');
+      toast(installing ? 'Chromium installed and verified.' : 'Chromium and dedicated browser state removed and verified.');
       await refreshAfterOperation();
       return payload;
     } catch (error) {
@@ -206,9 +195,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     const originalPost = window.prReviewPost;
     if (typeof originalPost === 'function' && !originalPost.browserOperationWrapped) {
       const wrapped = function(path, body) {
-        if (path === INSTALL_PATH || path === UNINSTALL_PATH) {
-          return runBrowserOperation(path, body);
-        }
+        if (path === INSTALL_PATH || path === UNINSTALL_PATH) return runBrowserOperation(path, body);
         return originalPost(path, body);
       };
       wrapped.browserOperationWrapped = true;
