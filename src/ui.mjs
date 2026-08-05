@@ -9,6 +9,7 @@ import { DASHBOARD_POLL_SCRIPT } from './dashboard-poll-script.mjs';
 import { ISSUES_MAP_LAYOUT_UI_SCRIPT } from './issues-map-layout-ui-script.mjs';
 import { LOGS_UI_SCRIPT } from './logs-ui-script.mjs';
 import { MODEL_THINKING_UI_SCRIPT } from './model-thinking-ui-script.mjs';
+import { PR_REVIEW_BROWSER_SETUP_UI_SCRIPT } from './pr-review-browser-setup-ui-script.mjs';
 import { PR_REVIEW_DASHBOARD_SCRIPT } from './pr-review-dashboard-script.mjs';
 import { PR_REVIEW_DASHBOARD_STYLE } from './pr-review-dashboard-style.mjs';
 import { PR_REVIEW_PANEL } from './pr-review-panel.mjs';
@@ -29,6 +30,26 @@ const CONTROL_CENTER_SCRIPT_WITHOUT_MAINTENANCE = CONTROL_CENTER_SCRIPT
   .replace(
     /\nfunction renderHealth\(data\) \{[\s\S]*?\n\}\n\nfunction renderCounts/,
     '\nfunction renderCounts',
+  )
+  .replace('Native dependency API', 'GitHub Issues API')
+  .replace(
+    "'Structured GitHub blocked-by data is available.'",
+    '"GitHub issue\'s structure read and accessible."',
+  )
+  .replace('Execution is blocked where relationship data is unavailable.', 'GitHub issue structure or blocked-by relationships are unavailable.');
+
+const PR_REVIEW_DASHBOARD_SCRIPT_WITH_BROWSER_REQUIREMENTS = PR_REVIEW_DASHBOARD_SCRIPT
+  .replace(
+    "    setPrChip('pr-browser-chip', browser.library.installed ? 'Playwright installed' : 'Playwright missing', browser.library.installed ? 'good' : 'bad');\n",
+    "    setPrChip('pr-browser-chip', browser.chromium.installed ? 'Chromium installed' : 'Chromium missing', browser.chromium.installed ? 'good' : 'bad');\n",
+  )
+  .replace(
+    "    const conversation = config.browserReview.projectConversationUrl || prData.globalConversationUrl;\n    setPrChip('pr-conversation-chip', conversation ? 'Conversation configured' : 'Conversation missing', conversation ? 'good' : 'bad');\n",
+    "    const conversation = config.browserReview.projectConversationUrl;\n    setPrChip('pr-conversation-chip', conversation ? 'PR Review Chat URL configured' : 'PR Review Chat URL missing', conversation ? 'good' : 'bad');\n",
+  )
+  .replace(
+    /    document\.getElementById\('pr-browser-status'\)\.innerHTML = \[[\s\S]*?    \]\.join\(''\);\n(?=    document\.getElementById\('pr-history'\))/,
+    "    if (typeof window.renderPrReviewBrowserSetup === 'function') window.renderPrReviewBrowserSetup(prData);\n",
   );
 
 const CONTROLLER_ACTIONS_PANEL = String.raw`      <div class="header-actions controller-action-bar" id="controller-actions" data-state="loading">
@@ -106,6 +127,10 @@ function integratedDashboardShell() {
       CONTROLLER_ACTIONS_PANEL,
     )
     .replace(
+      '      <span class="chip" id="health-dependencies">Dependencies unknown</span>\n',
+      '',
+    )
+    .replace(
       '    <button class="nav-tab" data-view="dependencies" onclick="showView(\'dependencies\')">Dependencies</button>\n',
       '    <button class="nav-tab" data-view="dependencies" onclick="showView(\'dependencies\')">Issues Map</button>\n',
     )
@@ -154,7 +179,8 @@ ${integratedDashboardShell()}
 <script>${SETUP_CATALOG_FEEDBACK_SCRIPT}</script>
 <script>${COMPONENTS_UI_SCRIPT}</script>
 <script>${CONTROLLER_ACTIONS_UI_SCRIPT}</script>
-<script>${PR_REVIEW_DASHBOARD_SCRIPT}</script>
+<script>${PR_REVIEW_DASHBOARD_SCRIPT_WITH_BROWSER_REQUIREMENTS}</script>
+<script>${PR_REVIEW_BROWSER_SETUP_UI_SCRIPT}</script>
 <script>${COMPONENT_CHANGES_UI_SCRIPT}</script>
 <script>${BROWSER_OPERATION_UI_SCRIPT}</script>
 <script>${PR_REVIEW_SETTINGS_SAVE_SCRIPT}</script>

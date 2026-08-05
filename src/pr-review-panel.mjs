@@ -14,9 +14,9 @@ export const PR_REVIEW_PANEL = String.raw`
 
       <div class="health-strip pr-review-health" aria-label="PR review health">
         <span id="pr-queue-chip" class="chip">Queue unknown</span>
-        <span id="pr-browser-chip" class="chip">Browser unknown</span>
+        <span id="pr-browser-chip" class="chip">Chromium unknown</span>
         <span id="pr-auth-chip" class="chip">Authentication unknown</span>
-        <span id="pr-conversation-chip" class="chip">Conversation unknown</span>
+        <span id="pr-conversation-chip" class="chip">PR Review Chat URL unknown</span>
         <span id="pr-reconcile-chip" class="chip">Reconciliation unknown</span>
       </div>
 
@@ -53,7 +53,7 @@ export const PR_REVIEW_PANEL = String.raw`
           <div class="field-grid">
             <label>Enable PR automation<select id="pr-enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
             <label>Enable ChatGPT browser reviews<select id="pr-browser-enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
-            <label>Project conversation URL<input id="pr-project-url" placeholder="https://chatgpt.com/c/..."></label>
+            <label>PR Review Chat URL<input id="pr-project-url" placeholder="https://chatgpt.com/c/..."></label>
             <label>Review debounce in seconds<input id="pr-debounce" type="number" min="0" max="600" step="1"></label>
             <label>Active reconciliation in seconds<input id="pr-active-interval" type="number" min="10" max="3600" step="1"></label>
             <label>Idle reconciliation in seconds<input id="pr-idle-interval" type="number" min="30" max="86400" step="1"></label>
@@ -67,19 +67,20 @@ export const PR_REVIEW_PANEL = String.raw`
         </article>
 
         <article class="card">
-          <div class="card-head"><div><h2>Dedicated ChatGPT browser</h2><p>Manage the isolated browser used by serial PR review for this project.</p></div></div>
-          <div id="pr-browser-status" class="meta-grid"></div>
-          <div class="actions pr-review-section">
-            <button onclick="installPrReviewBrowser()">Install Chromium</button>
-            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/open')">Launch browser</button>
-            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/use-current',{scope:'project'})">Use current conversation</button>
-            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/test')">Test destination</button>
-            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/test',{sendTestPrompt:true})">Send harmless test</button>
-            <button class="secondary" onclick="prReviewPost('/api/pr-reviews/browser/close')">Close browser</button>
+          <div class="card-head"><div><h2>Dedicated ChatGPT browser</h2><p>Verify Chromium and the saved chat used by serial PR review.</p></div></div>
+          <div id="pr-browser-status" class="component-list" aria-live="polite">
+            <div class="component" id="pr-chromium-requirement" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px">
+              <div><strong>Chromium Installed</strong><p id="pr-chromium-status" style="margin:4px 0 0">Checking…</p></div>
+              <div class="actions"><span id="pr-chromium-badge"><span class="status-dot"></span></span><button id="pr-install-chromium" type="button" onclick="installPrReviewBrowser(this)">Install Chromium</button></div>
+            </div>
+            <div class="component" id="pr-chat-url-requirement" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px">
+              <div><strong>PR Review Chat URL</strong><p id="pr-chat-url-status" style="margin:4px 0 0">Checking…</p><p id="pr-browser-test-result" class="muted" aria-live="polite" style="margin:4px 0 0"></p></div>
+              <div class="actions"><span id="pr-chat-url-badge"><span class="status-dot"></span></span><button id="pr-test-browser" class="secondary" type="button" onclick="testPrReviewBrowserSetup(this)" disabled>Test</button></div>
+            </div>
           </div>
           <div class="actions pr-review-section">
-            <button class="danger" onclick="openPrReviewConfirm('Reset dedicated profile','RESET','/api/pr-reviews/browser/reset')">Reset profile</button>
-            <button class="danger" onclick="openPrReviewConfirm('Uninstall browser','UNINSTALL','/api/pr-reviews/browser/uninstall')">Uninstall browser</button>
+            <button id="pr-reset-browser-profile" class="danger" onclick="openPrReviewConfirm('Reset dedicated profile','RESET','/api/pr-reviews/browser/reset')">Reset profile</button>
+            <button id="pr-uninstall-chromium" class="danger" onclick="openPrReviewConfirm('Uninstall Chromium','UNINSTALL','/api/pr-reviews/browser/uninstall')">Uninstall Chromium</button>
           </div>
         </article>
       </div>

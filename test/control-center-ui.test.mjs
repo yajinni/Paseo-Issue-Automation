@@ -48,20 +48,23 @@ test('PR review controls remove redundant refresh and move the review toggle to 
   assert.match(html, /Immediately compare managed pull requests with GitHub/);
 });
 
-test('ChatGPT browser controls show useful state and describe credential reset accurately', () => {
+test('ChatGPT browser controls show Chromium and project-chat readiness without low-level metadata', () => {
   const html = dashboardHtml();
-  assert.match(html, /GPT Chat Selected/);
-  assert.match(html, /GPT chat not selected/);
-  assert.match(html, /if \(\/\^Profile:\/\.test\(text\)\)/);
-  assert.match(html, /item\.remove\(\)/);
-  assert.match(html, /Reset ChatGPT Credentials/);
-  assert.match(html, /saved ChatGPT login credentials and local session data/);
+  assert.match(html, /Chromium Installed/);
+  assert.match(html, /PR Review Chat URL/);
+  assert.match(html, /browser\.chromium\.installed/);
+  assert.match(html, /Reset profile/);
+  assert.doesNotMatch(html, /GPT Chat Selected/);
+  assert.doesNotMatch(html, /GPT chat not selected/);
+  assert.doesNotMatch(html, /Profile lock: <strong>/);
+  assert.doesNotMatch(html, /Reset ChatGPT Credentials/);
+  assert.doesNotMatch(html, /browser\.library\.installed/);
 });
 
 test('setup does not hide read-only repository views', () => {
   const html = dashboardHtml();
   assert.doesNotMatch(html, /showView\('settings'\).*setupComplete/);
-  assert.match(html, /Repository issues and native dependencies are available read-only/);
+  assert.match(html, /Repository issues and GitHub issue relationships are available read-only/);
 });
 
 test('dashboard presents deterministic controller configuration without an Orchestrator model field', () => {

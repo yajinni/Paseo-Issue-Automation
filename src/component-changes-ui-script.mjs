@@ -113,20 +113,8 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
     if (active) active.value = String(Number(data?.config?.reconciliation?.activeIntervalMs || 0) / 1000);
     if (idle) idle.value = String(Number(data?.config?.reconciliation?.idleIntervalMs || 0) / 1000);
 
-    const conversation = data?.config?.browserReview?.projectConversationUrl || null;
-    const chip = document.getElementById('pr-conversation-chip');
-    if (chip) {
-      chip.textContent = conversation ? 'Project conversation configured' : 'Project conversation missing';
-      chip.className = 'chip ' + (conversation ? 'good' : 'bad');
-    }
-    const status = document.getElementById('pr-browser-status');
-    if (status && data?.browser) {
-      status.innerHTML = [
-        '<span>Library: <strong>' + (data.browser.library?.installed ? 'Installed' : 'Missing') + '</strong></span>',
-        '<span>Profile: <strong>' + (data.browser.profile?.profileExists ? 'Ready' : 'Missing') + '</strong></span>',
-        '<span>Profile lock: <strong>' + (data.browser.profile?.locked ? 'In use' : 'Available') + '</strong></span>',
-        '<span>Project conversation: <strong>' + (conversation || 'Not configured') + '</strong></span>'
-      ].join('');
+    if (typeof window.renderPrReviewBrowserSetup === 'function') {
+      window.renderPrReviewBrowserSetup(data);
     }
     applyHelp(document);
   }

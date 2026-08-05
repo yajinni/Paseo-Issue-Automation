@@ -136,6 +136,10 @@ export function resetBrowserProfile(options = {}) {
   rmSync(paths.profile, { recursive: true, force: true });
   mkdirSync(paths.profile, { recursive: true, mode: 0o700 });
   try { chmodSync(paths.profile, 0o700); } catch {}
+  saveBrowserConfig({
+    lastConversationUrl: null,
+    lastAuthenticatedAt: null,
+  }, options);
   return { reset: true };
 }
 

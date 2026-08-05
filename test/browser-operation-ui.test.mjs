@@ -131,7 +131,7 @@ class FakeDocument {
 
 function uninstallMarkup() {
   const html = dashboardHtml();
-  const match = html.match(/<button class="danger" onclick="([^"]*\/api\/pr-reviews\/browser\/uninstall[^"]*)">Uninstall browser<\/button>/);
+  const match = html.match(/<button[^>]*id="pr-uninstall-chromium"[^>]*onclick="([^"]*\/api\/pr-reviews\/browser\/uninstall[^"]*)"[^>]*>Uninstall Chromium<\/button>/);
   assert.ok(match, 'the integrated dashboard must expose the expected uninstall endpoint');
   return match[1];
 }
@@ -139,8 +139,8 @@ function uninstallMarkup() {
 function createHarness() {
   const document = new FakeDocument();
   const uninstallButton = document.createElement('button');
-  uninstallButton.id = 'uninstall-control';
-  uninstallButton.textContent = 'Uninstall browser';
+  uninstallButton.id = 'pr-uninstall-chromium';
+  uninstallButton.textContent = 'Uninstall Chromium';
   uninstallButton.setAttribute('onclick', uninstallMarkup());
   document.body.appendChild(uninstallButton);
 

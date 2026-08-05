@@ -21,15 +21,22 @@ test('PR Reviews navigation is opt-in and the save behavior is installed', () =>
   assert.match(html, /installPrReviewBrowser/);
 });
 
-test('PR review panel uses only the approved browser controls and wording', () => {
+test('PR review panel exposes only the simplified browser setup controls and wording', () => {
   assert.match(PR_REVIEW_PANEL, /Install Chromium/);
-  assert.match(PR_REVIEW_PANEL, /Use current conversation/);
-  assert.match(PR_REVIEW_PANEL, /Uninstall browser/);
+  assert.match(PR_REVIEW_PANEL, /PR Review Chat URL/);
+  assert.match(PR_REVIEW_PANEL, /id="pr-test-browser"[^>]*>Test<\/button>/);
+  assert.match(PR_REVIEW_PANEL, /Reset profile/);
+  assert.match(PR_REVIEW_PANEL, /Uninstall Chromium/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Launch browser/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Use current conversation/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Test destination/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Send harmless test/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Close browser/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Project conversation URL/);
   assert.doesNotMatch(PR_REVIEW_PANEL, /Install dependencies \+ Chromium/);
   assert.doesNotMatch(PR_REVIEW_PANEL, /Use current for project/);
   assert.doesNotMatch(PR_REVIEW_PANEL, /Use current globally/);
   assert.doesNotMatch(PR_REVIEW_PANEL, /Uninstall browser state/);
-  assert.doesNotMatch(PR_REVIEW_PANEL, /Reset and uninstall remove only machine-local browser state/);
 });
 
 test('component changes use one standard server-side Chromium install action', () => {

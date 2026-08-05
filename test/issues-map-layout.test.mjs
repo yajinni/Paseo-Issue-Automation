@@ -22,10 +22,14 @@ test('dashboard installs the Issues Map layout script', () => {
   assert.match(html, /issues-map-primary/);
 });
 
-test('PR browser configuration exposes only the project conversation action', () => {
-  assert.match(PR_REVIEW_PANEL, />Use current conversation<\/button>/);
-  assert.match(PR_REVIEW_PANEL, /browser\/use-current',\{scope:'project'\}\)/);
-  assert.doesNotMatch(PR_REVIEW_PANEL, /Use current for project/);
-  assert.doesNotMatch(PR_REVIEW_PANEL, /Use current globally/);
+test('PR browser configuration uses a saved project chat URL and one safe Test action', () => {
+  const html = dashboardHtml();
+  assert.match(PR_REVIEW_PANEL, /PR Review Chat URL/);
+  assert.match(PR_REVIEW_PANEL, /id="pr-project-url"/);
+  assert.match(PR_REVIEW_PANEL, /id="pr-test-browser"[^>]*>Test<\/button>/);
+  assert.match(html, /projectConversationUrl/);
+  assert.match(html, /sendTestPrompt: false/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /Use current conversation/);
+  assert.doesNotMatch(PR_REVIEW_PANEL, /browser\/use-current/);
   assert.doesNotMatch(PR_REVIEW_PANEL, /scope:'global'/);
 });
