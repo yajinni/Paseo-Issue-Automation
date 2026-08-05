@@ -66,7 +66,7 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
     Array.from(document.querySelectorAll('button')).forEach(function(button) {
       const text = String(button.textContent || '').trim().toLowerCase();
       if (text !== 'uninstall browser' && text !== 'uninstall chromium') return;
-      button.textContent = 'Uninstall Chromium';
+      if (text === 'uninstall browser') button.textContent = 'Uninstall Chromium';
       button.title = 'Remove Playwright Chromium and delete the dedicated ChatGPT profile, login, selected conversation, and local browser state.';
       button.setAttribute('onclick', "openPrReviewConfirm('Uninstall Chromium','UNINSTALL','/api/pr-reviews/browser/uninstall')");
     });
@@ -202,9 +202,6 @@ export const BROWSER_OPERATION_UI_SCRIPT = String.raw`
       window.prReviewPost = wrapped;
       prReviewPost = wrapped;
     }
-
-    const observer = new MutationObserver(renameUninstallControl);
-    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
