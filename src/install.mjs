@@ -6,6 +6,8 @@ import {
   setupRequirements,
 } from './setup-requirements.mjs';
 import {
+  createSetupPullRequest,
+  preflightSetupPullRequest,
   reconcileSetupPullRequest,
   setupChangeStatus,
   setupPullRequestBlocksSetup,
@@ -39,6 +41,13 @@ export function requirements(root, _existing = null, options = {}) {
   return setupRequirements(root, { force: options.force === true });
 }
 
+export function installRepositoryIntegration(root) {
+  preflightSetupPullRequest(root);
+  const components = legacy.installRepositoryIntegration(root);
+  const setupPullRequest = createSetupPullRequest(root);
+  return { ...components, setupPullRequest };
+}
+
 function paseoOverrideFromRequirements(req) {
   return {
     reachable: req.paseoReachable === true,
@@ -60,20 +69,41 @@ function synchronizeSetupCompletion(root, snapshot) {
   return { ...snapshot, config };
 }
 
+function canRecoverExistingSetupChanges(built, setupPullRequest, repositoryChanges) {
+  return !setupPullRequest
+    && repositoryChanges.available
+    && repositoryChanges.expectedFiles.length > 0
+    && repositoryChanges.unexpectedFiles.length === 0
+    && repositoryChanges.currentBranch === built.config.baseBranch
+    && built.integration.issueTemplate
+    && built.integration.paseoService
+    && built.integration.labelsReady
+    && Boolean(built.workspace?.id);
+}
+
 export function setupSnapshot(root, options = {}) {
   const force = options.forceDiscovery === true;
-  const setupPullRequest = reconcileSetupPullRequest(root);
-  const repositoryChanges = setupChangeStatus(root);
+  let setupPullRequest = reconcileSetupPullRequest(root);
+  let repositoryChanges = setupChangeStatus(root);
   const req = setupRequirements(root, { force: options.forceRequirements === true });
   const setupOptions = cachedSetupOptions(root, {
     force,
     paseoOverride: paseoOverrideFromRequirements(req),
   });
-  const built = buildSetupSnapshot(root, {
+  const build = () => buildSetupSnapshot(root, {
     requirements: req,
     branches: setupOptions.branches?.branches || [],
     forceIntegration: options.forceIntegration === true || force,
   });
+  let built = build();
+
+  if (canRecoverExistingSetupChanges(built, setupPullRequest, repositoryChanges)) {
+    const submission = createSetupPullRequest(root);
+    setupPullRequest = submission.pullRequest || setupPullRequest;
+    repositoryChanges = setupChangeStatus(root);
+    built = build();
+  }
+
   const setupPullRequestReady = !setupPullRequestBlocksSetup(setupPullRequest);
   const setupFilesCommitted = repositoryChanges.expectedFiles.length === 0;
   const snapshot = synchronizeSetupCompletion(root, {
