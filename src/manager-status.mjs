@@ -1,4 +1,5 @@
 import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
+import { loadExternalMigration } from './external-migration.mjs';
 import { inspectRepository } from './repository-registry.mjs';
 import { loadSetupPullRequest, setupChangeStatus } from './setup-pr.mjs';
 import {
@@ -39,6 +40,7 @@ export function managerRepositoryStatus(repository, {
   const runtime = loadRuntime(inspected.path);
   const integration = loadIntegration(inspected.path);
   const controllerMode = loadControllerMode(inspected.path);
+  const migration = loadExternalMigration(inspected.path);
   const setupPullRequest = loadSetupPullRequest(inspected.path);
   const setupChanges = setupChangeStatus(inspected.path, { runner, mode: controllerMode });
   const runs = listRuns(inspected.path);
@@ -49,6 +51,7 @@ export function managerRepositoryStatus(repository, {
   const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const externalController = controllerMode === CONTROLLER_MODES.external;
   const embeddedController = controllerMode === CONTROLLER_MODES.embedded;
+  const migrationPending = migration?.state === 'open' || (migration?.state === 'merged' && !migration.syncedAt);
 
   return {
     repository: {
@@ -71,6 +74,8 @@ export function managerRepositoryStatus(repository, {
       managedLabelCount: Object.values(integration.labels || {})
         .filter((item) => item?.createdByPackage === true).length,
       pullRequest: setupPullRequest,
+      migration,
+      migrationPending,
       repositoryChanges: {
         available: setupChanges.available,
         expectedFiles: setupChanges.expectedFiles,
@@ -102,6 +107,8 @@ export function managerRepositoryStatus(repository, {
       configuration: true,
       installationActions: true,
       externalInstallation: !controllerMode,
+      embeddedMigration: embeddedController && !migrationPending,
+      migrationReconciliation: Boolean(migration?.number) && migration?.state !== 'completed',
       migrationRequired: embeddedController,
       backgroundWorkers: Boolean(workerManager),
       prReviewWorkers: Boolean(reviewWorkerManager),
