@@ -13,28 +13,42 @@ test('bare command starts the standalone manager and opens the dashboard', async
   assert.deepEqual(calls, [{ open: true, rootDir: 'C:/paseo-manager-state' }]);
 });
 
-test('explicit help aliases still print help instead of starting the manager', async () => {
-  for (const command of ['help', '--help', '-h']) {
-    const calls = [];
-    await dispatchCli([command], {
+test('--help is the only top-level help command', async () => {
+  const calls = [];
+  await dispatchCli(['--help'], {
+    managerCommand: async () => { calls.push('manager'); },
+    helpCommand: () => { calls.push('help'); },
+  });
+  assert.deepEqual(calls, ['help']);
+
+  await assert.rejects(
+    dispatchCli(['--help', 'extra'], {
       managerCommand: async () => { calls.push('manager'); },
       helpCommand: () => { calls.push('help'); },
-    });
-    assert.deepEqual(calls, ['help']);
-  }
+    }),
+    /does not accept additional arguments/,
+  );
 });
 
-test('explicit manager command keeps its existing browser-open behavior', async () => {
-  const calls = [];
-  await dispatchCli(['manager'], {
-    managerCommand: async (options) => { calls.push(options); },
-  });
-  await dispatchCli(['manager', '--open'], {
-    managerCommand: async (options) => { calls.push(options); },
-  });
-
-  assert.deepEqual(calls, [
-    { open: false, rootDir: undefined },
-    { open: true, rootDir: undefined },
-  ]);
+test('retired help and manager aliases fail before repository routing', async () => {
+  for (const args of [
+    ['help'],
+    ['-h'],
+    ['manager'],
+    ['manager', '--open'],
+  ]) {
+    const calls = [];
+    await assert.rejects(
+      dispatchCli(args, {
+        managerCommand: async () => { calls.push('manager'); },
+        repositoryCommand: async () => { calls.push('repository'); },
+        mainCommand: async () => { calls.push('main'); },
+        helpCommand: () => { calls.push('help'); },
+      }),
+      args[0] === 'manager'
+        ? /Run paseo-issue-automation with no arguments/
+        : /Use paseo-issue-automation --help/,
+    );
+    assert.deepEqual(calls, []);
+  }
 });
