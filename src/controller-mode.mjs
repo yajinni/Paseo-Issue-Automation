@@ -20,10 +20,9 @@ function completedMigrationMode(root) {
   if (!existsSync(file)) return null;
   try {
     const migration = JSON.parse(readFileSync(file, 'utf8'));
-    return migration?.state === 'completed'
-      && migration?.targetMode === CONTROLLER_MODES.external
-      ? CONTROLLER_MODES.external
-      : null;
+    // external-migration.json is written only by the one-way embedded-to-external
+    // migration workflow, including records created before targetMode was stored.
+    return migration?.state === 'completed' ? CONTROLLER_MODES.external : null;
   } catch {
     return null;
   }
