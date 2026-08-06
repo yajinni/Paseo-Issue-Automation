@@ -1,3 +1,4 @@
+import { adoptAlreadyMigratedRepository } from './external-adoption.mjs';
 import {
   createExternalRemovalPullRequest,
   reconcileExternalRemoval,
@@ -7,7 +8,7 @@ import {
   createExternalMigrationPullRequest,
   reconcileExternalMigration,
 } from './external-migration.mjs';
-import { installExternalRepositoryIntegration } from './install.mjs';
+import { installExternalRepositoryIntegration, setupSnapshot } from './install.mjs';
 
 function requireRegisteredRepository(repository, action) {
   if (!repository?.id || !repository?.path) {
@@ -69,6 +70,28 @@ export function reconcileEmbeddedMigrationFromManager(repository, {
     'reconcile the external-controller migration',
     reconciler,
   );
+}
+
+export function finalizeExistingMigrationFromManager(repository, {
+  workerManager = null,
+  reviewWorkerManager = null,
+  adopter = adoptAlreadyMigratedRepository,
+  refresher = setupSnapshot,
+} = {}) {
+  requireRegisteredRepository(repository, 'finalize the existing external-controller migration');
+  requireStoppedWorkers(repository, { workerManager, reviewWorkerManager });
+  const adoption = adopter(repository.path);
+  const setup = refresher(repository.path, {
+    forceDiscovery: true,
+    forceRequirements: true,
+    forceIntegration: true,
+  });
+  return {
+    ...adoption,
+    setupReady: setup.checks?.ready === true,
+    setupComplete: setup.config?.setupComplete === true,
+    setupChecks: setup.checks || null,
+  };
 }
 
 export function repairExternalRepositoryFromManager(repository, {
