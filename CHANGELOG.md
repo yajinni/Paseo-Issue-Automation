@@ -27,3 +27,4 @@
 - Add a standalone read-only repository manager server with repository registration, selection, isolated status inspection, and no dependency on the current working directory.
 - Add allowlisted repository-scoped manager controls for claims, configuration, manual dispatch, dependency reconciliation, and manual issue actions while background workers and installation remain separate.
 - Add independent start, stop, restart, status, configuration refresh, and cleanup for per-repository coding-worker timers without coupling one repository's failures to another.
+- Add a machine-local manager-wide coding limit, one-claim fair scheduling turns, round-robin pending-repository rotation, and conservative capacity checks across all running repository workers.

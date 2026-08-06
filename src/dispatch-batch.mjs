@@ -21,14 +21,23 @@ function normalizedAttempt(result, type) {
   }];
 }
 
+function normalizedClaimLimit(value) {
+  if (value === undefined || value === null) return Number.POSITIVE_INFINITY;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('maxClaims must be a positive integer.');
+  return limit;
+}
+
 export function dispatchAvailableIssues(root, {
   configLoader = loadConfig,
   dispatchIssue = dispatchNextIssue,
   dispatchFix = dispatchNextFixJob,
   activeCount = activeCodingCount,
   resumeLaunches = resumePendingAgentLaunches,
+  maxClaims = null,
 } = {}) {
   const maximum = Math.max(1, Number(configLoader(root).maxActive) || 1);
+  const claimLimit = normalizedClaimLimit(maxClaims);
   const lockFile = path.join(statePaths(root).root, 'coding-scheduler.lock');
   const lease = acquireLease(lockFile, {
     owner: `coding-scheduler-${process.pid}`,
@@ -58,7 +67,7 @@ export function dispatchAvailableIssues(root, {
         reason: resumed.reason || 'An existing workspace launch requires attention.',
       };
     }
-    while (true) {
+    while (attempts.length < claimLimit) {
       renew({ phase: 'counting-capacity', claimed: attempts.length });
       if (activeCount(root) >= maximum) break;
       renew({ phase: 'dispatching-fix', claimed: attempts.length });
