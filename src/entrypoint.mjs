@@ -16,7 +16,9 @@ export async function dispatchCli(args = [], {
   runner,
   platform = process.platform,
 } = {}) {
-  const command = args[0] || 'help';
+  if (args.length === 0) return managerCommand({ open: true, rootDir });
+
+  const command = args[0];
   if (command === 'help' || command === '--help' || command === '-h') return helpCommand();
   if (command === 'repo') return repositoryCommand(args.slice(1), { cwd, rootDir, runner, platform });
   if (command === 'manager') {
