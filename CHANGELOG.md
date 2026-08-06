@@ -24,3 +24,4 @@
 - Add a versioned machine-local repository registry with standalone add, list, show, and remove commands as the first step toward one manager controlling multiple isolated repositories.
 - Add explicit `--repo` selection for existing commands while preserving current-directory fallback for legacy workflows.
 - Add tested repository-registry HTTP request handling and repository-scoped API path resolution before server integration.
+- Add a standalone read-only repository manager server with repository registration, selection, isolated status inspection, and no dependency on the current working directory.
