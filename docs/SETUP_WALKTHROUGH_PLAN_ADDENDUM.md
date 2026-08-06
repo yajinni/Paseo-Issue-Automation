@@ -156,6 +156,120 @@ This option is enabled by default.
 - Install or update the automation issue template through the reviewed setup pull request.
 - Any additional repository-managed files discovered during implementation should use the same setup-PR path unless they are machine-local configuration that does not belong in the repository.
 
+## Automatic local clone and Paseo workspace flow
+
+The repository workspace step should be almost entirely automatic and should appear after repository/base-branch selection and before Issues Setup.
+
+### Find an existing usable clone
+
+Search only safe, known locations:
+
+- Paseo workspaces already registered on the machine;
+- repository roots previously configured in Paseo Issue Automation;
+- the manager-controlled repositories root.
+
+Do not scan the entire filesystem.
+
+Match clones by normalized Git remote URL, not only by directory name.
+
+For every candidate, verify:
+
+- the remote matches the selected GitHub repository;
+- the selected base branch can be fetched;
+- the repository is writable by the automation process;
+- Git credentials work;
+- Paseo can create and remove an isolated worktree safely;
+- the candidate does not require destructive cleanup or overwrite unrelated user work.
+
+If exactly one valid clone exists, select it automatically.
+
+If multiple valid clones exist, show a selector containing the path, current branch, workspace registration state, and relevant safety status. Do not guess which clone the user wants.
+
+If an existing clone is dirty, unsafe, unavailable, or otherwise unsuitable for automation, do not reset or alter the user’s worktree. Prefer creating a managed clone instead.
+
+### Clone automatically when needed
+
+When no usable clone exists, clone the repository automatically into a manager-controlled repositories root.
+
+- Choose a platform-appropriate application-managed root automatically.
+- Keep the root hidden during the normal flow.
+- Show or request a different location only when the default is unavailable, not writable, or the user opens advanced settings.
+- Preserve one stable managed repository/workspace that Paseo can use to create isolated issue worktrees.
+
+After cloning or selecting a clone:
+
+1. fetch and fast-forward the selected base branch safely;
+2. register or validate the repository as a Paseo workspace;
+3. confirm worktree creation and cleanup;
+4. store the normalized repository, path, remote, and selected base branch;
+5. continue automatically when every check passes.
+
+Only expand this step when user action is required.
+
+## Final readiness and first-run page
+
+The final page provides a plain-language summary and performs the safe end-to-end readiness checks before issue claims are enabled.
+
+### Configuration summary
+
+Show the finalized selections for:
+
+- Paseo daemon and CLI;
+- Provider/Coding Harness;
+- coding model and thinking level;
+- review model and thinking level;
+- GitHub account;
+- repository and selected base branch;
+- managed local clone and Paseo workspace;
+- issue-selection mode and lifecycle labels;
+- concurrency, temporary retry, and excluded-label settings;
+- quick/full/manual/Web ChatGPT review workflow;
+- review-round limits;
+- ChatGPT Profile and selected review chat when applicable;
+- setup pull request and automatic-merge choice.
+
+Allow the user to return to the relevant page to change a setting before final confirmation.
+
+### Final setup actions
+
+After confirmation:
+
+1. create or reuse the approved lifecycle labels through GitHub;
+2. create the setup branch from the latest selected base branch;
+3. install or update the existing automation issue template through the setup pull request;
+4. enable automatic merge by default when GitHub supports it;
+5. wait for the setup pull request to merge and for the local selected base branch to synchronize;
+6. keep issue claims disabled until repository-managed setup is verified on the selected base branch.
+
+### Safe readiness checks
+
+Run a final **Recheck** covering:
+
+- Paseo daemon, password, CLI, and version compatibility;
+- selected Provider/Coding Harness, models, and thinking options;
+- GitHub CLI authentication and Git credential integration;
+- repository permissions and selected base-branch availability;
+- managed clone remote and base-branch synchronization;
+- Paseo workspace registration;
+- temporary worktree creation and cleanup;
+- ability to fetch and push an automation branch without publishing a fake pull request;
+- issue template and lifecycle-label installation;
+- issue query, validation, dependency reading, and queue ordering;
+- configured review-path readiness;
+- Chromium, ChatGPT Profile, signed-in ChatGPT session, selected review chat, and GitHub access when Web ChatGPT is selected.
+
+The readiness check must not modify application code, create a fake issue, publish a fake review, or leave behind a test branch/worktree. Prefer capability and permission checks over paid model prompts. If a real provider request is ever technically necessary, require explicit user notice rather than silently consuming usage.
+
+### First run
+
+After readiness passes:
+
+- show the currently eligible issues in lowest-number-first order;
+- identify issues skipped because of native blockers, invalid template content, exclusions, or other safety conditions;
+- provide **Finish setup and start automation** as the primary action;
+- if no issue is currently eligible, finish setup successfully and leave the controller ready to claim a future eligible issue;
+- allow the walkthrough to be run again later to configure another repository.
+
 ## Planning items resolved by this addendum
 
 The following items from the main document are now resolved:
@@ -166,6 +280,8 @@ The following items from the main document are now resolved:
 - visibility of advanced Issues Setup options during setup;
 - use of the repository’s existing automation issue template;
 - setup pull request targeting the selected base branch;
-- automatic setup-PR merge behavior.
+- automatic setup-PR merge behavior;
+- automatic local clone and Paseo workspace behavior;
+- final readiness and first-run behavior.
 
-The local clone/workspace flow and final readiness/first-run behavior still require continued planning.
+The product-level setup walkthrough decisions are now complete enough to begin implementation planning. Implementation must still inspect and reconcile the current code, labels, template validation, installation flow, workspace behavior, and tests before making changes.
