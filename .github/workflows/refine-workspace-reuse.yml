@@ -1,0 +1,51 @@
+name: Refine workspace reuse implementation
+
+on:
+  push:
+    branches:
+      - ai/reuse-workspace-on-agent-start-failure
+    paths:
+      - .github/workflows/refine-workspace-reuse.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ai/reuse-workspace-on-agent-start-failure
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Refine pause and workspace identity handling
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          file = Path('src/attempts.mjs')
+          text = file.read_text(encoding='utf-8')
+          old = """    const workspace = verifyWorkspaceIdentity(root, workspaceFromPayload(payload), {\n      title: workspaceTitle,\n      branch: selection.branch,\n    });\n    saveActivity(root, issue.number, {\n      workspaceId: workspace.workspaceId,\n      worktreePath: workspace.worktreePath,\n      phase: 'starting-agent',\n    }, 'workspace-created', `Workspace ${workspace.workspaceId} created once for attempt ${selection.attempt}.`);\n"""
+          new = """    const workspace = workspaceFromPayload(payload);\n    saveActivity(root, issue.number, {\n      workspaceId: workspace.workspaceId || null,\n      worktreePath: workspace.worktreePath || null,\n      workspaceName: workspace.workspaceName || null,\n      phase: 'verifying-workspace',\n    }, 'workspace-created', `Workspace ${workspace.workspaceId || '(unknown)'} created once for attempt ${selection.attempt}.`);\n    verifyWorkspaceIdentity(root, workspace, {\n      title: workspaceTitle,\n      branch: selection.branch,\n    });\n    saveActivity(root, issue.number, { phase: 'starting-agent' }, 'workspace-verified',\n      `Workspace ${workspace.workspaceId} matches ${selection.branch}.`);\n"""
+          if old not in text:
+            raise SystemExit('workspace verification anchor not found')
+          text = text.replace(old, new, 1)
+          old_resume = """export function resumePendingAgentLaunches(root) {\n  const pending = listRuns(root).filter((state) =>\n"""
+          new_resume = """export function resumePendingAgentLaunches(root) {\n  if (!loadRuntime(root).claimsEnabled) {\n    return { claimed: false, attempts: [], results: [], haltDispatch: false, reason: 'Claims are paused.' };\n  }\n  const pending = listRuns(root).filter((state) =>\n"""
+          if old_resume not in text:
+            raise SystemExit('resume launch anchor not found')
+          file.write_text(text.replace(old_resume, new_resume, 1), encoding='utf-8')
+          PY
+          npm install
+          npm test
+          npm run check
+          npm run pack:check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/attempts.mjs
+          git commit -m "Refine pending launch control and cleanup"
+          git push origin HEAD:ai/reuse-workspace-on-agent-start-failure
