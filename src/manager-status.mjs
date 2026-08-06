@@ -1,6 +1,8 @@
 import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
+import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
 import { inspectRepository } from './repository-registry.mjs';
+import { managedRepositoryOperationalSummary } from './repository-health.mjs';
 import { loadSetupPullRequest, setupChangeStatus } from './setup-pr.mjs';
 import {
   listRuns,
@@ -41,6 +43,7 @@ export function managerRepositoryStatus(repository, {
   const integration = loadIntegration(inspected.path);
   const controllerMode = loadControllerMode(inspected.path);
   const migration = loadExternalMigration(inspected.path);
+  const maintenance = externalMaintenanceStatus(inspected.path);
   const setupPullRequest = loadSetupPullRequest(inspected.path);
   const setupChanges = setupChangeStatus(inspected.path, { runner, mode: controllerMode });
   const runs = listRuns(inspected.path);
@@ -53,7 +56,7 @@ export function managerRepositoryStatus(repository, {
   const embeddedController = controllerMode === CONTROLLER_MODES.embedded;
   const migrationPending = migration?.state === 'open' || (migration?.state === 'merged' && !migration.syncedAt);
 
-  return {
+  const status = {
     repository: {
       ...repository,
       name: repository.name || inspected.name,
@@ -84,6 +87,7 @@ export function managerRepositoryStatus(repository, {
         reason: setupChanges.reason,
       },
     },
+    maintenance,
     automation: {
       claimsEnabled: runtime.claimsEnabled === true,
       maxActive: config.maxActive,
@@ -110,9 +114,13 @@ export function managerRepositoryStatus(repository, {
       embeddedMigration: embeddedController && !migrationPending,
       migrationReconciliation: Boolean(migration?.number) && migration?.state !== 'completed',
       migrationRequired: embeddedController,
+      externalRepair: maintenance.repairAvailable,
+      externalRemoval: maintenance.removalAvailable,
+      externalRemovalReconciliation: maintenance.removalReconciliation,
       backgroundWorkers: Boolean(workerManager),
       prReviewWorkers: Boolean(reviewWorkerManager),
     },
     stateDirectory: statePaths(inspected.path).root,
   };
+  return { ...status, ...managedRepositoryOperationalSummary(status) };
 }
