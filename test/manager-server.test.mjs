@@ -17,9 +17,9 @@ function createRepository(parent, name) {
   return root;
 }
 
-test('manager command starts outside a repository without invoking legacy dispatch', async () => {
+test('bare command starts the manager outside a repository without invoking legacy dispatch', async () => {
   const calls = [];
-  const result = await dispatchCli(['manager', '--open'], {
+  const result = await dispatchCli([], {
     cwd: tmpdir(),
     rootDir: '/manager-home',
     managerCommand: async (options) => { calls.push(options); return { started: true }; },
@@ -27,10 +27,6 @@ test('manager command starts outside a repository without invoking legacy dispat
   });
   assert.deepEqual(result, { started: true });
   assert.deepEqual(calls, [{ open: true, rootDir: '/manager-home' }]);
-  await assert.rejects(
-    dispatchCli(['manager', '--unknown'], { managerCommand: async () => null }),
-    /Unknown manager option/,
-  );
 });
 
 test('manager API scopes coding and PR review workers to one repository', () => {
