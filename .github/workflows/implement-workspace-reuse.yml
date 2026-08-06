@@ -1,0 +1,716 @@
+name: Implement workspace reuse on agent start failure
+
+on:
+  push:
+    branches:
+      - ai/reuse-workspace-on-agent-start-failure
+    paths:
+      - .github/workflows/implement-workspace-reuse.yml
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ai/reuse-workspace-on-agent-start-failure
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Implement bounded same-workspace launch retries
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          launch_retry = r'''import os from 'node:os';
+          import path from 'node:path';
+          import { findFirstKey, run } from './process.mjs';
+
+          export const AGENT_START_MAX_ATTEMPTS = 3;
+
+          function text(value) {
+            return value === undefined || value === null ? '' : String(value).trim();
+          }
+
+          function expandedPath(value) {
+            const raw = text(value);
+            if (!raw) return '';
+            if (raw === '~') return os.homedir();
+            if (raw.startsWith('~/') || raw.startsWith('~\\')) return path.join(os.homedir(), raw.slice(2));
+            return raw;
+          }
+
+          function normalizedPath(value) {
+            const resolved = path.resolve(expandedPath(value));
+            return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+          }
+
+          export function pathBelongsToWorkspace(workspacePath, candidatePath) {
+            if (!text(workspacePath) || !text(candidatePath)) return false;
+            const workspace = normalizedPath(workspacePath);
+            const candidate = normalizedPath(candidatePath);
+            const relative = path.relative(workspace, candidate);
+            return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+          }
+
+          export function workspaceCreateArgs({ root, title, branch, baseBranch }) {
+            return [
+              'workspace', 'create', '--json',
+              '--isolation', 'worktree', '--path', String(root),
+              '--title', String(title), '--mode', 'branch-off',
+              '--new-branch', String(branch), '--base', String(baseBranch),
+            ];
+          }
+
+          export function agentRunArgs({ provider, title, workspaceId, prompt }) {
+            return [
+              'run', '--background', '--json', '--provider', String(provider),
+              '--title', String(title), '--workspace', String(workspaceId), String(prompt),
+            ];
+          }
+
+          export function workspaceFromPayload(payload) {
+            return {
+              workspaceId: text(findFirstKey(payload, ['workspaceId', 'workspace_id'])),
+              worktreePath: text(findFirstKey(payload, ['cwd', 'worktreePath', 'worktree_path', 'path'])),
+              workspaceName: text(findFirstKey(payload, ['name', 'title'])),
+            };
+          }
+
+          export function agentRowsFromPayload(payload) {
+            if (Array.isArray(payload)) return payload.filter((item) => item && typeof item === 'object');
+            const candidate = findFirstKey(payload, ['data', 'agents', 'items', 'entries']);
+            if (Array.isArray(candidate)) return candidate.filter((item) => item && typeof item === 'object');
+            return [];
+          }
+
+          function parseJsonOutput(result) {
+            if (!result?.ok || !text(result.stdout)) return null;
+            try { return JSON.parse(result.stdout); }
+            catch { return null; }
+          }
+
+          export function inspectWorkspaceAgents(root, worktreePath, { runner = run } = {}) {
+            const result = runner('paseo', ['ls', '-a', '-g', '--json'], { cwd: root, allowFailure: true });
+            const payload = parseJsonOutput(result);
+            if (!payload) {
+              return {
+                verified: false,
+                agents: [],
+                reason: text(result?.stderr) || text(result?.stdout) || 'Paseo agent inventory could not be read.',
+              };
+            }
+            return {
+              verified: true,
+              agents: agentRowsFromPayload(payload).filter((agent) => pathBelongsToWorkspace(worktreePath, agent.cwd)),
+              reason: null,
+            };
+          }
+
+          export function expectedWorkspaceAgent(inspection, title) {
+            if (!inspection?.verified) return { status: 'unverified', agent: null };
+            const matches = inspection.agents.filter((agent) => text(agent.name ?? agent.title) === text(title));
+            if (matches.length === 1) return { status: 'found', agent: matches[0] };
+            if (matches.length > 1) return { status: 'ambiguous', agent: null, agents: matches };
+            if (inspection.agents.length) return { status: 'nonempty', agent: null, agents: inspection.agents };
+            return { status: 'empty', agent: null, agents: [] };
+          }
+
+          export function verifyWorkspaceIdentity(root, workspace, expected, { runner = run } = {}) {
+            if (!workspace.workspaceId) throw new Error('Paseo workspace creation did not return a workspace ID.');
+            if (!workspace.worktreePath) throw new Error('Paseo workspace creation did not return a worktree path.');
+            if (workspace.workspaceName && workspace.workspaceName !== expected.title) {
+              throw new Error(`Paseo created workspace ${workspace.workspaceName} instead of ${expected.title}.`);
+            }
+            const branchResult = runner('git', ['-C', workspace.worktreePath, 'branch', '--show-current'], {
+              cwd: root,
+              allowFailure: true,
+            });
+            if (!branchResult?.ok) {
+              throw new Error(text(branchResult?.stderr) || text(branchResult?.stdout) || 'Could not verify the created worktree branch.');
+            }
+            const actualBranch = text(branchResult.stdout);
+            if (actualBranch !== expected.branch) {
+              throw new Error(`Paseo created branch ${actualBranch || '(detached)'} instead of ${expected.branch}.`);
+            }
+            return workspace;
+          }
+
+          export function cleanupWorkspaceIfEmpty(root, workspace, { runner = run } = {}) {
+            if (!workspace?.workspaceId || !workspace?.worktreePath) {
+              return { status: 'not-applicable', archived: false, reason: 'No recorded workspace is available.' };
+            }
+            const inspection = inspectWorkspaceAgents(root, workspace.worktreePath, { runner });
+            if (!inspection.verified) {
+              return { status: 'skipped-unverified', archived: false, reason: inspection.reason };
+            }
+            if (inspection.agents.length) {
+              return {
+                status: 'skipped-nonempty',
+                archived: false,
+                reason: `${inspection.agents.length} agent(s) still belong to the workspace.`,
+                agentIds: inspection.agents.map((agent) => agent.id).filter(Boolean),
+              };
+            }
+            const archived = runner('paseo', ['workspace', 'archive', String(workspace.workspaceId)], {
+              cwd: root,
+              allowFailure: true,
+            });
+            if (!archived?.ok) {
+              return {
+                status: 'archive-failed',
+                archived: false,
+                reason: text(archived?.stderr) || text(archived?.stdout) || 'Paseo workspace archive failed.',
+              };
+            }
+            return { status: 'archived-empty', archived: true, reason: null };
+          }
+
+          export function launchErrorDetail(error) {
+            return text(error?.stderr) || text(error?.stdout) || text(error?.message) || String(error);
+          }
+          '''
+          launch_retry = '\n'.join(line[10:] if line.startswith('          ') else line for line in launch_retry.splitlines()) + '\n'
+          Path('src/launch-retry.mjs').write_text(launch_retry, encoding='utf-8')
+
+          process_file = Path('src/process.mjs')
+          process_text = process_file.read_text(encoding='utf-8')
+          old = """    error.timeoutMs = timeoutMs;\n    error.resolvedCommand = output.resolvedCommand;\n    throw error;\n"""
+          new = """    error.timeoutMs = timeoutMs;\n    error.resolvedCommand = output.resolvedCommand;\n    error.stdout = output.stdout;\n    error.stderr = output.stderr;\n    throw error;\n"""
+          if old not in process_text:
+            raise SystemExit('process.mjs error metadata anchor not found')
+          process_file.write_text(process_text.replace(old, new), encoding='utf-8')
+
+          attempts_file = Path('src/attempts.mjs')
+          attempts = attempts_file.read_text(encoding='utf-8')
+          import_anchor = "import { findFirstKey, run, runJson } from './process.mjs';\n"
+          import_replacement = import_anchor + """import {\n  AGENT_START_MAX_ATTEMPTS,\n  agentRunArgs,\n  cleanupWorkspaceIfEmpty,\n  expectedWorkspaceAgent,\n  inspectWorkspaceAgents,\n  launchErrorDetail,\n  verifyWorkspaceIdentity,\n  workspaceCreateArgs,\n  workspaceFromPayload,\n} from './launch-retry.mjs';\n"""
+          if import_anchor not in attempts:
+            raise SystemExit('attempts.mjs import anchor not found')
+          attempts = attempts.replace(import_anchor, import_replacement, 1)
+
+          start = attempts.index('function rollbackLaunch(')
+          end = attempts.index('export function dispatchSpecificIssue', start)
+          replacement = r'''function previousAttemptHistory(previous) {
+            return previous ? [...(previous.history || []), {
+              attempt: previous.attempt || 1,
+              branch: previous.branch || null,
+              status: previous.status || null,
+              startedAt: previous.startedAt || null,
+              completedAt: previous.completedAt || null,
+              workspaceId: previous.workspaceId || null,
+              activity: previous.activity || [],
+              events: previous.events || [],
+            }] : [];
+          }
+
+          function saveActivity(root, issueNumber, patch, type, details) {
+            const current = loadRun(root, issueNumber) || {};
+            const at = now();
+            return saveRun(root, issueNumber, {
+              ...current,
+              ...patch,
+              updatedAt: at,
+              activity: [...(current.activity || []), { type, at, details }],
+            });
+          }
+
+          function terminalLaunchFailure(root, issue, reason) {
+            const current = loadRun(root, issue.number) || {};
+            if (current.coderAgentId || current.agentId) {
+              run('paseo', ['stop', String(current.coderAgentId || current.agentId)], { cwd: root, allowFailure: true });
+            }
+            const cleanup = cleanupWorkspaceIfEmpty(root, current);
+            try {
+              editLabels(root, issue.number, [LABELS.failed], [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.humanReview]);
+            } catch {}
+            const at = now();
+            const cleanupDetail = cleanup.status === 'archived-empty'
+              ? ' The confirmed empty workspace was archived.'
+              : cleanup.status === 'not-applicable'
+                ? ''
+                : ` Workspace cleanup: ${cleanup.status}${cleanup.reason ? ` (${cleanup.reason})` : ''}.`;
+            const message = `${String(reason)}${cleanupDetail}`;
+            saveRun(root, issue.number, {
+              ...current,
+              issueNumber: issue.number,
+              issueTitle: issue.title,
+              issueUrl: issue.url,
+              status: LABELS.failed,
+              phase: 'launch-failed',
+              reason: message,
+              workspaceCleanup: cleanup,
+              completedAt: at,
+              updatedAt: at,
+              activity: [...(current.activity || []), { type: 'launch-failed', at, details: message }],
+            });
+            return {
+              claimed: false,
+              failed: true,
+              haltDispatch: true,
+              issueNumber: issue.number,
+              branch: current.branch || null,
+              attempt: current.attempt || null,
+              reason: message,
+            };
+          }
+
+          function finalizeAgentLaunch(root, issue, agent, { recovered = false } = {}) {
+            const current = loadRun(root, issue.number) || {};
+            const coderAgentId = findFirstKey(agent, ['agentId', 'agent_id', 'id']);
+            if (!coderAgentId) return terminalLaunchFailure(root, issue, `Paseo did not return an agent ID for issue #${issue.number}.`);
+            const started = current.startedAt || now();
+            const state = saveActivity(root, issue.number, {
+              status: LABELS.running,
+              phase: 'coding',
+              coderAgentId,
+              agentId: coderAgentId,
+              reason: null,
+              completedAt: null,
+              heartbeatAt: now(),
+            }, recovered ? 'agent-start-reconciled' : 'agent-started', recovered
+              ? `Recovered agent ${coderAgentId} after the create command reported failure.`
+              : `Agent ${coderAgentId} started in workspace ${current.workspaceId}.`);
+            const controllerPid = startControllerWorker(root, issue.number);
+            saveActivity(root, issue.number, { ...state, controllerPid, startedAt: started }, 'controller-started',
+              `Issue Execution Controller PID ${controllerPid}.`);
+            unskipIssue(root, issue.number);
+            return {
+              claimed: true,
+              issueNumber: issue.number,
+              branch: current.branch,
+              attempt: current.attempt,
+              controllerPid,
+              workspaceId: current.workspaceId,
+            };
+          }
+
+          function pendingLaunch(root, issue, attempts, reason, phase = 'launch-retrying') {
+            const current = loadRun(root, issue.number) || {};
+            const message = phase === 'launch-reconciliation-needed'
+              ? `${reason} The controller could not verify whether Paseo created an agent, so it will not create another one until reconciliation succeeds.`
+              : `${reason} Agent start attempt ${attempts}/${AGENT_START_MAX_ATTEMPTS} failed; the next polling cycle will retry in workspace ${current.workspaceId}.`;
+            saveActivity(root, issue.number, {
+              status: LABELS.running,
+              phase,
+              reason: message,
+              agentStartAttempts: attempts,
+              maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+            }, phase === 'launch-reconciliation-needed' ? 'agent-start-reconciliation-needed' : 'agent-start-retry-scheduled', message);
+            return {
+              claimed: true,
+              pending: true,
+              issueNumber: issue.number,
+              branch: current.branch,
+              attempt: current.attempt,
+              workspaceId: current.workspaceId,
+              reason: message,
+            };
+          }
+
+          function reconcileFailedAgentStart(root, issue, title, attemptCount, reason) {
+            const current = loadRun(root, issue.number) || {};
+            const inspection = inspectWorkspaceAgents(root, current.worktreePath);
+            if (!inspection.verified) {
+              return pendingLaunch(root, issue, attemptCount,
+                `${reason} Paseo agent inventory failed: ${inspection.reason}`, 'launch-reconciliation-needed');
+            }
+            const reconciliation = expectedWorkspaceAgent(inspection, title);
+            if (reconciliation.status === 'found') {
+              return finalizeAgentLaunch(root, issue, reconciliation.agent, { recovered: true });
+            }
+            if (reconciliation.status === 'ambiguous') {
+              return terminalLaunchFailure(root, issue,
+                `${reason} Multiple matching agents exist in the workspace; operator action is required.`);
+            }
+            if (reconciliation.status === 'nonempty') {
+              return terminalLaunchFailure(root, issue,
+                `${reason} The workspace contains an unexpected agent; it was preserved for operator inspection.`);
+            }
+            if (attemptCount >= AGENT_START_MAX_ATTEMPTS) {
+              return terminalLaunchFailure(root, issue,
+                `${reason} Agent creation failed ${attemptCount} times in the same workspace.`);
+            }
+            return pendingLaunch(root, issue, attemptCount, reason);
+          }
+
+          function startRecordedAgent(root, issue, repository) {
+            const config = loadConfig(root);
+            const current = loadRun(root, issue.number) || {};
+            if (!current.workspaceId || !current.worktreePath) {
+              return terminalLaunchFailure(root, issue, 'The recorded launch has no usable Paseo workspace.');
+            }
+            const title = current.agentTitle || `Issue #${issue.number} Coder (attempt ${current.attempt || 1})`;
+            const attemptCount = Number(current.agentStartAttempts || 0) + 1;
+            saveActivity(root, issue.number, {
+              phase: 'starting-agent',
+              reason: null,
+              agentStartAttempts: attemptCount,
+              maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+            }, 'agent-start-attempt', `Starting agent attempt ${attemptCount}/${AGENT_START_MAX_ATTEMPTS} in workspace ${current.workspaceId}.`);
+            try {
+              const payload = runJson('paseo', agentRunArgs({
+                provider: config.models.coder,
+                title,
+                workspaceId: current.workspaceId,
+                prompt: buildAttemptPrompt(repository, issue, current.branch, config),
+              }), { cwd: root });
+              return finalizeAgentLaunch(root, issue, payload);
+            } catch (error) {
+              return reconcileFailedAgentStart(root, issue, title, attemptCount, launchErrorDetail(error));
+            }
+          }
+
+          function reconcileBeforeRetry(root, issue, repository) {
+            const current = loadRun(root, issue.number) || {};
+            const inspection = inspectWorkspaceAgents(root, current.worktreePath);
+            if (!inspection.verified) {
+              return pendingLaunch(root, issue, Number(current.agentStartAttempts || 0),
+                `Paseo agent inventory failed: ${inspection.reason}`, 'launch-reconciliation-needed');
+            }
+            const title = current.agentTitle || `Issue #${issue.number} Coder (attempt ${current.attempt || 1})`;
+            const reconciliation = expectedWorkspaceAgent(inspection, title);
+            if (reconciliation.status === 'found') return finalizeAgentLaunch(root, issue, reconciliation.agent, { recovered: true });
+            if (reconciliation.status === 'ambiguous') {
+              return terminalLaunchFailure(root, issue, 'Multiple matching agents exist in the recorded workspace; operator action is required.');
+            }
+            if (reconciliation.status === 'nonempty') {
+              return terminalLaunchFailure(root, issue, 'The recorded workspace contains an unexpected agent and was preserved for operator inspection.');
+            }
+            if (Number(current.agentStartAttempts || 0) >= AGENT_START_MAX_ATTEMPTS) {
+              return terminalLaunchFailure(root, issue,
+                `Agent creation failed ${current.agentStartAttempts} times in the same workspace.`);
+            }
+            return startRecordedAgent(root, issue, repository);
+          }
+
+          function launch(root, issue, branchAction) {
+            const config = loadConfig(root);
+            if (!config.setupComplete) throw new Error('Setup is not complete.');
+            const dependency = validateLaunch(root, issue, config);
+            const previous = loadRun(root, issue.number);
+            if (previous?.status === LABELS.running) throw new Error(`Issue #${issue.number} already has a running attempt.`);
+
+            const base = branchName(issue, 1);
+            const nextAttempt = previous ? Number(previous.attempt || 1) + 1 : 1;
+            let selection;
+            if (!previous && !branchExists(root, base)) selection = { branch: base, attempt: 1 };
+            else if (branchAction === 'keep') selection = nextBranch(root, issue, nextAttempt);
+            else if (branchAction === 'delete') {
+              deleteRecordedBranch(root, previous);
+              selection = nextBranch(root, issue, nextAttempt);
+            } else throw new Error(`Branch ${base} already exists. Choose keep or delete.`);
+
+            const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
+            if (!repository) throw new Error('Could not determine the GitHub repository.');
+
+            const started = now();
+            const agentTitle = `Issue #${issue.number} Coder (attempt ${selection.attempt})`;
+            const workspaceTitle = selection.branch;
+            editLabels(root, issue.number, [LABELS.running], [LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
+            saveRun(root, issue.number, {
+              issueNumber: issue.number,
+              issueTitle: issue.title,
+              issueUrl: issue.url,
+              branch: selection.branch,
+              attempt: selection.attempt,
+              status: LABELS.running,
+              phase: 'creating-workspace',
+              workspaceTitle,
+              agentTitle,
+              dependencies: dependency.dependencies,
+              dependencySource: dependency.source,
+              startedAt: started,
+              heartbeatAt: started,
+              updatedAt: started,
+              completedAt: null,
+              prNumber: null,
+              events: [],
+              agentStartAttempts: 0,
+              maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+              activity: [{ type: 'attempt-launching', at: started, details: `Attempt ${selection.attempt} reserved on ${selection.branch}.` }],
+              history: previousAttemptHistory(previous),
+            });
+            unskipIssue(root, issue.number);
+
+            try {
+              const payload = runJson('paseo', workspaceCreateArgs({
+                root,
+                title: workspaceTitle,
+                branch: selection.branch,
+                baseBranch: config.baseBranch,
+              }), { cwd: root });
+              const workspace = verifyWorkspaceIdentity(root, workspaceFromPayload(payload), {
+                title: workspaceTitle,
+                branch: selection.branch,
+              });
+              saveActivity(root, issue.number, {
+                workspaceId: workspace.workspaceId,
+                worktreePath: workspace.worktreePath,
+                phase: 'starting-agent',
+              }, 'workspace-created', `Workspace ${workspace.workspaceId} created once for attempt ${selection.attempt}.`);
+              return startRecordedAgent(root, issue, repository);
+            } catch (error) {
+              return terminalLaunchFailure(root, issue, launchErrorDetail(error));
+            }
+          }
+
+          export function resumePendingAgentLaunches(root) {
+            const pending = listRuns(root).filter((state) =>
+              state?.status === LABELS.running
+              && ['launch-retrying', 'launch-reconciliation-needed'].includes(state.phase)
+              && state.workspaceId
+              && !state.agentId
+              && !state.coderAgentId);
+            if (!pending.length) return { claimed: false, attempts: [], results: [], haltDispatch: false };
+            const results = [];
+            const attempts = [];
+            for (const state of pending) {
+              let result;
+              try {
+                const issue = viewIssue(root, state.issueNumber);
+                const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
+                if (!repository) throw new Error('Could not determine the GitHub repository.');
+                result = state.phase === 'launch-reconciliation-needed'
+                  ? reconcileBeforeRetry(root, issue, repository)
+                  : startRecordedAgent(root, issue, repository);
+              } catch (error) {
+                const issue = { number: state.issueNumber, title: state.issueTitle, url: state.issueUrl };
+                result = terminalLaunchFailure(root, issue, launchErrorDetail(error));
+              }
+              results.push(result);
+              if (result?.claimed) attempts.push({
+                claimed: true,
+                type: 'launch-retry',
+                issueNumber: result.issueNumber,
+                branch: result.branch,
+                attempt: result.attempt,
+                controllerPid: result.controllerPid,
+                pending: result.pending === true,
+              });
+            }
+            return {
+              claimed: attempts.length > 0,
+              attempts,
+              results,
+              haltDispatch: results.some((result) => result?.failed || result?.pending),
+              reason: results.map((result) => result?.reason).filter(Boolean).join(' '),
+            };
+          }
+
+          '''
+          replacement = '\n'.join(line[10:] if line.startswith('          ') else line for line in replacement.splitlines())
+          attempts = attempts[:start] + replacement + attempts[end:]
+          attempts_file.write_text(attempts, encoding='utf-8')
+
+          dispatch_file = Path('src/dispatch-batch.mjs')
+          dispatch = dispatch_file.read_text(encoding='utf-8')
+          dispatch = dispatch.replace(
+            "import { dispatchNextIssue } from './attempts.mjs';",
+            "import { dispatchNextIssue, resumePendingAgentLaunches } from './attempts.mjs';",
+          )
+          dispatch = dispatch.replace(
+            "  activeCount = activeCodingCount,\n} = {}) {",
+            "  activeCount = activeCodingCount,\n  resumeLaunches = resumePendingAgentLaunches,\n} = {}) {",
+          )
+          old_block = """  try {\n    const attempts = [];\n    const results = [];\n    while (true) {\n"""
+          new_block = """  try {\n    const resumed = resumeLaunches(root);\n    const attempts = normalizedAttempt(resumed, 'launch-retry');\n    const results = resumed?.results?.length || resumed?.attempts?.length\n      ? [{ type: 'launch-retry', ...resumed }]\n      : [];\n    if (resumed?.haltDispatch) {\n      return {\n        claimed: attempts.length > 0,\n        issueNumber: attempts[0]?.issueNumber,\n        branch: attempts[0]?.branch,\n        attempts,\n        dispatches: results,\n        haltDispatch: true,\n        reason: resumed.reason || 'An existing workspace launch requires attention.',\n      };\n    }\n    while (true) {\n"""
+          if old_block not in dispatch:
+            raise SystemExit('dispatch-batch try block anchor not found')
+          dispatch_file.write_text(dispatch.replace(old_block, new_block, 1), encoding='utf-8')
+
+          package_file = Path('package.json')
+          package = package_file.read_text(encoding='utf-8')
+          package = package.replace(
+            'node --check src/install.mjs && node --check src/issues-map-layout-ui-script.mjs',
+            'node --check src/install.mjs && node --check src/launch-retry.mjs && node --check src/issues-map-layout-ui-script.mjs',
+          )
+          package_file.write_text(package, encoding='utf-8')
+
+          changelog_file = Path('CHANGELOG.md')
+          changelog = changelog_file.read_text(encoding='utf-8')
+          changelog = changelog.replace(
+            '- Preserve guided setup, reversible installation, manual issue controls, fresh-attempt restarts, activity history, and package release checks.',
+            '- Preserve guided setup, reversible installation, manual issue controls, fresh-attempt restarts, activity history, and package release checks.\n- Create one worktree workspace per issue attempt, retry failed agent creation in that recorded workspace, surface retry and reconciliation failures, and archive only workspaces proven to contain no agents.',
+          )
+          changelog_file.write_text(changelog, encoding='utf-8')
+
+          test_file = r'''import assert from 'node:assert/strict';
+          import test from 'node:test';
+          import {
+            agentRunArgs,
+            cleanupWorkspaceIfEmpty,
+            expectedWorkspaceAgent,
+            inspectWorkspaceAgents,
+            verifyWorkspaceIdentity,
+            workspaceCreateArgs,
+          } from '../src/launch-retry.mjs';
+
+          test('workspace creation and agent start are separate commands', () => {
+            const create = workspaceCreateArgs({
+              root: '/repo',
+              title: 'ai/issue-274-test-attempt-2',
+              branch: 'ai/issue-274-test-attempt-2',
+              baseBranch: 'main',
+            });
+            const start = agentRunArgs({
+              provider: 'opencode/openai/model',
+              title: 'Issue #274 Coder (attempt 2)',
+              workspaceId: 'wks_one',
+              prompt: 'do the work',
+            });
+            assert.equal(create[0], 'workspace');
+            assert.ok(create.includes('--new-branch'));
+            assert.ok(!create.includes('run'));
+            assert.equal(start[0], 'run');
+            assert.deepEqual(start.slice(start.indexOf('--workspace'), start.indexOf('--workspace') + 2), ['--workspace', 'wks_one']);
+            assert.ok(!start.includes('--new-workspace'));
+            assert.ok(!start.includes('--new-branch'));
+          });
+
+          test('workspace agent inspection matches only the recorded worktree', () => {
+            const runner = () => ({
+              ok: true,
+              stdout: JSON.stringify({ data: [
+                { id: 'agent-one', name: 'Issue #274 Coder (attempt 2)', cwd: '/worktrees/issue-274' },
+                { id: 'agent-two', name: 'Other', cwd: '/worktrees/other' },
+              ] }),
+              stderr: '',
+            });
+            const inspection = inspectWorkspaceAgents('/repo', '/worktrees/issue-274', { runner });
+            assert.equal(inspection.verified, true);
+            assert.deepEqual(inspection.agents.map((agent) => agent.id), ['agent-one']);
+            assert.equal(expectedWorkspaceAgent(inspection, 'Issue #274 Coder (attempt 2)').status, 'found');
+          });
+
+          test('cleanup archives only a verified empty workspace', () => {
+            const calls = [];
+            const emptyRunner = (command, args) => {
+              calls.push([command, args]);
+              if (args[0] === 'ls') return { ok: true, stdout: JSON.stringify({ data: [] }), stderr: '' };
+              return { ok: true, stdout: '', stderr: '' };
+            };
+            const archived = cleanupWorkspaceIfEmpty('/repo', {
+              workspaceId: 'wks_empty',
+              worktreePath: '/worktrees/empty',
+            }, { runner: emptyRunner });
+            assert.equal(archived.status, 'archived-empty');
+            assert.ok(calls.some(([, args]) => args.join(' ') === 'workspace archive wks_empty'));
+
+            let archivedNonempty = false;
+            const nonemptyRunner = (_command, args) => {
+              if (args[0] === 'ls') {
+                return { ok: true, stdout: JSON.stringify({ data: [{ id: 'agent', cwd: '/worktrees/used', name: 'agent' }] }), stderr: '' };
+              }
+              archivedNonempty = true;
+              return { ok: true, stdout: '', stderr: '' };
+            };
+            const preserved = cleanupWorkspaceIfEmpty('/repo', {
+              workspaceId: 'wks_used',
+              worktreePath: '/worktrees/used',
+            }, { runner: nonemptyRunner });
+            assert.equal(preserved.status, 'skipped-nonempty');
+            assert.equal(archivedNonempty, false);
+
+            let archivedUnknown = false;
+            const failedInventory = (_command, args) => {
+              if (args[0] === 'ls') return { ok: false, stdout: '', stderr: 'daemon unavailable' };
+              archivedUnknown = true;
+              return { ok: true, stdout: '', stderr: '' };
+            };
+            const unknown = cleanupWorkspaceIfEmpty('/repo', {
+              workspaceId: 'wks_unknown',
+              worktreePath: '/worktrees/unknown',
+            }, { runner: failedInventory });
+            assert.equal(unknown.status, 'skipped-unverified');
+            assert.equal(archivedUnknown, false);
+          });
+
+          test('workspace identity rejects an attempt or branch mismatch', () => {
+            assert.throws(() => verifyWorkspaceIdentity('/repo', {
+              workspaceId: 'wks_wrong',
+              worktreePath: '/worktrees/wrong',
+              workspaceName: 'ai/issue-274-attempt-2',
+            }, {
+              title: 'ai/issue-274-attempt-3',
+              branch: 'ai/issue-274-attempt-3',
+            }, {
+              runner: () => ({ ok: true, stdout: 'ai/issue-274-attempt-2', stderr: '' }),
+            }), /instead of/);
+          });
+          '''
+          test_file = '\n'.join(line[10:] if line.startswith('          ') else line for line in test_file.splitlines()) + '\n'
+          Path('test/launch-retry.test.mjs').write_text(test_file, encoding='utf-8')
+
+          dispatch_test = Path('test/dispatch-batch.test.mjs')
+          dispatch_tests = dispatch_test.read_text(encoding='utf-8')
+          dispatch_tests += r'''
+
+          test('pending launch retries run before capacity prevents new dispatch', (t) => {
+            const root = repository(t);
+            let issueDispatches = 0;
+            const result = dispatchAvailableIssues(root, {
+              configLoader: () => ({ maxActive: 1 }),
+              activeCount: () => 1,
+              resumeLaunches: () => ({
+                claimed: true,
+                haltDispatch: true,
+                reason: 'retry scheduled in existing workspace',
+                attempts: [{ claimed: true, issueNumber: 274, branch: 'ai/issue-274', attempt: 2, pending: true }],
+                results: [{ claimed: true, issueNumber: 274, pending: true }],
+              }),
+              dispatchFix: () => ({ claimed: false }),
+              dispatchIssue: () => {
+                issueDispatches += 1;
+                return { claimed: false };
+              },
+            });
+            assert.equal(result.claimed, true);
+            assert.equal(result.issueNumber, 274);
+            assert.equal(result.haltDispatch, true);
+            assert.equal(issueDispatches, 0);
+          });
+
+          test('terminal launch failure halts the cycle instead of claiming another issue', (t) => {
+            const root = repository(t);
+            let issueDispatches = 0;
+            const result = dispatchAvailableIssues(root, {
+              configLoader: () => ({ maxActive: 1 }),
+              activeCount: () => 0,
+              resumeLaunches: () => ({
+                claimed: false,
+                haltDispatch: true,
+                reason: 'agent failed after bounded retries',
+                attempts: [],
+                results: [{ claimed: false, failed: true, issueNumber: 274 }],
+              }),
+              dispatchFix: () => ({ claimed: false }),
+              dispatchIssue: () => {
+                issueDispatches += 1;
+                return { claimed: true, issueNumber: 275 };
+              },
+            });
+            assert.equal(result.claimed, false);
+            assert.equal(result.haltDispatch, true);
+            assert.equal(issueDispatches, 0);
+          });
+          '''
+          dispatch_test.write_text(dispatch_tests, encoding='utf-8')
+          PY
+
+          npm install
+          npm test
+          npm run check
+          npm run pack:check
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src test package.json CHANGELOG.md
+          git commit -m "Reuse issue workspace across agent start retries"
+          git push origin HEAD:ai/reuse-workspace-on-agent-start-failure
