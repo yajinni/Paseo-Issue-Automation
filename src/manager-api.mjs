@@ -1,6 +1,10 @@
 import { managerRepositoryAction } from './manager-actions.mjs';
 import { loadManagerConfig, saveManagerConfig } from './manager-config.mjs';
-import { installExternalRepositoryFromManager } from './manager-installation.mjs';
+import {
+  installExternalRepositoryFromManager,
+  migrateEmbeddedRepositoryFromManager,
+  reconcileEmbeddedMigrationFromManager,
+} from './manager-installation.mjs';
 import {
   parseRepositoryApiPath,
   repositoryRegistryRequest,
@@ -63,6 +67,23 @@ function managerRequest(method, pathname, body, options) {
   return null;
 }
 
+function installationResult(context, options, handler, dependencyKey) {
+  const result = handler(context.repository, {
+    workerManager: options.workerManager,
+    reviewWorkerManager: options.reviewWorkerManager,
+    [dependencyKey]: options[dependencyKey],
+  });
+  const statusReader = options.statusReader || managerRepositoryStatus;
+  return {
+    handled: true,
+    status: 200,
+    body: {
+      result,
+      status: statusReader(context.repository, options),
+    },
+  };
+}
+
 export function managerApiRequest({ method, pathname, body = {} }, options = {}) {
   const manager = managerRequest(method, pathname, body, options);
   if (manager) return manager;
@@ -100,20 +121,28 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
   }
   if (method === 'POST') {
     if (context.pathname === '/api/install/external') {
-      const installHandler = options.installHandler || installExternalRepositoryFromManager;
-      const result = installHandler(context.repository, {
-        workerManager: options.workerManager,
-        reviewWorkerManager: options.reviewWorkerManager,
-        installer: options.externalInstaller,
-      });
-      return {
-        handled: true,
-        status: 200,
-        body: {
-          result,
-          status: statusReader(context.repository, options),
-        },
-      };
+      return installationResult(
+        context,
+        options,
+        options.installHandler || installExternalRepositoryFromManager,
+        'installer',
+      );
+    }
+    if (context.pathname === '/api/migrate/external') {
+      return installationResult(
+        context,
+        options,
+        options.migrationHandler || migrateEmbeddedRepositoryFromManager,
+        'migrator',
+      );
+    }
+    if (context.pathname === '/api/migrate/reconcile') {
+      return installationResult(
+        context,
+        options,
+        options.migrationReconcileHandler || reconcileEmbeddedMigrationFromManager,
+        'reconciler',
+      );
     }
 
     const codingWorkerResult = workerAction(options.workerManager, context, context.pathname);

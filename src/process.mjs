@@ -102,10 +102,6 @@ export function buildWindowsCmdInvocation(executable, args = [], env = process.e
   return {
     executable: env.ComSpec || env.COMSPEC || 'cmd.exe',
     args: ['/d', '/s', '/v:off', '/c', commandLine],
-    // Node otherwise re-escapes the quotes in the /c payload before handing it
-    // to cmd.exe. Passing the command line verbatim keeps the quoted path and
-    // arguments intact. Starting with `call` also avoids cmd's special handling
-    // for a /c payload whose first character is a quote.
     windowsVerbatimArguments: true,
   };
 }
@@ -189,6 +185,12 @@ function resolvedSpawn(command, args, options) {
   return { executable, args, resolution };
 }
 
+function preservesLeadingWhitespace(command, args = []) {
+  return String(command).toLowerCase() === 'git'
+    && args[0] === 'status'
+    && args.some((value) => String(value).startsWith('--porcelain'));
+}
+
 export function run(command, args = [], options = {}) {
   const timeoutMs = commandTimeout(options);
   const env = options.env || process.env;
@@ -209,10 +211,11 @@ export function run(command, args = [], options = {}) {
   });
 
   const timedOut = result.error?.code === 'ETIMEDOUT';
+  const rawStdout = String(result.stdout || '');
   const output = {
     ok: !result.error && result.status === 0,
     exitCode: result.status ?? 1,
-    stdout: String(result.stdout || '').trim(),
+    stdout: preservesLeadingWhitespace(command, effectiveArgs) ? rawStdout.trimEnd() : rawStdout.trim(),
     stderr: String(result.stderr || '').trim(),
     error: result.error || null,
     timedOut,

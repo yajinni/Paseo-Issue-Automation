@@ -30,3 +30,4 @@
 - Add a machine-local manager-wide coding limit, one-claim fair scheduling turns, round-robin pending-repository rotation, and conservative capacity checks across all running repository workers.
 - Add independent repository PR-review scheduler and reconciliation workers while preserving the machine-global serial ChatGPT browser lease across every repository.
 - Add external standalone-manager installation that manages only the issue template, labels, workspace, and local state without adding a project dependency, lockfile entry, `node_modules` requirement, or `paseo.json` service.
+- Add a reviewed embedded-to-external migration PR workflow that removes the project dependency and managed service launcher, pauses automation while pending, and switches controller mode only after merge and local synchronization.
