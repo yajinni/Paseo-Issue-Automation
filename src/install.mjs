@@ -1,5 +1,6 @@
 import { runJson } from './process.mjs';
 import { appendControllerLog } from './controller-log.mjs';
+import { CONTROLLER_MODES, loadControllerMode, saveControllerMode } from './controller-mode.mjs';
 import { discoverSetupOptions } from './setup-discovery.mjs';
 import { buildSetupSnapshot, clearSetupSnapshotCache } from './setup-snapshot.mjs';
 import {
@@ -59,24 +60,54 @@ export function requirements(root, _existing = null, options = {}) {
   return setupRequirements(root, { force: options.force === true });
 }
 
+function logCreatedSetupPullRequest(root, setupPullRequest) {
+  if (!setupPullRequest?.created || !setupPullRequest.pullRequest) return;
+  safeSetupLog(root, {
+    action: 'create-setup-pr',
+    status: 'success',
+    message: `Setup PR #${setupPullRequest.pullRequest.number} was committed, pushed, and opened automatically.`,
+    details: {
+      pullRequest: setupPullRequest.pullRequest,
+      returnedToBaseBranch: setupPullRequest.returnedToBaseBranch,
+      switchError: setupPullRequest.switchError,
+    },
+  });
+}
+
 export function installRepositoryIntegration(root) {
   preflightSetupPullRequest(root);
   const components = legacy.installRepositoryIntegration(root);
   const setupPullRequest = createSetupPullRequest(root);
-  if (setupPullRequest?.created && setupPullRequest.pullRequest) {
-    safeSetupLog(root, {
-      action: 'create-setup-pr',
-      status: 'success',
-      message: `Setup PR #${setupPullRequest.pullRequest.number} was committed, pushed, and opened automatically.`,
-      details: {
-        pullRequest: setupPullRequest.pullRequest,
-        returnedToBaseBranch: setupPullRequest.returnedToBaseBranch,
-        switchError: setupPullRequest.switchError,
-      },
-    });
-  }
+  logCreatedSetupPullRequest(root, setupPullRequest);
   ensureSetupPullRequestWorker(root);
-  return { ...components, setupPullRequest };
+  return { controllerMode: CONTROLLER_MODES.embedded, ...components, setupPullRequest };
+}
+
+export function installExternalRepositoryIntegration(root) {
+  const existingMode = loadControllerMode(root);
+  if (existingMode === CONTROLLER_MODES.embedded) {
+    throw new Error('This repository uses the embedded dependency installation. Use the explicit migration workflow before switching to the external manager.');
+  }
+  preflightSetupPullRequest(root, { mode: CONTROLLER_MODES.external });
+  saveControllerMode(root, CONTROLLER_MODES.external);
+  const components = {
+    template: legacy.installIssueTemplate(root),
+    labels: legacy.installLabels(root),
+    workspace: legacy.createAutomationWorkspace(root),
+  };
+  const setupPullRequest = createSetupPullRequest(root, { mode: CONTROLLER_MODES.external });
+  logCreatedSetupPullRequest(root, setupPullRequest);
+  ensureSetupPullRequestWorker(root);
+  safeSetupLog(root, {
+    action: 'install-external-controller',
+    status: 'success',
+    message: 'Repository integration was installed for the standalone external manager without adding a package dependency or repository service launcher.',
+    details: {
+      controllerMode: CONTROLLER_MODES.external,
+      files: setupPullRequest?.pullRequest?.files || [],
+    },
+  });
+  return { controllerMode: CONTROLLER_MODES.external, ...components, setupPullRequest };
 }
 
 function paseoOverrideFromRequirements(req) {
@@ -122,12 +153,15 @@ function existingInstallationCanBeRecovered(root, setupPullRequest, repositoryCh
   const config = loadConfig(root);
   const integration = loadIntegration(root);
   const labels = Object.values(integration.labels || {});
+  const controllerMode = loadControllerMode(root);
+  const controllerReady = controllerMode === CONTROLLER_MODES.external
+    || integration.paseoJson?.serviceAddedByPackage === true;
   return repositoryChanges.available
     && repositoryChanges.expectedFiles.length > 0
     && repositoryChanges.unexpectedFiles.length === 0
     && repositoryChanges.currentBranch === config.baseBranch
     && integration.issueTemplate?.createdByPackage === true
-    && integration.paseoJson?.serviceAddedByPackage === true
+    && controllerReady
     && labels.length > 0
     && Boolean(config.workspace?.id);
 }
@@ -257,72 +291,4 @@ export function setupSnapshot(root, options = {}) {
     setupOptions,
     setupCheckedAt: new Date().toISOString(),
   };
-}
-
-// Retained for compatibility with older clients. Setup completion is now
-// synchronized automatically whenever the setup snapshot is evaluated.
-export function finishSetup(root) {
-  const snapshot = setupSnapshot(root, {
-    forceDiscovery: true,
-    forceRequirements: true,
-    forceIntegration: true,
-  });
-  if (!snapshot.checks.ready) {
-    throw new Error('Setup cannot finish until every required setup check passes.');
-  }
-  return snapshot.config;
-}
-
-export function setupRepositoryFilesCheck(repositoryChanges = {}) {
-  const changedFiles = Array.isArray(repositoryChanges.expectedFiles)
-    ? repositoryChanges.expectedFiles
-    : [];
-  return {
-    name: 'No uncommitted setup-file changes',
-    pass: changedFiles.length === 0,
-    details: { changedFiles },
-  };
-}
-
-export function runSetupSelfTest(root) {
-  const snapshot = setupSnapshot(root, {
-    forceDiscovery: true,
-    forceRequirements: true,
-    forceIntegration: true,
-  });
-  const prProbe = runJson('gh', ['pr', 'list', '--state', 'all', '--limit', '1', '--json', 'number,headRefOid'], {
-    cwd: root,
-    allowFailure: true,
-    timeoutMs: 8_000,
-  });
-  const checks = [
-    { name: 'Git repository and remote', pass: Boolean(snapshot.requirements.git && snapshot.requirements.remote) },
-    { name: 'GitHub CLI authenticated', pass: snapshot.requirements.githubAuthenticated },
-    { name: 'Paseo daemon reachable', pass: snapshot.requirements.paseoReachable },
-    { name: 'Issue template installed', pass: snapshot.integration.issueTemplate },
-    { name: 'Paseo service installed', pass: snapshot.integration.paseoService },
-    { name: 'Lifecycle labels present', pass: snapshot.integration.labelsReady },
-    { name: 'Automation workspace available', pass: Boolean(snapshot.workspace?.id) },
-    { name: 'Base branch exists', pass: snapshot.checks.baseBranchExists },
-    { name: 'Coder and Reviewer models configured', pass: snapshot.checks.modelsConfigured },
-    setupRepositoryFilesCheck(snapshot.repositoryChanges),
-    { name: 'Setup pull request merged and synchronized', pass: snapshot.checks.setupPullRequestReady },
-    { name: 'GitHub pull-request metadata readable', pass: Array.isArray(prProbe) },
-  ].map((check) => ({ ...check, pass: Boolean(check.pass) }));
-  return {
-    pass: checks.every((check) => check.pass),
-    destructive: false,
-    note: 'No issue, branch, agent, pull request, or repository file was created by this self-test.',
-    modelAvailability: 'Available harnesses and models are discovered from the running Paseo daemon; this self-test does not launch billable agents.',
-    paseoMessage: snapshot.requirements.paseoMessage,
-    uncommittedSetupFiles: snapshot.repositoryChanges.expectedFiles,
-    checks,
-  };
-}
-
-export function clearSetupDiscoveryCache(root) {
-  if (root) discoveryCache.delete(root);
-  else discoveryCache.clear();
-  clearSetupRequirementCache(root);
-  clearSetupSnapshotCache(root);
 }
