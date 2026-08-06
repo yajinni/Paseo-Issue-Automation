@@ -17,6 +17,10 @@ function workerAction(workerManager, context, pathname) {
   return workerManager.restart(context.repository);
 }
 
+function cachedManagerStatus(workerManager) {
+  return workerManager?.managerStatus?.({ refreshCapacity: false }) || null;
+}
+
 function managerRequest(method, pathname, body, options) {
   if (pathname === '/api/manager/config' && method === 'GET') {
     return { handled: true, status: 200, body: { config: loadManagerConfig(options) } };
@@ -27,7 +31,7 @@ function managerRequest(method, pathname, body, options) {
     return {
       handled: true,
       status: 200,
-      body: { config, manager: options.workerManager?.managerStatus?.() || null },
+      body: { config, manager: cachedManagerStatus(options.workerManager) },
     };
   }
   if (pathname === '/api/manager/status' && method === 'GET') {
@@ -36,7 +40,7 @@ function managerRequest(method, pathname, body, options) {
       status: 200,
       body: {
         config: loadManagerConfig(options),
-        manager: options.workerManager?.managerStatus?.() || null,
+        manager: cachedManagerStatus(options.workerManager),
         workers: options.workerManager?.list?.() || [],
       },
     };
