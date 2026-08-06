@@ -20,3 +20,4 @@
 - Add dependency-cycle and execution-wave validation.
 - Replace the injected setup dashboard extensions with a unified responsive control center for overview, issue execution, dependency waves, activity, settings, and maintenance.
 - Preserve guided setup, reversible installation, manual issue controls, fresh-attempt restarts, activity history, and package release checks.
+- Create one worktree workspace per issue attempt, retry failed agent creation in that recorded workspace, surface retry and reconciliation failures, and archive only workspaces proven to contain no agents.

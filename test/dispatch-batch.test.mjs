@@ -52,3 +52,53 @@ test('batch dispatch never exceeds the configured maximum', (t) => {
   assert.equal(calls, 2);
   assert.equal(result.attempts.length, 2);
 });
+
+
+test('pending launch retries run before capacity prevents new dispatch', (t) => {
+  const root = repository(t);
+  let issueDispatches = 0;
+  const result = dispatchAvailableIssues(root, {
+    configLoader: () => ({ maxActive: 1 }),
+    activeCount: () => 1,
+    resumeLaunches: () => ({
+      claimed: true,
+      haltDispatch: true,
+      reason: 'retry scheduled in existing workspace',
+      attempts: [{ claimed: true, issueNumber: 274, branch: 'ai/issue-274', attempt: 2, pending: true }],
+      results: [{ claimed: true, issueNumber: 274, pending: true }],
+    }),
+    dispatchFix: () => ({ claimed: false }),
+    dispatchIssue: () => {
+      issueDispatches += 1;
+      return { claimed: false };
+    },
+  });
+  assert.equal(result.claimed, true);
+  assert.equal(result.issueNumber, 274);
+  assert.equal(result.haltDispatch, true);
+  assert.equal(issueDispatches, 0);
+});
+
+test('terminal launch failure halts the cycle instead of claiming another issue', (t) => {
+  const root = repository(t);
+  let issueDispatches = 0;
+  const result = dispatchAvailableIssues(root, {
+    configLoader: () => ({ maxActive: 1 }),
+    activeCount: () => 0,
+    resumeLaunches: () => ({
+      claimed: false,
+      haltDispatch: true,
+      reason: 'agent failed after bounded retries',
+      attempts: [],
+      results: [{ claimed: false, failed: true, issueNumber: 274 }],
+    }),
+    dispatchFix: () => ({ claimed: false }),
+    dispatchIssue: () => {
+      issueDispatches += 1;
+      return { claimed: true, issueNumber: 275 };
+    },
+  });
+  assert.equal(result.claimed, false);
+  assert.equal(result.haltDispatch, true);
+  assert.equal(issueDispatches, 0);
+});
