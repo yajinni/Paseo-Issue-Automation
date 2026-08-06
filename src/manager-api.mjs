@@ -1,3 +1,4 @@
+import { managerRepositoryAction } from './manager-actions.mjs';
 import {
   repositoryRegistryRequest,
   resolveRepositoryApiContext,
@@ -10,12 +11,27 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
 
   const context = resolveRepositoryApiContext(pathname, options);
   if (!context) return { handled: false };
+  const statusReader = options.statusReader || managerRepositoryStatus;
   if (method === 'GET' && context.pathname === '/api/status') {
     return {
       handled: true,
       status: 200,
-      body: { status: managerRepositoryStatus(context.repository, options) },
+      body: { status: statusReader(context.repository, options) },
     };
+  }
+  if (method === 'POST') {
+    const actionHandler = options.actionHandler || managerRepositoryAction;
+    const result = actionHandler(context.root, context.pathname, body, options.actions);
+    if (result !== null) {
+      return {
+        handled: true,
+        status: 200,
+        body: {
+          result,
+          status: statusReader(context.repository, options),
+        },
+      };
+    }
   }
   return {
     handled: true,
@@ -23,8 +39,7 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     body: {
       error: method === 'GET'
         ? `Manager route ${context.pathname} is not available.`
-        : 'Repository mutations are not enabled in the standalone manager yet.',
-      readOnly: true,
+        : `Manager action ${context.pathname} is not available.`,
     },
   };
 }
