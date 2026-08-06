@@ -1,4 +1,6 @@
+import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
 import { inspectRepository } from './repository-registry.mjs';
+import { loadSetupPullRequest, setupChangeStatus } from './setup-pr.mjs';
 import {
   listRuns,
   loadConfig,
@@ -36,12 +38,17 @@ export function managerRepositoryStatus(repository, {
   const config = loadConfig(inspected.path);
   const runtime = loadRuntime(inspected.path);
   const integration = loadIntegration(inspected.path);
+  const controllerMode = loadControllerMode(inspected.path);
+  const setupPullRequest = loadSetupPullRequest(inspected.path);
+  const setupChanges = setupChangeStatus(inspected.path, { runner, mode: controllerMode });
   const runs = listRuns(inspected.path);
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'closed'].includes(String(item?.status || '')),
   );
   const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
+  const externalController = controllerMode === CONTROLLER_MODES.external;
+  const embeddedController = controllerMode === CONTROLLER_MODES.embedded;
 
   return {
     repository: {
@@ -55,11 +62,22 @@ export function managerRepositoryStatus(repository, {
     setup: {
       complete: config.setupComplete === true,
       baseBranch: config.baseBranch || null,
+      controllerMode,
+      externalController,
+      embeddedController,
       workspaceId: config.workspace?.id || null,
       issueTemplateManaged: integration.issueTemplate?.createdByPackage === true,
       paseoServiceManaged: integration.paseoJson?.serviceAddedByPackage === true,
       managedLabelCount: Object.values(integration.labels || {})
         .filter((item) => item?.createdByPackage === true).length,
+      pullRequest: setupPullRequest,
+      repositoryChanges: {
+        available: setupChanges.available,
+        expectedFiles: setupChanges.expectedFiles,
+        unexpectedFiles: setupChanges.unexpectedFiles,
+        managedFiles: setupChanges.managedFiles,
+        reason: setupChanges.reason,
+      },
     },
     automation: {
       claimsEnabled: runtime.claimsEnabled === true,
@@ -82,7 +100,9 @@ export function managerRepositoryStatus(repository, {
     capabilities: {
       automationActions: true,
       configuration: true,
-      installationActions: false,
+      installationActions: true,
+      externalInstallation: !controllerMode,
+      migrationRequired: embeddedController,
       backgroundWorkers: Boolean(workerManager),
       prReviewWorkers: Boolean(reviewWorkerManager),
     },

@@ -1,5 +1,6 @@
 import { managerRepositoryAction } from './manager-actions.mjs';
 import { loadManagerConfig, saveManagerConfig } from './manager-config.mjs';
+import { installExternalRepositoryFromManager } from './manager-installation.mjs';
 import {
   parseRepositoryApiPath,
   repositoryRegistryRequest,
@@ -98,6 +99,23 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     };
   }
   if (method === 'POST') {
+    if (context.pathname === '/api/install/external') {
+      const installHandler = options.installHandler || installExternalRepositoryFromManager;
+      const result = installHandler(context.repository, {
+        workerManager: options.workerManager,
+        reviewWorkerManager: options.reviewWorkerManager,
+        installer: options.externalInstaller,
+      });
+      return {
+        handled: true,
+        status: 200,
+        body: {
+          result,
+          status: statusReader(context.repository, options),
+        },
+      };
+    }
+
     const codingWorkerResult = workerAction(options.workerManager, context, context.pathname);
     if (codingWorkerResult !== null) {
       return {

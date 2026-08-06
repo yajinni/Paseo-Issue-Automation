@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
 import { runJson } from './process.mjs';
 import {
   LABEL_DETAILS,
@@ -150,23 +151,73 @@ function branchExists(branches, branch) {
   return Array.isArray(branches) && branches.some((item) => item.name === branch);
 }
 
+function installationPreview({
+  controllerMode,
+  issueTemplate,
+  paseoJson,
+  labels,
+  workspace,
+  root,
+}) {
+  const files = [{
+    path: issueTemplate.path,
+    action: !issueTemplate.present
+      ? 'create'
+      : issueTemplate.createdByPackage ? 'verify or repair managed file' : 'reuse only if content matches',
+  }];
+  if (controllerMode !== CONTROLLER_MODES.external) {
+    files.push({
+      path: paseoJson.path,
+      action: !paseoJson.present
+        ? 'create'
+        : paseoJson.servicePresent ? 'verify existing service' : 'add one service and preserve other content',
+    });
+  }
+  return {
+    controllerMode,
+    files,
+    githubLabels: Object.values(labels).map((label) => ({
+      name: label.name,
+      action: label.present ? 'reuse' : 'create',
+    })),
+    paseoWorkspace: {
+      title: 'Issue Coding Automation',
+      action: workspace?.id ? 'reuse existing workspace' : 'create local workspace',
+    },
+    localState: statePaths(root).root,
+    packageDependency: controllerMode === CONTROLLER_MODES.external
+      ? { action: 'none', reason: 'The standalone manager owns the controller executable.' }
+      : { action: 'repository dependency', removalCommand: npmUninstallCommand(root) },
+    npmRemovalCommand: controllerMode === CONTROLLER_MODES.external ? null : npmUninstallCommand(root),
+  };
+}
+
 export function buildSetupSnapshot(root, {
   requirements,
   branches = [],
   forceIntegration = false,
+  liveState = null,
+  controllerMode: requestedControllerMode = null,
 } = {}) {
   const config = loadConfig(root);
   const runtime = loadRuntime(root);
   const integrationState = loadIntegration(root);
-  const live = liveSetupState(root, requirements, { force: forceIntegration });
+  const controllerMode = requestedControllerMode || loadControllerMode(root) || CONTROLLER_MODES.embedded;
+  const live = liveState || liveSetupState(root, requirements, { force: forceIntegration });
   const issueTemplate = issueTemplateManagement(root, integrationState);
   const paseoJson = paseoManagement(root, integrationState);
-  const labels = labelManagement(live.labels, integrationState);
+  const labels = labelManagement(live.labels || [], integrationState);
   const workspace = live.workspace || config.workspace;
+  const externalController = controllerMode === CONTROLLER_MODES.external;
+  const embeddedControllerReady = paseoJson.servicePresent && !paseoJson.changedSinceInstall;
+  const controllerReady = externalController || embeddedControllerReady;
   const integration = {
+    controllerMode,
+    externalController,
+    controllerReady,
     issueTemplate: issueTemplate.present,
     paseoJson: paseoJson.present,
-    paseoService: paseoJson.servicePresent && !paseoJson.changedSinceInstall,
+    paseoService: embeddedControllerReady,
     labels,
     labelsReady: Object.values(labels).every((label) => label.present),
     management: { issueTemplate, paseoJson },
@@ -181,37 +232,24 @@ export function buildSetupSnapshot(root, {
     && requirements.paseoReachable
     && requirements.remote
     && integration.issueTemplate
-    && integration.paseoService
+    && integration.controllerReady
     && integration.labelsReady
     && workspace?.id
     && modelsConfigured
     && baseBranchExists,
   );
-  const preview = {
-    files: [
-      {
-        path: issueTemplate.path,
-        action: !issueTemplate.present ? 'create' : issueTemplate.createdByPackage ? 'verify or repair managed file' : 'reuse only if content matches',
-      },
-      {
-        path: paseoJson.path,
-        action: !paseoJson.present ? 'create' : paseoJson.servicePresent ? 'verify existing service' : 'add one service and preserve other content',
-      },
-    ],
-    githubLabels: Object.values(labels).map((label) => ({
-      name: label.name,
-      action: label.present ? 'reuse' : 'create',
-    })),
-    paseoWorkspace: {
-      title: 'Issue Coding Automation',
-      action: workspace?.id ? 'reuse existing workspace' : 'create local workspace',
-    },
-    localState: statePaths(root).root,
-    npmRemovalCommand: npmUninstallCommand(root),
-  };
+  const preview = installationPreview({
+    controllerMode,
+    issueTemplate,
+    paseoJson,
+    labels,
+    workspace,
+    root,
+  });
 
   return {
     root,
+    controllerMode,
     requirements,
     integration,
     workspace,
@@ -221,9 +259,9 @@ export function buildSetupSnapshot(root, {
     },
     config,
     runtime,
-    checks: { modelsConfigured, baseBranchExists, ready },
+    checks: { modelsConfigured, baseBranchExists, controllerReady, ready },
     stateDirectory: statePaths(root).root,
-    npmUninstallCommand: npmUninstallCommand(root),
+    npmUninstallCommand: preview.npmRemovalCommand,
     preview,
   };
 }
