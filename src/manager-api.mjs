@@ -11,10 +11,23 @@ import { managerRepositoryStatus } from './manager-status.mjs';
 function workerAction(workerManager, context, pathname) {
   const workerRoute = ['/api/worker/start', '/api/worker/stop', '/api/worker/restart'].includes(pathname);
   if (!workerRoute) return null;
-  if (!workerManager) throw new Error('The standalone manager worker pool is unavailable.');
+  if (!workerManager) throw new Error('The standalone manager coding-worker pool is unavailable.');
   if (pathname === '/api/worker/start') return workerManager.start(context.repository);
   if (pathname === '/api/worker/stop') return workerManager.stop(context.repository.id);
   return workerManager.restart(context.repository);
+}
+
+function reviewWorkerAction(reviewWorkerManager, context, pathname) {
+  const workerRoute = [
+    '/api/review-worker/start',
+    '/api/review-worker/stop',
+    '/api/review-worker/restart',
+  ].includes(pathname);
+  if (!workerRoute) return null;
+  if (!reviewWorkerManager) throw new Error('The standalone manager PR-review worker pool is unavailable.');
+  if (pathname === '/api/review-worker/start') return reviewWorkerManager.start(context.repository);
+  if (pathname === '/api/review-worker/stop') return reviewWorkerManager.stop(context.repository.id);
+  return reviewWorkerManager.restart(context.repository);
 }
 
 function cachedManagerStatus(workerManager) {
@@ -42,6 +55,7 @@ function managerRequest(method, pathname, body, options) {
         config: loadManagerConfig(options),
         manager: cachedManagerStatus(options.workerManager),
         workers: options.workerManager?.list?.() || [],
+        reviewWorkers: options.reviewWorkerManager?.list?.() || [],
       },
     };
   }
@@ -55,14 +69,20 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     return {
       handled: true,
       status: 200,
-      body: { workers: options.workerManager?.list?.() || [] },
+      body: {
+        workers: options.workerManager?.list?.() || [],
+        reviewWorkers: options.reviewWorkerManager?.list?.() || [],
+      },
     };
   }
 
   const route = parseRepositoryApiPath(pathname);
-  if (method === 'DELETE' && route.selector && !route.repositoryPath && options.workerManager) {
+  if (method === 'DELETE' && route.selector && !route.repositoryPath) {
     const repository = findRepository(route.selector, options);
-    if (repository) options.workerManager.stop(repository.id);
+    if (repository) {
+      options.workerManager?.stop?.(repository.id);
+      options.reviewWorkerManager?.stop?.(repository.id);
+    }
   }
   const registry = repositoryRegistryRequest({ method, pathname, body }, options);
   if (registry.handled) return registry;
@@ -78,13 +98,24 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     };
   }
   if (method === 'POST') {
-    const workerResult = workerAction(options.workerManager, context, context.pathname);
-    if (workerResult !== null) {
+    const codingWorkerResult = workerAction(options.workerManager, context, context.pathname);
+    if (codingWorkerResult !== null) {
       return {
         handled: true,
         status: 200,
         body: {
-          result: workerResult,
+          result: codingWorkerResult,
+          status: statusReader(context.repository, options),
+        },
+      };
+    }
+    const reviewResult = reviewWorkerAction(options.reviewWorkerManager, context, context.pathname);
+    if (reviewResult !== null) {
+      return {
+        handled: true,
+        status: 200,
+        body: {
+          result: reviewResult,
           status: statusReader(context.repository, options),
         },
       };
