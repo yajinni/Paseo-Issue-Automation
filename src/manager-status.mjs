@@ -60,6 +60,7 @@ export function managerRepositoryStatus(repository, {
     automation: {
       claimsEnabled: runtime.claimsEnabled === true,
       maxActive: config.maxActive,
+      maxReviewRounds: config.maxReviewRounds,
       pollIntervalSeconds: config.pollIntervalSeconds,
       lastDispatchAt: runtime.lastDispatchAt || null,
       lastDispatchResult: runtime.lastDispatchResult || null,
@@ -72,7 +73,12 @@ export function managerRepositoryStatus(repository, {
       coder: config.models?.coder || null,
       reviewer: config.models?.reviewer || null,
     },
+    capabilities: {
+      automationActions: true,
+      configuration: true,
+      installationActions: false,
+      backgroundWorkers: false,
+    },
     stateDirectory: statePaths(inspected.path).root,
-    readOnly: true,
   };
 }
