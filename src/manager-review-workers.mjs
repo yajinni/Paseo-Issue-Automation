@@ -5,6 +5,7 @@ import { loadPrReviewStore } from './pr-review-store.mjs';
 import { reconciliationDelay } from './reconciliation-timing.mjs';
 
 const REVIEW_TICK_MS = 5_000;
+const FALLBACK_RECONCILIATION_DELAY_MS = 300_000;
 
 function snapshot(worker) {
   if (!worker) return { running: false, state: 'stopped' };
@@ -63,8 +64,12 @@ export function createManagerReviewWorkerPool({
   function scheduleReconciliation(worker) {
     if (!worker?.running) return;
     if (worker.reconciliationTimer) clearTimeoutFn(worker.reconciliationTimer);
-    const store = loadStore(worker.root);
-    const delay = reconciliationDelayForStore(store);
+    let delay = FALLBACK_RECONCILIATION_DELAY_MS;
+    try {
+      delay = reconciliationDelayForStore(loadStore(worker.root));
+    } catch (error) {
+      worker.lastReconciliationError = error instanceof Error ? error.message : String(error);
+    }
     worker.nextReconciliationDelayMs = delay;
     worker.reconciliationTimer = setTimeoutFn(() => reconcileTick(worker.repositoryId), delay);
     worker.reconciliationTimer?.unref?.();
