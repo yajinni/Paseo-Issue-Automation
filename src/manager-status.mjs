@@ -1,4 +1,5 @@
 import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
+import { inspectExternalMigrationAdoption } from './external-adoption.mjs';
 import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
 import { inspectRepository } from './repository-registry.mjs';
@@ -46,6 +47,9 @@ export function managerRepositoryStatus(repository, {
   const maintenance = externalMaintenanceStatus(inspected.path);
   const setupPullRequest = loadSetupPullRequest(inspected.path);
   const setupChanges = setupChangeStatus(inspected.path, { runner, mode: controllerMode });
+  const migrationAdoption = controllerMode === CONTROLLER_MODES.embedded
+    ? inspectExternalMigrationAdoption(inspected.path, { runner })
+    : null;
   const runs = listRuns(inspected.path);
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'closed'].includes(String(item?.status || '')),
@@ -55,6 +59,7 @@ export function managerRepositoryStatus(repository, {
   const externalController = controllerMode === CONTROLLER_MODES.external;
   const embeddedController = controllerMode === CONTROLLER_MODES.embedded;
   const migrationPending = migration?.state === 'open' || (migration?.state === 'merged' && !migration.syncedAt);
+  const adoptionReady = migrationAdoption?.ready === true && !migrationPending;
 
   const status = {
     repository: {
@@ -79,6 +84,7 @@ export function managerRepositoryStatus(repository, {
       pullRequest: setupPullRequest,
       migration,
       migrationPending,
+      migrationAdoption,
       repositoryChanges: {
         available: setupChanges.available,
         expectedFiles: setupChanges.expectedFiles,
@@ -111,8 +117,9 @@ export function managerRepositoryStatus(repository, {
       configuration: true,
       installationActions: true,
       externalInstallation: !controllerMode,
-      embeddedMigration: embeddedController && !migrationPending,
+      embeddedMigration: embeddedController && !migrationPending && !adoptionReady,
       migrationReconciliation: Boolean(migration?.number) && migration?.state !== 'completed',
+      migrationAdoption: adoptionReady,
       migrationRequired: embeddedController,
       externalRepair: maintenance.repairAvailable,
       externalRemoval: maintenance.removalAvailable,

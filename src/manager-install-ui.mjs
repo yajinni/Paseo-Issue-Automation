@@ -6,10 +6,12 @@ const INSTALL_PANEL = `  <section class="card wide" style="margin-top:14px">
     <div class="actions" style="margin-top:12px">
       <button id="install-external-controller" disabled>Install for standalone manager</button>
       <button id="migrate-embedded-controller" class="warning" disabled>Create migration PR</button>
+      <button id="finalize-existing-migration" class="warning" disabled>Finalize existing migration</button>
       <button id="reconcile-controller-migration" class="secondary" disabled>Reconcile migration PR</button>
     </div>
     <p class="muted">External installation adds the issue template, GitHub labels, Paseo workspace, and repository-local state. It does not add Paseo Issue Automation to <code>package.json</code>, any lockfile, <code>node_modules</code>, or <code>paseo.json</code>.</p>
     <p class="muted">Embedded migration creates a reviewed PR that removes the project dependency, updates its lockfile, and removes only the package-managed service launcher. Controller mode changes only after that PR merges and the local base branch synchronizes.</p>
+    <p class="muted">Finalize existing migration is for a repository whose dependency and managed service were already removed through another reviewed PR while machine-local controller state still says embedded. It verifies the clean configured base branch before changing local state.</p>
     <div id="setup-pr-link" class="muted"></div>
     <div id="migration-pr-link" class="muted"></div>
   </section>
@@ -32,6 +34,7 @@ function renderExternalInstallation(data) {
   const setup = data.setup || {};
   const capabilities = data.capabilities || {};
   const migration = setup.migration || null;
+  const adoption = setup.migrationAdoption || null;
   const mode = setup.controllerMode === 'external-manager'
     ? 'External standalone manager'
     : setup.controllerMode === 'embedded-repository'
@@ -42,6 +45,8 @@ function renderExternalInstallation(data) {
     ['Setup complete', setup.complete ? 'Yes' : 'No'],
     ['Migration state', migration ? migration.state : 'Not started'],
     ['Migration sync error', migration && migration.syncError],
+    ['Existing migration ready', adoption ? adoption.ready ? 'Yes' : 'No' : 'Not applicable'],
+    ['Existing migration reason', adoption && !adoption.ready ? (adoption.reasons || []).join(' ') : null],
     ['Managed setup files', (setup.repositoryChanges && setup.repositoryChanges.managedFiles || []).join(', ') || 'None'],
     ['Pending managed files', (setup.repositoryChanges && setup.repositoryChanges.expectedFiles || []).join(', ') || 'None'],
     ['Unrelated working-tree changes', (setup.repositoryChanges && setup.repositoryChanges.unexpectedFiles || []).join(', ') || 'None'],
@@ -65,9 +70,17 @@ function renderExternalInstallation(data) {
   migrationButton.disabled = !capabilities.embeddedMigration || workersRunning;
   migrationButton.textContent = setup.migrationPending
     ? 'Migration PR is pending'
-    : workersRunning
-      ? 'Stop repository workers before migration'
-      : 'Create migration PR';
+    : capabilities.migrationAdoption
+      ? 'Repository files are already migrated'
+      : workersRunning
+        ? 'Stop repository workers before migration'
+        : 'Create migration PR';
+
+  const adoptionButton = document.getElementById('finalize-existing-migration');
+  adoptionButton.disabled = !capabilities.migrationAdoption || workersRunning;
+  adoptionButton.textContent = workersRunning
+    ? 'Stop repository workers before finalizing migration'
+    : 'Finalize existing migration';
 
   const reconcileButton = document.getElementById('reconcile-controller-migration');
   reconcileButton.disabled = !capabilities.migrationReconciliation || workersRunning;
@@ -93,6 +106,13 @@ document.getElementById('migrate-embedded-controller').addEventListener('click',
   if (!currentStatus || !confirm('Create a migration PR that removes the repository-embedded Paseo dependency and managed service launcher? Automation will remain paused until the PR merges and synchronization completes.')) return;
   try {
     await postRepositoryAction('migrate/external');
+  } catch (error) { showError(error); }
+});
+
+document.getElementById('finalize-existing-migration').addEventListener('click', async () => {
+  if (!currentStatus || !confirm('Finalize the existing migration after verifying the selected repository has no embedded package dependency, lockfile reference, or managed service? Claims will remain paused until setup readiness is refreshed.')) return;
+  try {
+    await postRepositoryAction('migrate/adopt');
   } catch (error) { showError(error); }
 });
 

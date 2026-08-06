@@ -3,6 +3,28 @@ import {
   repositoryOperationalSummary,
 } from './repository-blockers.mjs';
 
+function adoptionBlockers(status) {
+  const adoption = status?.setup?.migrationAdoption;
+  if (!status?.setup?.embeddedController || adoption?.ready !== true) return [];
+  const name = status?.repository?.repository || status?.repository?.name || 'this repository';
+  return [{
+    code: 'external-migration-adoption-ready',
+    severity: 'error',
+    scope: 'migration',
+    title: 'Repository files are already migrated',
+    message: `${name} no longer contains the embedded package dependency or service, but machine-local controller state still says embedded. Finalize the existing migration instead of creating another migration PR.`,
+    blocksIssueProcessing: true,
+    action: {
+      kind: 'button',
+      label: 'Finalize existing migration',
+      targetId: 'finalize-existing-migration',
+    },
+    details: adoption.setupPullRequest?.number
+      ? { setupPullRequest: adoption.setupPullRequest.number }
+      : null,
+  }];
+}
+
 function maintenanceBlockers(status) {
   const name = status?.repository?.repository || status?.repository?.name || 'this repository';
   const removal = status?.maintenance?.removal;
@@ -48,7 +70,11 @@ function maintenanceBlockers(status) {
 }
 
 export function deriveManagedRepositoryBlockers(status = {}) {
-  return [...maintenanceBlockers(status), ...deriveRepositoryBlockers(status)];
+  const adoption = adoptionBlockers(status);
+  const repository = deriveRepositoryBlockers(status).filter((item) =>
+    !(adoption.length && item.code === 'setup-incomplete'),
+  );
+  return [...maintenanceBlockers(status), ...adoption, ...repository];
 }
 
 export function managedRepositoryOperationalSummary(status = {}) {
