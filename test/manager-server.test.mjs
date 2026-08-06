@@ -33,7 +33,7 @@ test('manager command starts outside a repository without invoking legacy dispat
   );
 });
 
-test('manager API returns isolated read-only repository state', () => {
+test('manager API returns isolated repository state and scopes actions to that root', () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), 'paseo-manager-api-'));
   const repositoryRoot = createRepository(rootDir, 'Example');
   const repository = addRepository(repositoryRoot, { rootDir });
@@ -63,20 +63,33 @@ test('manager API returns isolated read-only repository state', () => {
   assert.equal(response.body.status.automation.claimsEnabled, true);
   assert.equal(response.body.status.automation.maxActive, 2);
   assert.equal(response.body.status.models.coder, 'opencode/example-coder');
-  assert.equal(response.body.status.readOnly, true);
+  assert.equal(response.body.status.capabilities.automationActions, true);
+  assert.equal(response.body.status.capabilities.backgroundWorkers, false);
 
+  const calls = [];
   const mutation = managerApiRequest({
     method: 'POST',
     pathname: `/api/repositories/${encodeURIComponent(repository.id)}/pause`,
-  }, { rootDir });
-  assert.equal(mutation.status, 405);
-  assert.equal(mutation.body.readOnly, true);
+  }, {
+    rootDir,
+    actionHandler: (root, pathname, body) => {
+      calls.push({ root, pathname, body });
+      return { claimsEnabled: false };
+    },
+    statusReader: (entry) => ({ repository: entry, refreshed: true }),
+  });
+  assert.equal(mutation.status, 200);
+  assert.deepEqual(calls, [{ root: repositoryRoot, pathname: '/api/pause', body: {} }]);
+  assert.deepEqual(mutation.body.result, { claimsEnabled: false });
+  assert.equal(mutation.body.status.refreshed, true);
 });
 
-test('manager UI exposes repository selection and explicit read-only status', () => {
+test('manager UI exposes repository selection and scoped controls', () => {
   const html = managerHtml();
   assert.match(html, /id="repository-select"/);
   assert.match(html, /Register repository/);
-  assert.match(html, /read-only for repository automation/);
+  assert.match(html, /Resume claims/);
+  assert.match(html, /data-issue-action="start-issue"/);
+  assert.match(html, /Background workers and installation actions/);
   assert.match(html, /\/api\/repositories\//);
 });
