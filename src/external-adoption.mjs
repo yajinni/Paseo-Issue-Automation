@@ -88,7 +88,10 @@ function setupPullRequestPreventsAdoption(setupPullRequest) {
   return null;
 }
 
-export function inspectExternalMigrationAdoption(root, { runner = run } = {}) {
+export function inspectExternalMigrationAdoption(root, {
+  runner = run,
+  activeIssuesReader = null,
+} = {}) {
   const mode = loadControllerMode(root);
   const config = loadConfig(root);
   const integration = loadIntegration(root);
@@ -134,7 +137,7 @@ export function inspectExternalMigrationAdoption(root, { runner = run } = {}) {
     }
   }
 
-  const activeIssues = activeAutomationIssues(root);
+  const activeIssues = activeIssuesReader ? activeIssuesReader(root) : [];
   if (activeIssues.length) {
     reasons.push(`Stop active automation issues before finalizing migration: ${activeIssues.map((item) => `#${item.issueNumber}`).join(', ')}.`);
   }
@@ -148,6 +151,8 @@ export function inspectExternalMigrationAdoption(root, { runner = run } = {}) {
     currentBranch: changes.currentBranch,
     baseBranch: config.baseBranch || null,
     changedFiles: changes.changedFiles || [],
+    activeIssuesChecked: Boolean(activeIssuesReader),
+    activeIssueNumbers: activeIssues.map((item) => item.issueNumber),
     staleServiceOwnership: integration.paseoJson?.serviceAddedByPackage === true,
     setupPullRequest: loadSetupPullRequest(root),
   };
@@ -156,13 +161,14 @@ export function inspectExternalMigrationAdoption(root, { runner = run } = {}) {
 export function adoptAlreadyMigratedRepository(root, {
   runner = run,
   setupReconciler = reconcileSetupPullRequest,
+  activeIssuesReader = activeAutomationIssues,
   now = new Date(),
 } = {}) {
   const reconciledSetupPullRequest = setupReconciler(root, { runner });
   const setupReason = setupPullRequestPreventsAdoption(reconciledSetupPullRequest);
   if (setupReason) throw new Error(`Existing migration cannot be finalized: ${setupReason}`);
 
-  const inspection = inspectExternalMigrationAdoption(root, { runner });
+  const inspection = inspectExternalMigrationAdoption(root, { runner, activeIssuesReader });
   if (!inspection.ready) {
     throw new Error(`Existing migration cannot be finalized: ${inspection.reasons.join(' ')}`);
   }
