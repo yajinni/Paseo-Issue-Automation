@@ -5,6 +5,7 @@ import {
   cleanupWorkspaceIfEmpty,
   expectedWorkspaceAgent,
   inspectWorkspaceAgents,
+  nextReconciliationAttempt,
   verifyWorkspaceIdentity,
   workspaceCreateArgs,
 } from '../src/launch-retry.mjs';
@@ -100,4 +101,11 @@ test('workspace identity rejects an attempt or branch mismatch', () => {
   }, {
     runner: () => ({ ok: true, stdout: 'ai/issue-274-attempt-2', stderr: '' }),
   }), /instead of/);
+});
+
+
+test('workspace reconciliation stops after three failed checks', () => {
+  assert.deepEqual(nextReconciliationAttempt(0), { attempt: 1, maximum: 3, exhausted: false });
+  assert.deepEqual(nextReconciliationAttempt(1), { attempt: 2, maximum: 3, exhausted: false });
+  assert.deepEqual(nextReconciliationAttempt(2), { attempt: 3, maximum: 3, exhausted: true });
 });

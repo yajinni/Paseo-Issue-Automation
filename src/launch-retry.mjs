@@ -3,6 +3,18 @@ import path from 'node:path';
 import { findFirstKey, run } from './process.mjs';
 
 export const AGENT_START_MAX_ATTEMPTS = 3;
+export const LAUNCH_RECONCILIATION_MAX_ATTEMPTS = 3;
+
+export function nextReconciliationAttempt(current = 0) {
+  const previous = Number(current);
+  const normalized = Number.isInteger(previous) && previous >= 0 ? previous : 0;
+  const attempt = normalized + 1;
+  return {
+    attempt,
+    maximum: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+    exhausted: attempt >= LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+  };
+}
 
 function text(value) {
   return value === undefined || value === null ? '' : String(value).trim();

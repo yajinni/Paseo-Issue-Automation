@@ -14,11 +14,13 @@ import { LABELS, listRuns, loadConfig, loadRun, loadRuntime, saveRun, saveRuntim
 import { findFirstKey, run, runJson } from './process.mjs';
 import {
   AGENT_START_MAX_ATTEMPTS,
+  LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
   agentRunArgs,
   cleanupWorkspaceIfEmpty,
   expectedWorkspaceAgent,
   inspectWorkspaceAgents,
   launchErrorDetail,
+  nextReconciliationAttempt,
   verifyWorkspaceIdentity,
   workspaceCreateArgs,
   workspaceFromPayload,
@@ -279,6 +281,8 @@ function finalizeAgentLaunch(root, issue, agent, { recovered = false } = {}) {
     reason: null,
     completedAt: null,
     heartbeatAt: now(),
+    launchReconciliationAttempts: 0,
+    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
   }, recovered ? 'agent-start-reconciled' : 'agent-started', recovered
     ? `Recovered agent ${coderAgentId} after the create command reported failure.`
     : `Agent ${coderAgentId} started in workspace ${current.workspaceId}.`);
@@ -296,18 +300,45 @@ function finalizeAgentLaunch(root, issue, agent, { recovered = false } = {}) {
   };
 }
 
-function pendingLaunch(root, issue, attempts, reason, phase = 'launch-retrying') {
+function pendingLaunch(root, issue, attempts, reason) {
   const current = loadRun(root, issue.number) || {};
-  const message = phase === 'launch-reconciliation-needed'
-    ? `${reason} The controller could not verify whether Paseo created an agent, so it will not create another one until reconciliation succeeds.`
-    : `${reason} Agent start attempt ${attempts}/${AGENT_START_MAX_ATTEMPTS} failed; the next polling cycle will retry in workspace ${current.workspaceId}.`;
+  const message = `${reason} Agent start attempt ${attempts}/${AGENT_START_MAX_ATTEMPTS} failed; the next polling cycle will retry in workspace ${current.workspaceId}.`;
   saveActivity(root, issue.number, {
     status: LABELS.running,
-    phase,
+    phase: 'launch-retrying',
     reason: message,
     agentStartAttempts: attempts,
     maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
-  }, phase === 'launch-reconciliation-needed' ? 'agent-start-reconciliation-needed' : 'agent-start-retry-scheduled', message);
+    launchReconciliationAttempts: 0,
+    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+  }, 'agent-start-retry-scheduled', message);
+  return {
+    claimed: true,
+    pending: true,
+    issueNumber: issue.number,
+    branch: current.branch,
+    attempt: current.attempt,
+    workspaceId: current.workspaceId,
+    reason: message,
+  };
+}
+
+function pendingReconciliation(root, issue, reason) {
+  const current = loadRun(root, issue.number) || {};
+  const retry = nextReconciliationAttempt(current.launchReconciliationAttempts);
+  const summary = `${reason} Workspace reconciliation attempt ${retry.attempt}/${retry.maximum} failed.`;
+  if (retry.exhausted) {
+    return terminalLaunchFailure(root, issue,
+      `${summary} The controller stopped retrying; cleanup will archive the workspace only if Paseo can prove it is empty.`);
+  }
+  const message = `${summary} The controller will not create another agent until reconciliation succeeds.`;
+  saveActivity(root, issue.number, {
+    status: LABELS.running,
+    phase: 'launch-reconciliation-needed',
+    reason: message,
+    launchReconciliationAttempts: retry.attempt,
+    maxLaunchReconciliationAttempts: retry.maximum,
+  }, 'agent-start-reconciliation-needed', message);
   return {
     claimed: true,
     pending: true,
@@ -323,8 +354,8 @@ function reconcileFailedAgentStart(root, issue, title, attemptCount, reason) {
   const current = loadRun(root, issue.number) || {};
   const inspection = inspectWorkspaceAgents(root, current.worktreePath);
   if (!inspection.verified) {
-    return pendingLaunch(root, issue, attemptCount,
-      `${reason} Paseo agent inventory failed: ${inspection.reason}`, 'launch-reconciliation-needed');
+    return pendingReconciliation(root, issue,
+      `${reason} Paseo agent inventory failed: ${inspection.reason}`);
   }
   const reconciliation = expectedWorkspaceAgent(inspection, title);
   if (reconciliation.status === 'found') {
@@ -358,6 +389,8 @@ function startRecordedAgent(root, issue, repository) {
     reason: null,
     agentStartAttempts: attemptCount,
     maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+    launchReconciliationAttempts: 0,
+    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
   }, 'agent-start-attempt', `Starting agent attempt ${attemptCount}/${AGENT_START_MAX_ATTEMPTS} in workspace ${current.workspaceId}.`);
   try {
     const payload = runJson('paseo', agentRunArgs({
@@ -376,8 +409,8 @@ function reconcileBeforeRetry(root, issue, repository) {
   const current = loadRun(root, issue.number) || {};
   const inspection = inspectWorkspaceAgents(root, current.worktreePath);
   if (!inspection.verified) {
-    return pendingLaunch(root, issue, Number(current.agentStartAttempts || 0),
-      `Paseo agent inventory failed: ${inspection.reason}`, 'launch-reconciliation-needed');
+    return pendingReconciliation(root, issue,
+      `Paseo agent inventory failed: ${inspection.reason}`);
   }
   const title = current.agentTitle || `Issue #${issue.number} Coder (attempt ${current.attempt || 1})`;
   const reconciliation = expectedWorkspaceAgent(inspection, title);
@@ -439,6 +472,8 @@ function launch(root, issue, branchAction) {
     events: [],
     agentStartAttempts: 0,
     maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+    launchReconciliationAttempts: 0,
+    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
     activity: [{ type: 'attempt-launching', at: started, details: `Attempt ${selection.attempt} reserved on ${selection.branch}.` }],
     history: previousAttemptHistory(previous),
   });
