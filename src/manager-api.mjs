@@ -1,4 +1,5 @@
 import { managerRepositoryAction } from './manager-actions.mjs';
+import { loadManagerConfig, saveManagerConfig } from './manager-config.mjs';
 import {
   parseRepositoryApiPath,
   repositoryRegistryRequest,
@@ -16,7 +17,36 @@ function workerAction(workerManager, context, pathname) {
   return workerManager.restart(context.repository);
 }
 
+function managerRequest(method, pathname, body, options) {
+  if (pathname === '/api/manager/config' && method === 'GET') {
+    return { handled: true, status: 200, body: { config: loadManagerConfig(options) } };
+  }
+  if (pathname === '/api/manager/config' && method === 'POST') {
+    const config = saveManagerConfig(body, options);
+    options.workerManager?.drain?.();
+    return {
+      handled: true,
+      status: 200,
+      body: { config, manager: options.workerManager?.managerStatus?.() || null },
+    };
+  }
+  if (pathname === '/api/manager/status' && method === 'GET') {
+    return {
+      handled: true,
+      status: 200,
+      body: {
+        config: loadManagerConfig(options),
+        manager: options.workerManager?.managerStatus?.() || null,
+        workers: options.workerManager?.list?.() || [],
+      },
+    };
+  }
+  return null;
+}
+
 export function managerApiRequest({ method, pathname, body = {} }, options = {}) {
+  const manager = managerRequest(method, pathname, body, options);
+  if (manager) return manager;
   if (method === 'GET' && pathname === '/api/workers') {
     return {
       handled: true,
