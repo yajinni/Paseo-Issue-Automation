@@ -451,15 +451,19 @@ function launch(root, issue, branchAction) {
       branch: selection.branch,
       baseBranch: config.baseBranch,
     }), { cwd: root });
-    const workspace = verifyWorkspaceIdentity(root, workspaceFromPayload(payload), {
+    const workspace = workspaceFromPayload(payload);
+    saveActivity(root, issue.number, {
+      workspaceId: workspace.workspaceId || null,
+      worktreePath: workspace.worktreePath || null,
+      workspaceName: workspace.workspaceName || null,
+      phase: 'verifying-workspace',
+    }, 'workspace-created', `Workspace ${workspace.workspaceId || '(unknown)'} created once for attempt ${selection.attempt}.`);
+    verifyWorkspaceIdentity(root, workspace, {
       title: workspaceTitle,
       branch: selection.branch,
     });
-    saveActivity(root, issue.number, {
-      workspaceId: workspace.workspaceId,
-      worktreePath: workspace.worktreePath,
-      phase: 'starting-agent',
-    }, 'workspace-created', `Workspace ${workspace.workspaceId} created once for attempt ${selection.attempt}.`);
+    saveActivity(root, issue.number, { phase: 'starting-agent' }, 'workspace-verified',
+      `Workspace ${workspace.workspaceId} matches ${selection.branch}.`);
     return startRecordedAgent(root, issue, repository);
   } catch (error) {
     return terminalLaunchFailure(root, issue, launchErrorDetail(error));
@@ -467,6 +471,9 @@ function launch(root, issue, branchAction) {
 }
 
 export function resumePendingAgentLaunches(root) {
+  if (!loadRuntime(root).claimsEnabled) {
+    return { claimed: false, attempts: [], results: [], haltDispatch: false, reason: 'Claims are paused.' };
+  }
   const pending = listRuns(root).filter((state) =>
     state?.status === LABELS.running
     && ['launch-retrying', 'launch-reconciliation-needed'].includes(state.phase)
