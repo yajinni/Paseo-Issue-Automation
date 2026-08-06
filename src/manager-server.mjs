@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
-import { managerHtml } from './manager-worker-ui.mjs';
+import { managerHtml } from './manager-concurrency-ui.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
 
 function json(response, status, body) {
@@ -28,8 +28,9 @@ export async function startManagerServer({
   open = false,
   port = Number(process.env.PASEO_MANAGER_PORT || 4318),
   rootDir,
-  workerManager = createManagerWorkerPool(),
+  workerManager = null,
 } = {}) {
+  const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
@@ -45,7 +46,7 @@ export async function startManagerServer({
         method: request.method,
         pathname: url.pathname,
         body,
-      }, { rootDir, workerManager });
+      }, { rootDir, workerManager: workers });
       if (!result.handled) {
         json(response, 404, { error: 'Not found' });
         return;
@@ -63,7 +64,7 @@ export async function startManagerServer({
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}`;
   console.log(`Paseo repository manager: ${url}`);
-  server.on('close', () => workerManager.close());
+  server.on('close', () => workers.close());
   if (open) openBrowser(url);
-  return { server, url, workerManager };
+  return { server, url, workerManager: workers };
 }
