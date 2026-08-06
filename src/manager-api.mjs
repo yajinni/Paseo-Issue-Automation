@@ -1,6 +1,7 @@
 import { managerRepositoryAction } from './manager-actions.mjs';
 import { loadManagerConfig, saveManagerConfig } from './manager-config.mjs';
 import {
+  finalizeExistingMigrationFromManager,
   installExternalRepositoryFromManager,
   migrateEmbeddedRepositoryFromManager,
   reconcileEmbeddedMigrationFromManager,
@@ -70,12 +71,7 @@ function managerRequest(method, pathname, body, options) {
   return null;
 }
 
-function installationResult(context, options, handler, dependencyKey) {
-  const result = handler(context.repository, {
-    workerManager: options.workerManager,
-    reviewWorkerManager: options.reviewWorkerManager,
-    [dependencyKey]: options[dependencyKey],
-  });
+function refreshedResult(context, options, result) {
   const statusReader = options.statusReader || managerRepositoryStatus;
   return {
     handled: true,
@@ -85,6 +81,15 @@ function installationResult(context, options, handler, dependencyKey) {
       status: statusReader(context.repository, options),
     },
   };
+}
+
+function installationResult(context, options, handler, dependencyKey) {
+  const result = handler(context.repository, {
+    workerManager: options.workerManager,
+    reviewWorkerManager: options.reviewWorkerManager,
+    [dependencyKey]: options[dependencyKey],
+  });
+  return refreshedResult(context, options, result);
 }
 
 export function managerApiRequest({ method, pathname, body = {} }, options = {}) {
@@ -123,6 +128,16 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     };
   }
   if (method === 'POST') {
+    if (context.pathname === '/api/migrate/adopt') {
+      const result = finalizeExistingMigrationFromManager(context.repository, {
+        workerManager: options.workerManager,
+        reviewWorkerManager: options.reviewWorkerManager,
+        adopter: options.adoptionHandler,
+        refresher: options.setupRefresher,
+      });
+      return refreshedResult(context, options, result);
+    }
+
     const installationRoutes = new Map([
       ['/api/install/external', [options.installHandler || installExternalRepositoryFromManager, 'installer']],
       ['/api/migrate/external', [options.migrationHandler || migrateEmbeddedRepositoryFromManager, 'migrator']],
@@ -138,39 +153,18 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
 
     const codingWorkerResult = workerAction(options.workerManager, context, context.pathname);
     if (codingWorkerResult !== null) {
-      return {
-        handled: true,
-        status: 200,
-        body: {
-          result: codingWorkerResult,
-          status: statusReader(context.repository, options),
-        },
-      };
+      return refreshedResult(context, options, codingWorkerResult);
     }
     const reviewResult = reviewWorkerAction(options.reviewWorkerManager, context, context.pathname);
     if (reviewResult !== null) {
-      return {
-        handled: true,
-        status: 200,
-        body: {
-          result: reviewResult,
-          status: statusReader(context.repository, options),
-        },
-      };
+      return refreshedResult(context, options, reviewResult);
     }
 
     const actionHandler = options.actionHandler || managerRepositoryAction;
     const result = actionHandler(context.root, context.pathname, body, options.actions);
     if (result !== null) {
       if (context.pathname === '/api/config') options.workerManager?.refresh?.(context.repository);
-      return {
-        handled: true,
-        status: 200,
-        body: {
-          result,
-          status: statusReader(context.repository, options),
-        },
-      };
+      return refreshedResult(context, options, result);
     }
   }
   return {
