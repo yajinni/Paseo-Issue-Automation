@@ -7,12 +7,33 @@ export const CONTROLLER_MODES = Object.freeze({
   external: 'external-manager',
 });
 
+function stateRoot(root) {
+  return statePaths(root).root;
+}
+
 function modeFile(root) {
-  return path.join(statePaths(root).root, 'controller-mode.json');
+  return path.join(stateRoot(root), 'controller-mode.json');
+}
+
+function completedMigrationMode(root) {
+  const file = path.join(stateRoot(root), 'external-migration.json');
+  if (!existsSync(file)) return null;
+  try {
+    const migration = JSON.parse(readFileSync(file, 'utf8'));
+    return migration?.state === 'completed'
+      && migration?.targetMode === CONTROLLER_MODES.external
+      ? CONTROLLER_MODES.external
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export function loadControllerMode(root) {
   try {
+    const migratedMode = completedMigrationMode(root);
+    if (migratedMode) return migratedMode;
+
     const file = modeFile(root);
     if (existsSync(file)) {
       try {
