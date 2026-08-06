@@ -8,11 +8,12 @@ import { findRepository } from './repository-registry.mjs';
 import { managerRepositoryStatus } from './manager-status.mjs';
 
 function workerAction(workerManager, context, pathname) {
+  const workerRoute = ['/api/worker/start', '/api/worker/stop', '/api/worker/restart'].includes(pathname);
+  if (!workerRoute) return null;
   if (!workerManager) throw new Error('The standalone manager worker pool is unavailable.');
   if (pathname === '/api/worker/start') return workerManager.start(context.repository);
   if (pathname === '/api/worker/stop') return workerManager.stop(context.repository.id);
-  if (pathname === '/api/worker/restart') return workerManager.restart(context.repository);
-  return null;
+  return workerManager.restart(context.repository);
 }
 
 export function managerApiRequest({ method, pathname, body = {} }, options = {}) {
