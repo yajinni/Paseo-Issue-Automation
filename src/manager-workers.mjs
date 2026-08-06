@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { updateManagedDispatch } from './attempts.mjs';
 import { dispatchAvailableIssues } from './dispatch-batch.mjs';
+import { activeCodingCount } from './fix-jobs.mjs';
+import { DEFAULT_MANAGER_CONFIG, loadManagerConfig } from './manager-config.mjs';
 import { loadConfig } from './state.mjs';
 
 function snapshot(worker) {
@@ -16,36 +18,137 @@ function snapshot(worker) {
     lastTickAt: worker.lastTickAt,
     lastResult: worker.lastResult,
     lastError: worker.lastError,
+    lastScheduleReason: worker.lastScheduleReason,
+    activeCount: worker.activeCount,
+    capacityError: worker.capacityError,
+    pending: worker.pending === true,
     ticking: worker.ticking === true,
   };
+}
+
+function rotated(values, afterId) {
+  if (!values.length || !afterId) return values;
+  const index = values.findIndex((item) => item.repositoryId === afterId);
+  if (index < 0) return values;
+  return [...values.slice(index + 1), ...values.slice(0, index + 1)];
 }
 
 export function createManagerWorkerPool({
   dispatch = dispatchAvailableIssues,
   updateDispatch = updateManagedDispatch,
+  countActive = activeCodingCount,
   readConfig = loadConfig,
+  readManagerConfig = loadManagerConfig,
+  managerConfigOptions = {},
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
   now = () => new Date(),
 } = {}) {
   const workers = new Map();
+  const pending = new Set();
+  let draining = false;
+  let lastServedId = null;
+  let lastCapacity = {
+    globalMaxActive: DEFAULT_MANAGER_CONFIG.globalMaxActive,
+    active: 0,
+    available: DEFAULT_MANAGER_CONFIG.globalMaxActive,
+    checkedAt: null,
+    errors: [],
+  };
+
+  function runningWorkers() {
+    return [...workers.values()]
+      .filter((worker) => worker.running)
+      .sort((left, right) =>
+        String(left.repositoryName).localeCompare(String(right.repositoryName))
+        || left.repositoryId.localeCompare(right.repositoryId));
+  }
+
+  function capacity() {
+    const managerConfig = readManagerConfig(managerConfigOptions);
+    const errors = [];
+    let active = 0;
+    for (const worker of runningWorkers()) {
+      try {
+        worker.activeCount = Math.max(0, Number(countActive(worker.root)) || 0);
+        worker.capacityError = null;
+      } catch (error) {
+        worker.capacityError = error instanceof Error ? error.message : String(error);
+        errors.push({ repositoryId: worker.repositoryId, error: worker.capacityError });
+        const repositoryMaximum = Math.max(1, Number(readConfig(worker.root).maxActive) || 1);
+        worker.activeCount = repositoryMaximum;
+      }
+      active += worker.activeCount;
+    }
+    lastCapacity = {
+      globalMaxActive: managerConfig.globalMaxActive,
+      active,
+      available: Math.max(0, managerConfig.globalMaxActive - active),
+      checkedAt: now().toISOString(),
+      errors,
+    };
+    return lastCapacity;
+  }
+
+  function nextPendingWorker() {
+    const candidates = rotated(runningWorkers(), lastServedId)
+      .filter((worker) => pending.has(worker.repositoryId));
+    return candidates[0] || null;
+  }
+
+  function markCapacityWait(current) {
+    const reason = current.errors.length
+      ? `Global coding capacity cannot be confirmed safely: ${current.errors.map((item) => `${item.repositoryId}: ${item.error}`).join('; ')}`
+      : `Global coding capacity reached (${current.active}/${current.globalMaxActive}).`;
+    for (const repositoryId of pending) {
+      const worker = workers.get(repositoryId);
+      if (worker) worker.lastScheduleReason = reason;
+    }
+  }
+
+  function drain() {
+    if (draining) return managerStatus({ refreshCapacity: false });
+    draining = true;
+    try {
+      while (pending.size) {
+        const current = capacity();
+        if (current.available < 1) {
+          markCapacityWait(current);
+          break;
+        }
+        const worker = nextPendingWorker();
+        if (!worker) break;
+        pending.delete(worker.repositoryId);
+        worker.pending = false;
+        worker.ticking = true;
+        worker.lastScheduleReason = null;
+        try {
+          const result = dispatch(worker.root, { maxClaims: 1 });
+          updateDispatch(worker.root, result);
+          worker.lastResult = result;
+          worker.lastError = null;
+          lastServedId = worker.repositoryId;
+        } catch (error) {
+          worker.lastError = error instanceof Error ? error.message : String(error);
+          worker.lastResult = null;
+          lastServedId = worker.repositoryId;
+        } finally {
+          worker.ticking = false;
+        }
+      }
+    } finally {
+      draining = false;
+    }
+    return managerStatus({ refreshCapacity: false });
+  }
 
   function tick(repositoryId) {
     const worker = workers.get(String(repositoryId));
-    if (!worker?.running || worker.ticking) return snapshot(worker);
-    worker.ticking = true;
+    if (!worker?.running) return snapshot(worker);
     worker.lastTickAt = now().toISOString();
-    try {
-      const result = dispatch(worker.root);
-      updateDispatch(worker.root, result);
-      worker.lastResult = result;
-      worker.lastError = null;
-    } catch (error) {
-      worker.lastError = error instanceof Error ? error.message : String(error);
-      worker.lastResult = null;
-    } finally {
-      worker.ticking = false;
-    }
+    pending.add(worker.repositoryId);
+    worker.pending = true;
+    drain();
     return snapshot(worker);
   }
 
@@ -75,6 +178,10 @@ export function createManagerWorkerPool({
       lastTickAt: null,
       lastResult: null,
       lastError: null,
+      lastScheduleReason: null,
+      activeCount: 0,
+      capacityError: null,
+      pending: false,
       ticking: false,
       timer: null,
     };
@@ -89,9 +196,12 @@ export function createManagerWorkerPool({
     const worker = workers.get(id);
     if (!worker) return { repositoryId: id || null, running: false, state: 'stopped', changed: false };
     if (worker.timer) clearIntervalFn(worker.timer);
+    pending.delete(id);
+    worker.pending = false;
     worker.running = false;
     worker.timer = null;
     workers.delete(id);
+    if (lastServedId === id) lastServedId = null;
     return { ...snapshot(worker), changed: true };
   }
 
@@ -110,14 +220,23 @@ export function createManagerWorkerPool({
   }
 
   function list() {
-    return [...workers.values()]
-      .map(snapshot)
-      .sort((left, right) => String(left.repositoryName).localeCompare(String(right.repositoryName)));
+    return runningWorkers().map(snapshot);
+  }
+
+  function managerStatus({ refreshCapacity = true } = {}) {
+    const current = refreshCapacity ? capacity() : lastCapacity;
+    return {
+      ...current,
+      runningWorkerCount: runningWorkers().length,
+      pendingRepositoryIds: [...pending],
+      lastServedRepositoryId: lastServedId,
+      draining,
+    };
   }
 
   function close() {
     for (const id of [...workers.keys()]) stop(id);
   }
 
-  return { start, stop, restart, refresh, tick, status, list, close };
+  return { start, stop, restart, refresh, tick, drain, status, list, managerStatus, close };
 }
