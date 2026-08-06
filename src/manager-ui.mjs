@@ -10,25 +10,26 @@ export function managerHtml() {
 *{box-sizing:border-box}body{margin:0;background:#0b1018;color:#edf3ff}button,input,select{font:inherit}
 .shell{max-width:1180px;margin:0 auto;padding:24px}.header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:18px}
 h1{margin:0 0 6px;font-size:1.65rem}.muted{color:#9dacbf}.toolbar,.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-select,input{background:#111a27;color:#edf3ff;border:1px solid #2c3b50;border-radius:8px;padding:9px 11px}
-select{min-width:300px}button{border:0;border-radius:8px;padding:9px 13px;background:#2869d8;color:white;cursor:pointer}button.secondary{background:#243247}button.danger{background:#9c3342}button:disabled{opacity:.55;cursor:not-allowed}
+select,input{background:#111a27;color:#edf3ff;border:1px solid #2c3b50;border-radius:8px;padding:9px 11px}select{min-width:220px}
+button{border:0;border-radius:8px;padding:9px 13px;background:#2869d8;color:white;cursor:pointer}button.secondary{background:#243247}button.warning{background:#8b621d}button.danger{background:#9c3342}button:disabled{opacity:.55;cursor:not-allowed}
 .banner{border:1px solid #365275;background:#132137;border-radius:10px;padding:12px 14px;margin-bottom:16px}.error{border-color:#804451;background:#301820}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:#111924;border:1px solid #253348;border-radius:12px;padding:16px}.card h2{font-size:1rem;margin:0 0 12px}.facts{display:grid;grid-template-columns:minmax(130px,.65fr) minmax(0,1.35fr);gap:8px 14px}.facts dt{color:#9dacbf}.facts dd{margin:0;overflow-wrap:anywhere}.wide{grid-column:1/-1}.status{display:inline-flex;border-radius:999px;padding:4px 9px;background:#27364a}.status.good{background:#173d31}.status.warn{background:#503b1d}
-.register{display:flex;gap:10px;margin-top:16px}.register input{flex:1}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a111b;border-radius:8px;padding:12px;max-height:300px;overflow:auto}
-@media(max-width:760px){.header{display:block}.toolbar{margin-top:14px}.grid{grid-template-columns:1fr}.facts{grid-template-columns:1fr}.facts dd{margin-bottom:8px}.register{flex-direction:column}select{min-width:0;width:100%}}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:#111924;border:1px solid #253348;border-radius:12px;padding:16px}.card h2{font-size:1rem;margin:0 0 12px}.facts{display:grid;grid-template-columns:minmax(130px,.65fr) minmax(0,1.35fr);gap:8px 14px}.facts dt{color:#9dacbf}.facts dd{margin:0;overflow-wrap:anywhere}.wide{grid-column:1/-1}
+.register{display:flex;gap:10px;margin-top:16px}.register input{flex:1}.field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.field-grid label{display:grid;gap:5px;color:#9dacbf}.issue-row{display:grid;grid-template-columns:minmax(120px,.5fr) minmax(140px,.5fr) minmax(0,2fr);gap:10px;align-items:end}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a111b;border-radius:8px;padding:12px;max-height:300px;overflow:auto}
+@media(max-width:760px){.header{display:block}.toolbar{margin-top:14px}.grid,.field-grid,.issue-row{grid-template-columns:1fr}.facts{grid-template-columns:1fr}.facts dd{margin-bottom:8px}.register{flex-direction:column}select{min-width:0;width:100%}}
 </style>
 </head>
 <body>
 <main class="shell">
   <div class="header">
-    <div><h1>Paseo Repository Manager</h1><div class="muted">One standalone controller, isolated state for every registered repository.</div></div>
+    <div><h1>Paseo Repository Manager</h1><div class="muted">One standalone controller, isolated state and controls for every registered repository.</div></div>
     <div class="toolbar">
       <label for="repository-select" class="muted">Repository</label>
       <select id="repository-select" aria-label="Active repository"><option value="">No repositories registered</option></select>
       <button class="secondary" id="refresh-button">Refresh</button>
     </div>
   </div>
-  <div class="banner" id="mode-banner">This manager view is read-only for repository automation. Registration changes are available; issue actions arrive in the next stage.</div>
+  <div class="banner" id="mode-banner">Actions are scoped to the selected repository. Background workers and installation actions are not enabled in this stage.</div>
   <div class="grid">
     <section class="card wide">
       <h2>Repository</h2>
@@ -43,7 +44,45 @@ select{min-width:300px}button{border:0;border-radius:8px;padding:9px 13px;backgr
       <dl class="facts" id="automation-facts"><dt>State</dt><dd>Unknown</dd></dl>
     </section>
     <section class="card wide">
-      <h2>Latest dispatch result</h2>
+      <h2>Automation controls</h2>
+      <div class="actions">
+        <button class="repository-action" data-action="resume">Resume claims</button>
+        <button class="repository-action danger" data-action="pause">Pause claims</button>
+        <button class="repository-action secondary" data-action="run-now">Run now</button>
+        <button class="repository-action secondary" data-action="reconcile">Reconcile dependencies</button>
+      </div>
+      <p class="muted">These actions use only the selected repository root. They do not start a permanent manager worker.</p>
+    </section>
+    <section class="card">
+      <h2>Configuration</h2>
+      <form id="config-form">
+        <div class="field-grid">
+          <label>Base branch<input id="base-branch"></label>
+          <label>Poll interval<input id="poll-interval" type="number" min="60" max="3600"></label>
+          <label>Maximum active<input id="max-active" type="number" min="1" max="10"></label>
+          <label>Review rounds<input id="max-review-rounds" type="number" min="1" max="10"></label>
+          <label>Coder model<input id="coder-model" placeholder="provider/model"></label>
+          <label>Reviewer model<input id="reviewer-model" placeholder="provider/model"></label>
+        </div>
+        <div class="actions" style="margin-top:12px"><button class="repository-action" type="submit">Save configuration</button></div>
+      </form>
+    </section>
+    <section class="card">
+      <h2>Manual issue action</h2>
+      <div class="issue-row">
+        <label class="muted">Issue number<input id="issue-number" type="number" min="1"></label>
+        <label class="muted">Branch on retry<select id="branch-action"><option value="keep">Keep branch</option><option value="delete">Delete branch</option></select></label>
+        <div class="actions">
+          <button class="repository-action" data-issue-action="start-issue">Start</button>
+          <button class="repository-action secondary" data-issue-action="skip-issue">Skip</button>
+          <button class="repository-action secondary" data-issue-action="unskip-issue">Unskip</button>
+          <button class="repository-action warning" data-issue-action="restart-issue">Restart</button>
+          <button class="repository-action danger" data-issue-action="abandon-issue">Abandon</button>
+        </div>
+      </div>
+    </section>
+    <section class="card wide">
+      <h2>Latest action result</h2>
       <pre id="dispatch-result">No repository selected.</pre>
       <div class="actions"><button class="danger" id="remove-button" disabled>Remove from manager</button></div>
     </section>
@@ -59,13 +98,14 @@ const banner = document.getElementById('mode-banner');
 const removeButton = document.getElementById('remove-button');
 const nativeFetch = window.fetch.bind(window);
 let repositories = [];
+let currentStatus = null;
 
 function facts(target, entries) {
   const element = document.getElementById(target);
   element.textContent = '';
-  for (const [label, value] of entries) {
-    const dt = document.createElement('dt'); dt.textContent = label;
-    const dd = document.createElement('dd'); dd.textContent = value == null || value === '' ? 'Not configured' : String(value);
+  for (const entry of entries) {
+    const dt = document.createElement('dt'); dt.textContent = entry[0];
+    const dd = document.createElement('dd'); dd.textContent = entry[1] == null || entry[1] === '' ? 'Not configured' : String(entry[1]);
     element.append(dt, dd);
   }
 }
@@ -75,6 +115,11 @@ function showError(error) {
   banner.textContent = error instanceof Error ? error.message : String(error);
 }
 
+function selectedPath(action) {
+  if (!select.value) throw new Error('Select a repository first.');
+  return '/api/repositories/' + encodeURIComponent(select.value) + '/' + action;
+}
+
 async function jsonRequest(url, options) {
   const response = await nativeFetch(url, options);
   const body = await response.json().catch(() => ({}));
@@ -82,35 +127,12 @@ async function jsonRequest(url, options) {
   return body;
 }
 
-async function loadRepositories(preferredId) {
-  const body = await jsonRequest('/api/repositories');
-  repositories = body.repositories || [];
-  const prior = preferredId || select.value || localStorage.getItem('paseo-manager-repository');
-  select.textContent = '';
-  if (!repositories.length) {
-    const option = document.createElement('option'); option.value = ''; option.textContent = 'No repositories registered'; select.append(option);
-    removeButton.disabled = true;
-    return;
-  }
-  for (const repository of repositories) {
-    const option = document.createElement('option');
-    option.value = repository.id;
-    option.textContent = repository.repository || repository.name;
-    select.append(option);
-  }
-  select.value = repositories.some((item) => item.id === prior) ? prior : repositories[0].id;
-  await loadStatus();
+function setActionsEnabled(enabled) {
+  for (const button of document.querySelectorAll('.repository-action')) button.disabled = !enabled;
 }
 
-async function loadStatus() {
-  const id = select.value;
-  if (!id) return;
-  localStorage.setItem('paseo-manager-repository', id);
-  removeButton.disabled = false;
-  banner.className = 'banner';
-  banner.textContent = 'Viewing isolated repository state. Repository automation controls are intentionally read-only in this stage.';
-  const body = await jsonRequest('/api/repositories/' + encodeURIComponent(id) + '/status');
-  const data = body.status;
+function renderStatus(data) {
+  currentStatus = data;
   const repository = data.repository;
   facts('repository-facts', [
     ['Name', repository.repository || repository.name],
@@ -125,6 +147,7 @@ async function loadStatus() {
     ['Workspace', data.setup.workspaceId],
     ['Managed labels', data.setup.managedLabelCount],
     ['Issue template', data.setup.issueTemplateManaged ? 'Managed' : 'Not managed'],
+    ['Install controls', data.capabilities.installationActions ? 'Enabled' : 'Not available yet'],
   ]);
   facts('automation-facts', [
     ['Claims', data.automation.claimsEnabled ? 'Enabled' : 'Paused'],
@@ -132,22 +155,105 @@ async function loadStatus() {
     ['Recorded runs', data.automation.runCount],
     ['Maximum active', data.automation.maxActive],
     ['Poll interval', data.automation.pollIntervalSeconds + ' seconds'],
+    ['Background worker', data.capabilities.backgroundWorkers ? 'Running' : 'Not managed yet'],
     ['Coder', data.models.coder],
     ['Reviewer', data.models.reviewer],
   ]);
+  document.getElementById('base-branch').value = data.setup.baseBranch || '';
+  document.getElementById('poll-interval').value = data.automation.pollIntervalSeconds || 120;
+  document.getElementById('max-active').value = data.automation.maxActive || 1;
+  document.getElementById('max-review-rounds').value = data.automation.maxReviewRounds || 4;
+  document.getElementById('coder-model').value = data.models.coder || '';
+  document.getElementById('reviewer-model').value = data.models.reviewer || '';
   document.getElementById('dispatch-result').textContent = data.automation.lastDispatchResult
     ? JSON.stringify(data.automation.lastDispatchResult, null, 2)
     : 'No dispatch has been recorded.';
+  setActionsEnabled(true);
+}
+
+async function loadRepositories(preferredId) {
+  const body = await jsonRequest('/api/repositories');
+  repositories = body.repositories || [];
+  const prior = preferredId || select.value || localStorage.getItem('paseo-manager-repository');
+  select.textContent = '';
+  if (!repositories.length) {
+    const option = document.createElement('option'); option.value = ''; option.textContent = 'No repositories registered'; select.append(option);
+    removeButton.disabled = true;
+    setActionsEnabled(false);
+    return;
+  }
+  for (const repository of repositories) {
+    const option = document.createElement('option');
+    option.value = repository.id;
+    option.textContent = repository.repository || repository.name;
+    select.append(option);
+  }
+  select.value = repositories.some((item) => item.id === prior) ? prior : repositories[0].id;
+  await loadStatus();
+}
+
+async function loadStatus() {
+  if (!select.value) return;
+  localStorage.setItem('paseo-manager-repository', select.value);
+  removeButton.disabled = false;
+  banner.className = 'banner';
+  banner.textContent = 'All controls on this page are scoped to the selected repository. Background workers and installation actions remain separate follow-up stages.';
+  const body = await jsonRequest(selectedPath('status'));
+  renderStatus(body.status);
+}
+
+async function postRepositoryAction(action, payload) {
+  const body = await jsonRequest(selectedPath(action), {
+    method: 'POST',
+    headers: {'content-type':'application/json'},
+    body: JSON.stringify(payload || {}),
+  });
+  if (body.status) renderStatus(body.status);
+  document.getElementById('dispatch-result').textContent = JSON.stringify(body.result, null, 2);
+  return body;
 }
 
 select.addEventListener('change', () => loadStatus().catch(showError));
 document.getElementById('refresh-button').addEventListener('click', () => loadRepositories(select.value).catch(showError));
+for (const button of document.querySelectorAll('[data-action]')) {
+  button.addEventListener('click', () => postRepositoryAction(button.dataset.action).catch(showError));
+}
+for (const button of document.querySelectorAll('[data-issue-action]')) {
+  button.addEventListener('click', async () => {
+    const issueNumber = Number(document.getElementById('issue-number').value);
+    if (!Number.isInteger(issueNumber) || issueNumber <= 0) { showError(new Error('Enter a positive issue number.')); return; }
+    const payload = { issueNumber, branchAction: document.getElementById('branch-action').value };
+    if (button.dataset.issueAction === 'abandon-issue') {
+      const reason = prompt('Why should this attempt be abandoned?', 'Abandoned by user');
+      if (reason === null) return;
+      payload.reason = reason;
+    }
+    if (button.dataset.issueAction === 'restart-issue' && !confirm('Restart issue #' + issueNumber + ' with a fresh attempt?')) return;
+    try { await postRepositoryAction(button.dataset.issueAction, payload); }
+    catch (error) { showError(error); }
+  });
+}
+document.getElementById('config-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await postRepositoryAction('config', {
+      baseBranch: document.getElementById('base-branch').value.trim(),
+      pollIntervalSeconds: Number(document.getElementById('poll-interval').value),
+      maxActive: Number(document.getElementById('max-active').value),
+      maxReviewRounds: Number(document.getElementById('max-review-rounds').value),
+      models: {
+        coder: document.getElementById('coder-model').value.trim(),
+        reviewer: document.getElementById('reviewer-model').value.trim(),
+      },
+    });
+  } catch (error) { showError(error); }
+});
 document.getElementById('register-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const path = document.getElementById('repository-path').value.trim();
+  const repositoryPath = document.getElementById('repository-path').value.trim();
   try {
     const body = await jsonRequest('/api/repositories', {
-      method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({path}),
+      method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({path: repositoryPath}),
     });
     document.getElementById('repository-path').value = '';
     await loadRepositories(body.repository.id);
@@ -159,9 +265,11 @@ removeButton.addEventListener('click', async () => {
   try {
     await jsonRequest('/api/repositories/' + encodeURIComponent(repository.id), {method:'DELETE'});
     localStorage.removeItem('paseo-manager-repository');
+    currentStatus = null;
     await loadRepositories();
   } catch (error) { showError(error); }
 });
+setActionsEnabled(false);
 loadRepositories().catch(showError);
 </script>
 </body>
