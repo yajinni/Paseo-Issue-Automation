@@ -1,0 +1,206 @@
+name: Bound launch reconciliation retries
+
+on:
+  push:
+    branches:
+      - ai/reuse-workspace-on-agent-start-failure
+    paths:
+      - .github/workflows/bound-launch-reconciliation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ai/reuse-workspace-on-agent-start-failure
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Bound reconciliation and validate
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          helper_file = Path('src/launch-retry.mjs')
+          helper = helper_file.read_text(encoding='utf-8')
+          old = "export const AGENT_START_MAX_ATTEMPTS = 3;\n"
+          new = """export const AGENT_START_MAX_ATTEMPTS = 3;
+          export const LAUNCH_RECONCILIATION_MAX_ATTEMPTS = 3;
+
+          export function nextReconciliationAttempt(current = 0) {
+            const previous = Number(current);
+            const normalized = Number.isInteger(previous) && previous >= 0 ? previous : 0;
+            const attempt = normalized + 1;
+            return {
+              attempt,
+              maximum: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+              exhausted: attempt >= LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+            };
+          }
+          """
+          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
+          if old not in helper:
+            raise SystemExit('launch retry constant anchor not found')
+          helper_file.write_text(helper.replace(old, new, 1), encoding='utf-8')
+
+          attempts_file = Path('src/attempts.mjs')
+          attempts = attempts_file.read_text(encoding='utf-8')
+          attempts = attempts.replace(
+            "  AGENT_START_MAX_ATTEMPTS,\n  agentRunArgs,",
+            "  AGENT_START_MAX_ATTEMPTS,\n  LAUNCH_RECONCILIATION_MAX_ATTEMPTS,\n  agentRunArgs,",
+            1,
+          )
+          attempts = attempts.replace(
+            "  launchErrorDetail,\n  verifyWorkspaceIdentity,",
+            "  launchErrorDetail,\n  nextReconciliationAttempt,\n  verifyWorkspaceIdentity,",
+            1,
+          )
+
+          old_pending = r'''function pendingLaunch(root, issue, attempts, reason, phase = 'launch-retrying') {
+            const current = loadRun(root, issue.number) || {};
+            const message = phase === 'launch-reconciliation-needed'
+              ? `${reason} The controller could not verify whether Paseo created an agent, so it will not create another one until reconciliation succeeds.`
+              : `${reason} Agent start attempt ${attempts}/${AGENT_START_MAX_ATTEMPTS} failed; the next polling cycle will retry in workspace ${current.workspaceId}.`;
+            saveActivity(root, issue.number, {
+              status: LABELS.running,
+              phase,
+              reason: message,
+              agentStartAttempts: attempts,
+              maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+            }, phase === 'launch-reconciliation-needed' ? 'agent-start-reconciliation-needed' : 'agent-start-retry-scheduled', message);
+            return {
+              claimed: true,
+              pending: true,
+              issueNumber: issue.number,
+              branch: current.branch,
+              attempt: current.attempt,
+              workspaceId: current.workspaceId,
+              reason: message,
+            };
+          }
+          '''
+          old_pending = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_pending.splitlines())
+          new_pending = r'''function pendingLaunch(root, issue, attempts, reason) {
+            const current = loadRun(root, issue.number) || {};
+            const message = `${reason} Agent start attempt ${attempts}/${AGENT_START_MAX_ATTEMPTS} failed; the next polling cycle will retry in workspace ${current.workspaceId}.`;
+            saveActivity(root, issue.number, {
+              status: LABELS.running,
+              phase: 'launch-retrying',
+              reason: message,
+              agentStartAttempts: attempts,
+              maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+              launchReconciliationAttempts: 0,
+              maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+            }, 'agent-start-retry-scheduled', message);
+            return {
+              claimed: true,
+              pending: true,
+              issueNumber: issue.number,
+              branch: current.branch,
+              attempt: current.attempt,
+              workspaceId: current.workspaceId,
+              reason: message,
+            };
+          }
+
+          function pendingReconciliation(root, issue, reason) {
+            const current = loadRun(root, issue.number) || {};
+            const retry = nextReconciliationAttempt(current.launchReconciliationAttempts);
+            const summary = `${reason} Workspace reconciliation attempt ${retry.attempt}/${retry.maximum} failed.`;
+            if (retry.exhausted) {
+              return terminalLaunchFailure(root, issue,
+                `${summary} The controller stopped retrying; cleanup will archive the workspace only if Paseo can prove it is empty.`);
+            }
+            const message = `${summary} The controller will not create another agent until reconciliation succeeds.`;
+            saveActivity(root, issue.number, {
+              status: LABELS.running,
+              phase: 'launch-reconciliation-needed',
+              reason: message,
+              launchReconciliationAttempts: retry.attempt,
+              maxLaunchReconciliationAttempts: retry.maximum,
+            }, 'agent-start-reconciliation-needed', message);
+            return {
+              claimed: true,
+              pending: true,
+              issueNumber: issue.number,
+              branch: current.branch,
+              attempt: current.attempt,
+              workspaceId: current.workspaceId,
+              reason: message,
+            };
+          }
+          '''
+          new_pending = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_pending.splitlines())
+          if old_pending not in attempts:
+            raise SystemExit('pending launch block not found')
+          attempts = attempts.replace(old_pending, new_pending, 1)
+
+          attempts = attempts.replace(
+            "    return pendingLaunch(root, issue, attemptCount,\n      `${reason} Paseo agent inventory failed: ${inspection.reason}`, 'launch-reconciliation-needed');",
+            "    return pendingReconciliation(root, issue,\n      `${reason} Paseo agent inventory failed: ${inspection.reason}`);",
+            1,
+          )
+          attempts = attempts.replace(
+            "    return pendingLaunch(root, issue, Number(current.agentStartAttempts || 0),\n      `Paseo agent inventory failed: ${inspection.reason}`, 'launch-reconciliation-needed');",
+            "    return pendingReconciliation(root, issue,\n      `Paseo agent inventory failed: ${inspection.reason}`);",
+            1,
+          )
+
+          attempts = attempts.replace(
+            "    completedAt: null,\n    heartbeatAt: now(),",
+            "    completedAt: null,\n    heartbeatAt: now(),\n    launchReconciliationAttempts: 0,\n    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,",
+            1,
+          )
+          attempts = attempts.replace(
+            "    maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,\n  }, 'agent-start-attempt',",
+            "    maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,\n    launchReconciliationAttempts: 0,\n    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,\n  }, 'agent-start-attempt',",
+            1,
+          )
+          attempts = attempts.replace(
+            "    maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,\n    activity: [{ type: 'attempt-launching',",
+            "    maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,\n    launchReconciliationAttempts: 0,\n    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,\n    activity: [{ type: 'attempt-launching',",
+            1,
+          )
+          attempts_file.write_text(attempts, encoding='utf-8')
+
+          test_file = Path('test/launch-retry.test.mjs')
+          tests = test_file.read_text(encoding='utf-8')
+          tests = tests.replace(
+            "  cleanupWorkspaceIfEmpty,\n  expectedWorkspaceAgent,",
+            "  cleanupWorkspaceIfEmpty,\n  expectedWorkspaceAgent,",
+            1,
+          )
+          tests = tests.replace(
+            "  inspectWorkspaceAgents,\n  verifyWorkspaceIdentity,",
+            "  inspectWorkspaceAgents,\n  nextReconciliationAttempt,\n  verifyWorkspaceIdentity,",
+            1,
+          )
+          tests += r'''
+
+          test('workspace reconciliation stops after three failed checks', () => {
+            assert.deepEqual(nextReconciliationAttempt(0), { attempt: 1, maximum: 3, exhausted: false });
+            assert.deepEqual(nextReconciliationAttempt(1), { attempt: 2, maximum: 3, exhausted: false });
+            assert.deepEqual(nextReconciliationAttempt(2), { attempt: 3, maximum: 3, exhausted: true });
+          });
+          '''
+          test_file.write_text(tests, encoding='utf-8')
+          PY
+
+          npm install
+          npm test
+          npm run check
+          npm run pack:check
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src test
+          git rm .github/workflows/bound-launch-reconciliation.yml
+          git commit -m "Bound launch reconciliation retries"
+          git push origin HEAD:ai/reuse-workspace-on-agent-start-failure
