@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { dispatchNextIssue } from './attempts.mjs';
+import { dispatchNextIssue, resumePendingAgentLaunches } from './attempts.mjs';
 import { activeCodingCount, dispatchNextFixJob } from './fix-jobs.mjs';
 import { acquireLease, releaseLease, renewLease } from './durable-lease.mjs';
 import { loadConfig, statePaths } from './state.mjs';
@@ -26,6 +26,7 @@ export function dispatchAvailableIssues(root, {
   dispatchIssue = dispatchNextIssue,
   dispatchFix = dispatchNextFixJob,
   activeCount = activeCodingCount,
+  resumeLaunches = resumePendingAgentLaunches,
 } = {}) {
   const maximum = Math.max(1, Number(configLoader(root).maxActive) || 1);
   const lockFile = path.join(statePaths(root).root, 'coding-scheduler.lock');
@@ -41,8 +42,22 @@ export function dispatchAvailableIssues(root, {
     metadata,
   });
   try {
-    const attempts = [];
-    const results = [];
+    const resumed = resumeLaunches(root);
+    const attempts = normalizedAttempt(resumed, 'launch-retry');
+    const results = resumed?.results?.length || resumed?.attempts?.length
+      ? [{ type: 'launch-retry', ...resumed }]
+      : [];
+    if (resumed?.haltDispatch) {
+      return {
+        claimed: attempts.length > 0,
+        issueNumber: attempts[0]?.issueNumber,
+        branch: attempts[0]?.branch,
+        attempts,
+        dispatches: results,
+        haltDispatch: true,
+        reason: resumed.reason || 'An existing workspace launch requires attention.',
+      };
+    }
     while (true) {
       renew({ phase: 'counting-capacity', claimed: attempts.length });
       if (activeCount(root) >= maximum) break;

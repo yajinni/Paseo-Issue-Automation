@@ -232,6 +232,8 @@ export function run(command, args = [], options = {}) {
     error.timedOut = timedOut;
     error.timeoutMs = timeoutMs;
     error.resolvedCommand = output.resolvedCommand;
+    error.stdout = output.stdout;
+    error.stderr = output.stderr;
     throw error;
   }
 

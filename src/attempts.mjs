@@ -12,6 +12,19 @@ import {
 import { validateIssueBody, slugify } from './automation.mjs';
 import { LABELS, listRuns, loadConfig, loadRun, loadRuntime, saveRun, saveRuntime } from './state.mjs';
 import { findFirstKey, run, runJson } from './process.mjs';
+import {
+  AGENT_START_MAX_ATTEMPTS,
+  LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+  agentRunArgs,
+  cleanupWorkspaceIfEmpty,
+  expectedWorkspaceAgent,
+  inspectWorkspaceAgents,
+  launchErrorDetail,
+  nextReconciliationAttempt,
+  verifyWorkspaceIdentity,
+  workspaceCreateArgs,
+  workspaceFromPayload,
+} from './launch-retry.mjs';
 
 const now = () => new Date().toISOString();
 const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'controller-worker.mjs');
@@ -191,23 +204,228 @@ function startControllerWorker(root, issueNumber) {
   return child.pid;
 }
 
-function rollbackLaunch(root, issue, ids, reason) {
-  if (ids?.coderAgentId) run('paseo', ['stop', String(ids.coderAgentId)], { cwd: root, allowFailure: true });
-  if (ids?.workspaceId) run('paseo', ['workspace', 'archive', String(ids.workspaceId)], { cwd: root, allowFailure: true });
-  try { editLabels(root, issue.number, [LABELS.failed], [LABELS.running]); } catch {}
+function previousAttemptHistory(previous) {
+  return previous ? [...(previous.history || []), {
+    attempt: previous.attempt || 1,
+    branch: previous.branch || null,
+    status: previous.status || null,
+    startedAt: previous.startedAt || null,
+    completedAt: previous.completedAt || null,
+    workspaceId: previous.workspaceId || null,
+    activity: previous.activity || [],
+    events: previous.events || [],
+  }] : [];
+}
+
+function saveActivity(root, issueNumber, patch, type, details) {
+  const current = loadRun(root, issueNumber) || {};
   const at = now();
+  return saveRun(root, issueNumber, {
+    ...current,
+    ...patch,
+    updatedAt: at,
+    activity: [...(current.activity || []), { type, at, details }],
+  });
+}
+
+function terminalLaunchFailure(root, issue, reason) {
+  const current = loadRun(root, issue.number) || {};
+  if (current.coderAgentId || current.agentId) {
+    run('paseo', ['stop', String(current.coderAgentId || current.agentId)], { cwd: root, allowFailure: true });
+  }
+  const cleanup = cleanupWorkspaceIfEmpty(root, current);
+  try {
+    editLabels(root, issue.number, [LABELS.failed], [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.humanReview]);
+  } catch {}
+  const at = now();
+  const cleanupDetail = cleanup.status === 'archived-empty'
+    ? ' The confirmed empty workspace was archived.'
+    : cleanup.status === 'not-applicable'
+      ? ''
+      : ` Workspace cleanup: ${cleanup.status}${cleanup.reason ? ` (${cleanup.reason})` : ''}.`;
+  const message = `${String(reason)}${cleanupDetail}`;
   saveRun(root, issue.number, {
-    ...(loadRun(root, issue.number) || {}),
+    ...current,
     issueNumber: issue.number,
     issueTitle: issue.title,
     issueUrl: issue.url,
     status: LABELS.failed,
     phase: 'launch-failed',
-    reason: String(reason),
+    reason: message,
+    workspaceCleanup: cleanup,
     completedAt: at,
     updatedAt: at,
-    activity: [...(loadRun(root, issue.number)?.activity || []), { type: 'launch-failed', at, details: String(reason) }],
+    activity: [...(current.activity || []), { type: 'launch-failed', at, details: message }],
   });
+  return {
+    claimed: false,
+    failed: true,
+    haltDispatch: true,
+    issueNumber: issue.number,
+    branch: current.branch || null,
+    attempt: current.attempt || null,
+    reason: message,
+  };
+}
+
+function finalizeAgentLaunch(root, issue, agent, { recovered = false } = {}) {
+  const current = loadRun(root, issue.number) || {};
+  const coderAgentId = findFirstKey(agent, ['agentId', 'agent_id', 'id']);
+  if (!coderAgentId) return terminalLaunchFailure(root, issue, `Paseo did not return an agent ID for issue #${issue.number}.`);
+  const started = current.startedAt || now();
+  const state = saveActivity(root, issue.number, {
+    status: LABELS.running,
+    phase: 'coding',
+    coderAgentId,
+    agentId: coderAgentId,
+    reason: null,
+    completedAt: null,
+    heartbeatAt: now(),
+    launchReconciliationAttempts: 0,
+    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+  }, recovered ? 'agent-start-reconciled' : 'agent-started', recovered
+    ? `Recovered agent ${coderAgentId} after the create command reported failure.`
+    : `Agent ${coderAgentId} started in workspace ${current.workspaceId}.`);
+  const controllerPid = startControllerWorker(root, issue.number);
+  saveActivity(root, issue.number, { ...state, controllerPid, startedAt: started }, 'controller-started',
+    `Issue Execution Controller PID ${controllerPid}.`);
+  unskipIssue(root, issue.number);
+  return {
+    claimed: true,
+    issueNumber: issue.number,
+    branch: current.branch,
+    attempt: current.attempt,
+    controllerPid,
+    workspaceId: current.workspaceId,
+  };
+}
+
+function pendingLaunch(root, issue, attempts, reason) {
+  const current = loadRun(root, issue.number) || {};
+  const message = `${reason} Agent start attempt ${attempts}/${AGENT_START_MAX_ATTEMPTS} failed; the next polling cycle will retry in workspace ${current.workspaceId}.`;
+  saveActivity(root, issue.number, {
+    status: LABELS.running,
+    phase: 'launch-retrying',
+    reason: message,
+    agentStartAttempts: attempts,
+    maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+    launchReconciliationAttempts: 0,
+    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+  }, 'agent-start-retry-scheduled', message);
+  return {
+    claimed: true,
+    pending: true,
+    issueNumber: issue.number,
+    branch: current.branch,
+    attempt: current.attempt,
+    workspaceId: current.workspaceId,
+    reason: message,
+  };
+}
+
+function pendingReconciliation(root, issue, reason) {
+  const current = loadRun(root, issue.number) || {};
+  const retry = nextReconciliationAttempt(current.launchReconciliationAttempts);
+  const summary = `${reason} Workspace reconciliation attempt ${retry.attempt}/${retry.maximum} failed.`;
+  if (retry.exhausted) {
+    return terminalLaunchFailure(root, issue,
+      `${summary} The controller stopped retrying; cleanup will archive the workspace only if Paseo can prove it is empty.`);
+  }
+  const message = `${summary} The controller will not create another agent until reconciliation succeeds.`;
+  saveActivity(root, issue.number, {
+    status: LABELS.running,
+    phase: 'launch-reconciliation-needed',
+    reason: message,
+    launchReconciliationAttempts: retry.attempt,
+    maxLaunchReconciliationAttempts: retry.maximum,
+  }, 'agent-start-reconciliation-needed', message);
+  return {
+    claimed: true,
+    pending: true,
+    issueNumber: issue.number,
+    branch: current.branch,
+    attempt: current.attempt,
+    workspaceId: current.workspaceId,
+    reason: message,
+  };
+}
+
+function reconcileFailedAgentStart(root, issue, title, attemptCount, reason) {
+  const current = loadRun(root, issue.number) || {};
+  const inspection = inspectWorkspaceAgents(root, current.worktreePath);
+  if (!inspection.verified) {
+    return pendingReconciliation(root, issue,
+      `${reason} Paseo agent inventory failed: ${inspection.reason}`);
+  }
+  const reconciliation = expectedWorkspaceAgent(inspection, title);
+  if (reconciliation.status === 'found') {
+    return finalizeAgentLaunch(root, issue, reconciliation.agent, { recovered: true });
+  }
+  if (reconciliation.status === 'ambiguous') {
+    return terminalLaunchFailure(root, issue,
+      `${reason} Multiple matching agents exist in the workspace; operator action is required.`);
+  }
+  if (reconciliation.status === 'nonempty') {
+    return terminalLaunchFailure(root, issue,
+      `${reason} The workspace contains an unexpected agent; it was preserved for operator inspection.`);
+  }
+  if (attemptCount >= AGENT_START_MAX_ATTEMPTS) {
+    return terminalLaunchFailure(root, issue,
+      `${reason} Agent creation failed ${attemptCount} times in the same workspace.`);
+  }
+  return pendingLaunch(root, issue, attemptCount, reason);
+}
+
+function startRecordedAgent(root, issue, repository) {
+  const config = loadConfig(root);
+  const current = loadRun(root, issue.number) || {};
+  if (!current.workspaceId || !current.worktreePath) {
+    return terminalLaunchFailure(root, issue, 'The recorded launch has no usable Paseo workspace.');
+  }
+  const title = current.agentTitle || `Issue #${issue.number} Coder (attempt ${current.attempt || 1})`;
+  const attemptCount = Number(current.agentStartAttempts || 0) + 1;
+  saveActivity(root, issue.number, {
+    phase: 'starting-agent',
+    reason: null,
+    agentStartAttempts: attemptCount,
+    maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+    launchReconciliationAttempts: 0,
+    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+  }, 'agent-start-attempt', `Starting agent attempt ${attemptCount}/${AGENT_START_MAX_ATTEMPTS} in workspace ${current.workspaceId}.`);
+  try {
+    const payload = runJson('paseo', agentRunArgs({
+      provider: config.models.coder,
+      title,
+      workspaceId: current.workspaceId,
+      prompt: buildAttemptPrompt(repository, issue, current.branch, config),
+    }), { cwd: root });
+    return finalizeAgentLaunch(root, issue, payload);
+  } catch (error) {
+    return reconcileFailedAgentStart(root, issue, title, attemptCount, launchErrorDetail(error));
+  }
+}
+
+function reconcileBeforeRetry(root, issue, repository) {
+  const current = loadRun(root, issue.number) || {};
+  const inspection = inspectWorkspaceAgents(root, current.worktreePath);
+  if (!inspection.verified) {
+    return pendingReconciliation(root, issue,
+      `Paseo agent inventory failed: ${inspection.reason}`);
+  }
+  const title = current.agentTitle || `Issue #${issue.number} Coder (attempt ${current.attempt || 1})`;
+  const reconciliation = expectedWorkspaceAgent(inspection, title);
+  if (reconciliation.status === 'found') return finalizeAgentLaunch(root, issue, reconciliation.agent, { recovered: true });
+  if (reconciliation.status === 'ambiguous') {
+    return terminalLaunchFailure(root, issue, 'Multiple matching agents exist in the recorded workspace; operator action is required.');
+  }
+  if (reconciliation.status === 'nonempty') {
+    return terminalLaunchFailure(root, issue, 'The recorded workspace contains an unexpected agent and was preserved for operator inspection.');
+  }
+  if (Number(current.agentStartAttempts || 0) >= AGENT_START_MAX_ATTEMPTS) {
+    return terminalLaunchFailure(root, issue,
+      `Agent creation failed ${current.agentStartAttempts} times in the same workspace.`);
+  }
+  return startRecordedAgent(root, issue, repository);
 }
 
 function launch(root, issue, branchAction) {
@@ -230,70 +448,108 @@ function launch(root, issue, branchAction) {
   const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
   if (!repository) throw new Error('Could not determine the GitHub repository.');
 
-  let ids = null;
+  const started = now();
+  const agentTitle = `Issue #${issue.number} Coder (attempt ${selection.attempt})`;
+  const workspaceTitle = selection.branch;
+  editLabels(root, issue.number, [LABELS.running], [LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
+  saveRun(root, issue.number, {
+    issueNumber: issue.number,
+    issueTitle: issue.title,
+    issueUrl: issue.url,
+    branch: selection.branch,
+    attempt: selection.attempt,
+    status: LABELS.running,
+    phase: 'creating-workspace',
+    workspaceTitle,
+    agentTitle,
+    dependencies: dependency.dependencies,
+    dependencySource: dependency.source,
+    startedAt: started,
+    heartbeatAt: started,
+    updatedAt: started,
+    completedAt: null,
+    prNumber: null,
+    events: [],
+    agentStartAttempts: 0,
+    maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
+    launchReconciliationAttempts: 0,
+    maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
+    activity: [{ type: 'attempt-launching', at: started, details: `Attempt ${selection.attempt} reserved on ${selection.branch}.` }],
+    history: previousAttemptHistory(previous),
+  });
+  unskipIssue(root, issue.number);
+
   try {
-    const payload = runJson('paseo', [
-      'run', '--background', '--json', '--provider', config.models.coder,
-      '--title', `Issue #${issue.number} Coder (attempt ${selection.attempt})`,
-      '--new-workspace', 'worktree', '--worktree-mode', 'branch-off',
-      '--new-branch', selection.branch, '--base', config.baseBranch,
-      buildAttemptPrompt(repository, issue, selection.branch, config),
-    ], { cwd: root });
-    ids = {
-      coderAgentId: findFirstKey(payload, ['agentId', 'agent_id', 'id']),
-      workspaceId: findFirstKey(payload, ['workspaceId', 'workspace_id']),
-      worktreePath: findFirstKey(payload, ['worktreePath', 'worktree_path', 'cwd', 'path']),
-    };
-    if (!ids.coderAgentId) throw new Error(`Paseo did not return an agent ID for issue #${issue.number}.`);
-
-    editLabels(root, issue.number, [LABELS.running], [LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
-
-    const history = previous ? [...(previous.history || []), {
-      attempt: previous.attempt || 1,
-      branch: previous.branch || null,
-      status: previous.status || null,
-      startedAt: previous.startedAt || null,
-      completedAt: previous.completedAt || null,
-      workspaceId: previous.workspaceId || null,
-      activity: previous.activity || [],
-      events: previous.events || [],
-    }] : [];
-    const started = now();
-    const state = saveRun(root, issue.number, {
-      issueNumber: issue.number,
-      issueTitle: issue.title,
-      issueUrl: issue.url,
+    const payload = runJson('paseo', workspaceCreateArgs({
+      root,
+      title: workspaceTitle,
       branch: selection.branch,
-      attempt: selection.attempt,
-      status: LABELS.running,
-      phase: 'coding',
-      ...ids,
-      agentId: ids.coderAgentId,
-      dependencies: dependency.dependencies,
-      dependencySource: dependency.source,
-      startedAt: started,
-      heartbeatAt: started,
-      updatedAt: started,
-      completedAt: null,
-      prNumber: null,
-      events: [],
-      activity: [{ type: 'attempt-started', at: started, details: `Attempt ${selection.attempt} started on ${selection.branch}.` }],
-      history,
+      baseBranch: config.baseBranch,
+    }), { cwd: root });
+    const workspace = workspaceFromPayload(payload);
+    saveActivity(root, issue.number, {
+      workspaceId: workspace.workspaceId || null,
+      worktreePath: workspace.worktreePath || null,
+      workspaceName: workspace.workspaceName || null,
+      phase: 'verifying-workspace',
+    }, 'workspace-created', `Workspace ${workspace.workspaceId || '(unknown)'} created once for attempt ${selection.attempt}.`);
+    verifyWorkspaceIdentity(root, workspace, {
+      title: workspaceTitle,
+      branch: selection.branch,
     });
-    const controllerPid = startControllerWorker(root, issue.number);
-    saveRun(root, issue.number, {
-      ...state,
-      controllerPid,
-      activity: [...state.activity, { type: 'controller-started', at: now(), details: `Issue Execution Controller PID ${controllerPid}.` }],
-    });
-    unskipIssue(root, issue.number);
-    return { claimed: true, issueNumber: issue.number, branch: selection.branch, attempt: selection.attempt, controllerPid };
+    saveActivity(root, issue.number, { phase: 'starting-agent' }, 'workspace-verified',
+      `Workspace ${workspace.workspaceId} matches ${selection.branch}.`);
+    return startRecordedAgent(root, issue, repository);
   } catch (error) {
-    rollbackLaunch(root, issue, ids, error.message);
-    throw error;
+    return terminalLaunchFailure(root, issue, launchErrorDetail(error));
   }
 }
 
+export function resumePendingAgentLaunches(root) {
+  if (!loadRuntime(root).claimsEnabled) {
+    return { claimed: false, attempts: [], results: [], haltDispatch: false, reason: 'Claims are paused.' };
+  }
+  const pending = listRuns(root).filter((state) =>
+    state?.status === LABELS.running
+    && ['launch-retrying', 'launch-reconciliation-needed'].includes(state.phase)
+    && state.workspaceId
+    && !state.agentId
+    && !state.coderAgentId);
+  if (!pending.length) return { claimed: false, attempts: [], results: [], haltDispatch: false };
+  const results = [];
+  const attempts = [];
+  for (const state of pending) {
+    let result;
+    try {
+      const issue = viewIssue(root, state.issueNumber);
+      const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
+      if (!repository) throw new Error('Could not determine the GitHub repository.');
+      result = state.phase === 'launch-reconciliation-needed'
+        ? reconcileBeforeRetry(root, issue, repository)
+        : startRecordedAgent(root, issue, repository);
+    } catch (error) {
+      const issue = { number: state.issueNumber, title: state.issueTitle, url: state.issueUrl };
+      result = terminalLaunchFailure(root, issue, launchErrorDetail(error));
+    }
+    results.push(result);
+    if (result?.claimed) attempts.push({
+      claimed: true,
+      type: 'launch-retry',
+      issueNumber: result.issueNumber,
+      branch: result.branch,
+      attempt: result.attempt,
+      controllerPid: result.controllerPid,
+      pending: result.pending === true,
+    });
+  }
+  return {
+    claimed: attempts.length > 0,
+    attempts,
+    results,
+    haltDispatch: results.some((result) => result?.failed || result?.pending),
+    reason: results.map((result) => result?.reason).filter(Boolean).join(' '),
+  };
+}
 export function dispatchSpecificIssue(root, number, { branchAction = 'keep' } = {}) {
   reconcileDependencies(root);
   return launch(root, viewIssue(root, number), branchAction);
