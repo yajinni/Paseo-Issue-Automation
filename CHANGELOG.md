@@ -11,7 +11,7 @@
 - Deduplicate review submissions by repository, PR number, head SHA, and prompt version; debounce rapid pushes and supersede stale jobs.
 - Add managed-PR-only GitHub reconciliation and restart recovery for offline comments, new SHAs, merges, closures, interrupted submissions, and interrupted fixes.
 - Add versioned structured GitHub review-result markers and review-state labels.
-- Add an optional Playwright subsystem with explicit Chromium installation, a dedicated machine-local ChatGPT profile, owner-only storage, profile locking, diagnostics, and browser setup/doctor/test/reset/uninstall commands.
+- Add an explicit Playwright subsystem with Chromium installation controls, a dedicated machine-local ChatGPT profile, owner-only storage, profile locking, diagnostics, and browser setup/doctor/test/reset/uninstall commands.
 - Add a machine-global serial-review lease so projects sharing one browser profile cannot submit simultaneously.
 - Add explicit merge and issue-closure permissions, exact-head requirements, and closed-without-merge operator handling.
 - Add a dedicated PR review dashboard for queue state, managed PRs, browser health, conversation configuration, merge settings, recovery actions, and audit history.
@@ -21,13 +21,20 @@
 - Replace the injected setup dashboard extensions with a unified responsive control center for overview, issue execution, dependency waves, activity, settings, and maintenance.
 - Preserve guided setup, reversible installation, manual issue controls, fresh-attempt restarts, activity history, and package release checks.
 - Create one worktree workspace per issue attempt, retry failed agent creation in that recorded workspace, stop after three failed agent starts or three failed reconciliation checks, surface the exact failure, and archive only workspaces proven to contain no agents.
-- Add a versioned machine-local repository registry with standalone add, list, show, and remove commands as the first step toward one manager controlling multiple isolated repositories.
+- Add a versioned machine-local repository registry with standalone add, list, show, and remove commands.
 - Add explicit `--repo` selection for existing commands while preserving current-directory fallback for legacy workflows.
-- Add tested repository-registry HTTP request handling and repository-scoped API path resolution before server integration.
-- Add a standalone read-only repository manager server with repository registration, selection, isolated status inspection, and no dependency on the current working directory.
-- Add allowlisted repository-scoped manager controls for claims, configuration, manual dispatch, dependency reconciliation, and manual issue actions while background workers and installation remain separate.
+- Add tested repository-registry HTTP request handling and repository-scoped API path resolution.
+- Add a standalone repository manager server with repository registration, selection, isolated status inspection, and no dependency on the current working directory.
+- Add allowlisted repository-scoped manager controls for claims, configuration, manual dispatch, dependency reconciliation, and manual issue actions.
 - Add independent start, stop, restart, status, configuration refresh, and cleanup for per-repository coding-worker timers without coupling one repository's failures to another.
 - Add a machine-local manager-wide coding limit, one-claim fair scheduling turns, round-robin pending-repository rotation, and conservative capacity checks across all running repository workers.
 - Add independent repository PR-review scheduler and reconciliation workers while preserving the machine-global serial ChatGPT browser lease across every repository.
 - Add external standalone-manager installation that manages only the issue template, labels, workspace, and local state without adding a project dependency, lockfile entry, `node_modules` requirement, or `paseo.json` service.
 - Add a reviewed embedded-to-external migration PR workflow that removes the project dependency and managed service launcher, pauses automation while pending, and switches controller mode only after merge and local synchronization.
+- Add repository-specific blocker derivation that reports exact repositories, setup or migration PRs, affected files, worker failures, capacity reasons, and recovery actions.
+- Add ownership-safe external repair and reviewed removal, with label and workspace cleanup deferred until the removal PR merges and the local base branch synchronizes.
+- Add maintenance-aware repository health and controls to the standalone manager dashboard.
+- Make completed removal, completed migration, and later explicit reinstall state resolve deterministically without deleting lifecycle audit records.
+- Add recursive syntax validation so new package modules cannot be omitted from changed-area checks.
+- Add top-level CLI help that works outside a Git repository and documents manager, registry, and `--repo` workflows.
+- Document standalone installation, migration, worker operation, repair, removal, updating, and recovery as the recommended architecture.
