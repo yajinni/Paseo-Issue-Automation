@@ -38,3 +38,6 @@
 - Add recursive syntax validation so new package modules cannot be omitted from changed-area checks.
 - Add top-level CLI help that works outside a Git repository and documents manager, registry, and `--repo` workflows.
 - Document standalone installation, migration, worker operation, repair, removal, updating, and recovery as the recommended architecture.
+- Add fail-closed finalization for repositories whose embedded dependency and service were already removed through another reviewed PR while machine-local state still reports an embedded installation.
+- Preserve superseded setup-PR details in the completed migration audit, refresh normal setup readiness, and keep issue claims paused after existing-migration finalization.
+- Document the existing-migration finalization workflow, including the post-PR #380 Julie's Dashboard recovery steps.
