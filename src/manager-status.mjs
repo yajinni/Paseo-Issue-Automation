@@ -29,6 +29,7 @@ export function managerRepositoryStatus(repository, {
   runner = run,
   platform = process.platform,
   workerManager = null,
+  reviewWorkerManager = null,
 } = {}) {
   if (!repository?.path) throw new Error('A registered repository path is required.');
   const inspected = inspectRepository(repository.path, { runner, platform });
@@ -40,6 +41,7 @@ export function managerRepositoryStatus(repository, {
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'closed'].includes(String(item?.status || '')),
   );
   const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
+  const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
 
   return {
     repository: {
@@ -72,6 +74,7 @@ export function managerRepositoryStatus(repository, {
       statusCounts: statusCounts(runs),
     },
     worker,
+    reviewWorker,
     models: {
       coder: config.models?.coder || null,
       reviewer: config.models?.reviewer || null,
@@ -81,6 +84,7 @@ export function managerRepositoryStatus(repository, {
       configuration: true,
       installationActions: false,
       backgroundWorkers: Boolean(workerManager),
+      prReviewWorkers: Boolean(reviewWorkerManager),
     },
     stateDirectory: statePaths(inspected.path).root,
   };
