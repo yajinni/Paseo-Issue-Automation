@@ -28,6 +28,7 @@ function safeBranch(root, runner = run) {
 export function managerRepositoryStatus(repository, {
   runner = run,
   platform = process.platform,
+  workerManager = null,
 } = {}) {
   if (!repository?.path) throw new Error('A registered repository path is required.');
   const inspected = inspectRepository(repository.path, { runner, platform });
@@ -38,6 +39,7 @@ export function managerRepositoryStatus(repository, {
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'closed'].includes(String(item?.status || '')),
   );
+  const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
 
   return {
     repository: {
@@ -69,6 +71,7 @@ export function managerRepositoryStatus(repository, {
       runCount: runs.length,
       statusCounts: statusCounts(runs),
     },
+    worker,
     models: {
       coder: config.models?.coder || null,
       reviewer: config.models?.reviewer || null,
@@ -77,7 +80,7 @@ export function managerRepositoryStatus(repository, {
       automationActions: true,
       configuration: true,
       installationActions: false,
-      backgroundWorkers: false,
+      backgroundWorkers: Boolean(workerManager),
     },
     stateDirectory: statePaths(inspected.path).root,
   };
