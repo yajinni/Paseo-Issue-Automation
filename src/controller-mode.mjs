@@ -12,17 +12,24 @@ function modeFile(root) {
 }
 
 export function loadControllerMode(root) {
-  const file = modeFile(root);
-  if (existsSync(file)) {
-    try {
-      const stored = JSON.parse(readFileSync(file, 'utf8'));
-      if (Object.values(CONTROLLER_MODES).includes(stored?.mode)) return stored.mode;
-    } catch {}
+  try {
+    const file = modeFile(root);
+    if (existsSync(file)) {
+      try {
+        const stored = JSON.parse(readFileSync(file, 'utf8'));
+        if (Object.values(CONTROLLER_MODES).includes(stored?.mode)) return stored.mode;
+      } catch {}
+    }
+    const integration = loadIntegration(root);
+    return integration.paseoJson?.serviceAddedByPackage === true
+      ? CONTROLLER_MODES.embedded
+      : null;
+  } catch {
+    // Setup classification can run with injected runners before repository-local
+    // state is readable. Preserve the established embedded allowlist until an
+    // explicit external mode can be loaded.
+    return null;
   }
-  const integration = loadIntegration(root);
-  return integration.paseoJson?.serviceAddedByPackage === true
-    ? CONTROLLER_MODES.embedded
-    : null;
 }
 
 export function saveControllerMode(root, mode) {
