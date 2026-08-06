@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
 import { run, runJson } from './process.mjs';
 import {
   atomicWrite,
@@ -22,8 +23,16 @@ export const SETUP_COMMIT_FILES = Object.freeze([
   'bun.lock',
   'bun.lockb',
 ]);
+export const EXTERNAL_SETUP_COMMIT_FILES = Object.freeze([
+  '.github/ISSUE_TEMPLATE/automated-coding-task.md',
+]);
 
-const SETUP_COMMIT_FILE_SET = new Set(SETUP_COMMIT_FILES);
+export function setupCommitFiles(root, { mode = null } = {}) {
+  const selected = mode || loadControllerMode(root);
+  return selected === CONTROLLER_MODES.external
+    ? EXTERNAL_SETUP_COMMIT_FILES
+    : SETUP_COMMIT_FILES;
+}
 
 function setupPullRequestFile(root) {
   return path.join(statePaths(root).root, 'setup-pull-request.json');
@@ -76,7 +85,7 @@ function currentBranch(root, runner = run) {
   return runner('git', ['branch', '--show-current'], { cwd: root }).stdout;
 }
 
-export function setupChangeStatus(root, { runner = run } = {}) {
+export function setupChangeStatus(root, { runner = run, mode = null } = {}) {
   const result = runner('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
     cwd: root,
     allowFailure: true,
@@ -88,13 +97,16 @@ export function setupChangeStatus(root, { runner = run } = {}) {
       changedFiles: [],
       expectedFiles: [],
       unexpectedFiles: [],
+      managedFiles: setupCommitFiles(root, { mode }),
       reason: result.stderr || result.stdout || 'Git status failed.',
     };
   }
   const entries = parsePorcelainStatus(result.stdout);
   const changedFiles = [...new Set(entries.map((entry) => entry.path))].sort();
-  const expectedFiles = changedFiles.filter((file) => SETUP_COMMIT_FILE_SET.has(file));
-  const unexpectedFiles = changedFiles.filter((file) => !SETUP_COMMIT_FILE_SET.has(file));
+  const managedFiles = setupCommitFiles(root, { mode });
+  const managedSet = new Set(managedFiles);
+  const expectedFiles = changedFiles.filter((file) => managedSet.has(file));
+  const unexpectedFiles = changedFiles.filter((file) => !managedSet.has(file));
   return {
     available: true,
     currentBranch: currentBranch(root, runner),
@@ -102,6 +114,7 @@ export function setupChangeStatus(root, { runner = run } = {}) {
     changedFiles,
     expectedFiles,
     unexpectedFiles,
+    managedFiles,
     reason: null,
   };
 }
@@ -131,14 +144,14 @@ function ensureGitIdentity(root, runner = run) {
   const name = runner('git', ['config', '--get', 'user.name'], { cwd: root, allowFailure: true });
   const email = runner('git', ['config', '--get', 'user.email'], { cwd: root, allowFailure: true });
   if (!name.ok || !name.stdout || !email.ok || !email.stdout) {
-    throw new Error('Git user.name and user.email must be configured before Paseo can create the setup commit.');
+    throw new Error('Git user.name and git user.email must be configured before Paseo can create the setup commit.');
   }
 }
 
-export function preflightSetupPullRequest(root, { runner = run } = {}) {
+export function preflightSetupPullRequest(root, { runner = run, mode = null } = {}) {
   const config = loadConfig(root);
   if (!config.baseBranch) throw new Error('Select the base branch before installing repository components.');
-  const changes = setupChangeStatus(root, { runner });
+  const changes = setupChangeStatus(root, { runner, mode });
   if (!changes.available) throw new Error(changes.reason || 'Git status is unavailable.');
   if (changes.currentBranch !== config.baseBranch) {
     throw new Error(`Repository components must be installed from the configured base branch ${config.baseBranch}; current branch is ${changes.currentBranch || 'detached HEAD'}.`);
@@ -207,11 +220,12 @@ export function createSetupPullRequest(root, {
   runner = run,
   jsonRunner = runJson,
   now = new Date(),
+  mode = null,
 } = {}) {
-  const preflight = preflightSetupPullRequest(root, { runner });
-  const changes = setupChangeStatus(root, { runner });
+  const preflight = preflightSetupPullRequest(root, { runner, mode });
+  const changes = setupChangeStatus(root, { runner, mode });
   if (!changes.expectedFiles.length) {
-    return { created: false, reason: 'No package-managed repository changes need a pull request.' };
+    return { created: false, reason: 'No controller-managed repository changes need a pull request.' };
   }
   if (changes.unexpectedFiles.length) {
     throw new Error(`Automatic setup PR creation stopped because unrelated working-tree changes are present: ${changes.unexpectedFiles.join(', ')}.`);
@@ -219,6 +233,7 @@ export function createSetupPullRequest(root, {
 
   const branch = chooseBranch(root, runner, now);
   const baseBranch = preflight.baseBranch;
+  const managedSet = new Set(changes.managedFiles);
   let committed = false;
   let pushed = false;
   let prCreated = false;
@@ -231,7 +246,7 @@ export function createSetupPullRequest(root, {
       .filter(Boolean)
       .sort();
     if (!staged.length) throw new Error('No setup files were staged for the automatic setup PR.');
-    const unexpectedStaged = staged.filter((file) => !SETUP_COMMIT_FILE_SET.has(file));
+    const unexpectedStaged = staged.filter((file) => !managedSet.has(file));
     if (unexpectedStaged.length) throw new Error(`Refusing to commit unexpected files: ${unexpectedStaged.join(', ')}.`);
 
     runner('git', ['commit', '-m', 'Install Paseo issue automation'], { cwd: root });
@@ -269,6 +284,7 @@ export function createSetupPullRequest(root, {
       baseBranch,
       headSha,
       files: staged,
+      controllerMode: mode || loadControllerMode(root),
       createdAt: new Date().toISOString(),
       syncedAt: null,
       syncError: null,
@@ -284,7 +300,7 @@ export function createSetupPullRequest(root, {
       switchError: switched.ok ? null : switched.stderr || switched.stdout || null,
     };
   } catch (error) {
-    const status = setupChangeStatus(root, { runner });
+    const status = setupChangeStatus(root, { runner, mode });
     if (!committed && status.currentBranch === branch) {
       runner('git', ['switch', baseBranch], { cwd: root, allowFailure: true });
       runner('git', ['branch', '-D', branch], { cwd: root, allowFailure: true });
