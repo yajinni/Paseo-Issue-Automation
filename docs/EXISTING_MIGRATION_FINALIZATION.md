@@ -61,7 +61,7 @@ npm install --global github:yajinni/Paseo-Issue-Automation#<approved-commit-sha>
 Start or restart the manager:
 
 ```bash
-paseo-issue-automation manager --open
+paseo-issue-automation
 ```
 
 Then:
