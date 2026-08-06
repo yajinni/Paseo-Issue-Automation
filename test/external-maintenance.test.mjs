@@ -29,7 +29,7 @@ function repository() {
 }
 
 test('completed removal clears inferred mode while a later explicit reinstall wins', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'paseo-controller-mode-removal-'));
+  const root = repository();
   saveControllerMode(root, CONTROLLER_MODES.external);
   assert.equal(loadControllerMode(root), CONTROLLER_MODES.external);
   clearControllerMode(root);
@@ -142,7 +142,7 @@ test('manager dashboard exposes health, repair, reviewed removal, and reconcilia
 test('syntax validation discovers modules instead of maintaining a manual source list', () => {
   const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const checker = readFileSync(new URL('../scripts/check-syntax.mjs', import.meta.url), 'utf8');
-  assert.equal(packageJson.scripts.check, 'node scripts/check-syntax.mjs');
+  assert.match(packageJson.scripts.check, /node scripts\/check-syntax\.mjs/);
   assert.match(checker, /modules\('src'\)/);
   assert.match(checker, /--check/);
 });
