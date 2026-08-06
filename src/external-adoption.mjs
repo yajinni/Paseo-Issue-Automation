@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { CONTROLLER_MODES, loadControllerMode, saveControllerMode } from './controller-mode.mjs';
 import { loadExternalMaintenance } from './external-maintenance.mjs';
@@ -22,6 +22,7 @@ import {
   saveConfig,
   saveIntegration,
   saveRuntime,
+  statePaths,
 } from './state.mjs';
 
 const TEXT_LOCKFILES = [
@@ -69,6 +70,20 @@ function pendingLifecycleReason(root) {
   const removal = loadExternalMaintenance(root)?.removal;
   if (removal?.state === 'open' || (removal?.state === 'merged' && !removal.syncedAt)) {
     return `Removal PR #${removal.number} is already awaiting completion.`;
+  }
+  return null;
+}
+
+function setupPullRequestPreventsAdoption(setupPullRequest) {
+  if (!setupPullRequest) return null;
+  if (setupPullRequest.state === 'open') {
+    return `Setup PR #${setupPullRequest.number} is still open.`;
+  }
+  if (setupPullRequest.state === 'merged' && !setupPullRequest.syncedAt) {
+    return `Setup PR #${setupPullRequest.number} merged but has not synchronized locally.`;
+  }
+  if (setupPullRequest.state === 'failed') {
+    return `Setup PR reconciliation failed: ${setupPullRequest.error || 'unknown error'}.`;
   }
   return null;
 }
@@ -143,7 +158,10 @@ export function adoptAlreadyMigratedRepository(root, {
   setupReconciler = reconcileSetupPullRequest,
   now = new Date(),
 } = {}) {
-  setupReconciler(root, { runner });
+  const reconciledSetupPullRequest = setupReconciler(root, { runner });
+  const setupReason = setupPullRequestPreventsAdoption(reconciledSetupPullRequest);
+  if (setupReason) throw new Error(`Existing migration cannot be finalized: ${setupReason}`);
+
   const inspection = inspectExternalMigrationAdoption(root, { runner });
   if (!inspection.ready) {
     throw new Error(`Existing migration cannot be finalized: ${inspection.reasons.join(' ')}`);
@@ -165,8 +183,12 @@ export function adoptAlreadyMigratedRepository(root, {
     completedAt,
     syncError: null,
     files: existing.files || ['package.json', ...inspection.lockfiles, inspection.service.path],
+    supersededSetupPullRequest: reconciledSetupPullRequest || null,
   });
 
+  if (reconciledSetupPullRequest) {
+    rmSync(path.join(statePaths(root).root, 'setup-pull-request.json'), { force: true });
+  }
   saveConfig(root, { ...loadConfig(root), setupComplete: false });
   saveRuntime(root, { ...loadRuntime(root), claimsEnabled: false });
 
