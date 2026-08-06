@@ -85,6 +85,7 @@ test('Julie post-migration state is recognized without creating another migratio
   assert.equal(loadControllerMode(root), CONTROLLER_MODES.embedded);
   const inspection = inspectExternalMigrationAdoption(root);
   assert.equal(inspection.ready, true);
+  assert.equal(inspection.activeIssuesChecked, false);
   assert.equal(inspection.dependency, null);
   assert.deepEqual(inspection.lockfiles, []);
   assert.equal(inspection.service.state, 'absent');
@@ -97,6 +98,7 @@ test('adoption preserves repository state and supersedes the closed setup record
   const beforeConfig = loadConfig(root);
   const result = adoptAlreadyMigratedRepository(root, {
     now: new Date('2026-08-06T13:30:00.000Z'),
+    activeIssuesReader: () => [],
     setupReconciler: () => ({
       number: 379,
       url: 'https://github.com/yajinni/JuliesDashboard/pull/379',
@@ -106,6 +108,7 @@ test('adoption preserves repository state and supersedes the closed setup record
   });
 
   assert.equal(result.adopted, true);
+  assert.equal(result.inspection.activeIssuesChecked, true);
   assert.equal(loadControllerMode(root), CONTROLLER_MODES.external);
   const integration = loadIntegration(root);
   assert.equal(integration.paseoJson, null);
@@ -129,7 +132,7 @@ test('adoption preserves repository state and supersedes the closed setup record
   );
 });
 
-test('adoption fails closed when embedded files or unsafe local state remain', () => {
+test('adoption fails closed when embedded files, active issues, or unsafe local state remain', () => {
   const dependencyRoot = repository();
   const manifest = JSON.parse(readFileSync(path.join(dependencyRoot, 'package.json'), 'utf8'));
   manifest.dependencies = { 'paseo-issue-automation': 'github:yajinni/Paseo-Issue-Automation' };
@@ -148,6 +151,16 @@ test('adoption fails closed when embedded files or unsafe local state remain', (
   const changedRoot = repository();
   writeFileSync(path.join(changedRoot, 'notes.txt'), 'uncommitted\n');
   assert.match(inspectExternalMigrationAdoption(changedRoot).reasons.join(' '), /clean working tree/);
+
+  const activeRoot = repository();
+  assert.throws(
+    () => adoptAlreadyMigratedRepository(activeRoot, {
+      activeIssuesReader: () => [{ issueNumber: 274 }],
+      setupReconciler: () => ({ number: 379, state: 'closed' }),
+    }),
+    /Stop active automation issues.*#274/,
+  );
+  assert.equal(loadControllerMode(activeRoot), CONTROLLER_MODES.embedded);
 });
 
 test('manager finalization requires stopped workers and refreshes normal setup readiness', () => {
