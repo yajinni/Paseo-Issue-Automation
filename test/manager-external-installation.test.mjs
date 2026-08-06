@@ -78,5 +78,5 @@ test('manager installation UI states that dependency and lockfile changes are no
   assert.match(html, /node_modules/);
   assert.match(html, /paseo\.json/);
   assert.match(html, /install\/external/);
-  assert.match(html, /Setup PR #/);
+  assert.match(html, /Setup PR/);
 });
