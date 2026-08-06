@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
-import { managerHtml } from './manager-ui.mjs';
+import { managerHtml } from './manager-worker-ui.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
 
 function json(response, status, body) {
