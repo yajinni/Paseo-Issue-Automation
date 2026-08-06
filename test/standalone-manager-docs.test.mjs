@@ -45,7 +45,7 @@ test('standalone manager documentation covers the complete managed lifecycle', (
     'Reconcile removal PR',
     '127.0.0.1:4318',
   ]) assert.match(documentation, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(documentation, /does not need `paseo-issue-automation` in `package\.json`/);
+  assert.match(documentation, /does not need `paseo-issue-automation` in `package\.json`/u);
   assert.match(documentation, /Modified or user-owned files, labels, and workspaces are never deleted automatically/);
 });
 
