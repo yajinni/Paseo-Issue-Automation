@@ -1,4 +1,9 @@
 import {
+  createExternalRemovalPullRequest,
+  reconcileExternalRemoval,
+  repairExternalRepositoryIntegration,
+} from './external-maintenance.mjs';
+import {
   createExternalMigrationPullRequest,
   reconcileExternalMigration,
 } from './external-migration.mjs';
@@ -21,14 +26,23 @@ function requireStoppedWorkers(repository, { workerManager = null, reviewWorkerM
   }
 }
 
+function guarded(repository, options, action, handler) {
+  requireRegisteredRepository(repository, action);
+  requireStoppedWorkers(repository, options);
+  return handler(repository.path);
+}
+
 export function installExternalRepositoryFromManager(repository, {
   workerManager = null,
   reviewWorkerManager = null,
   installer = installExternalRepositoryIntegration,
 } = {}) {
-  requireRegisteredRepository(repository, 'install the external controller integration');
-  requireStoppedWorkers(repository, { workerManager, reviewWorkerManager });
-  return installer(repository.path);
+  return guarded(
+    repository,
+    { workerManager, reviewWorkerManager },
+    'install the external controller integration',
+    installer,
+  );
 }
 
 export function migrateEmbeddedRepositoryFromManager(repository, {
@@ -36,9 +50,12 @@ export function migrateEmbeddedRepositoryFromManager(repository, {
   reviewWorkerManager = null,
   migrator = createExternalMigrationPullRequest,
 } = {}) {
-  requireRegisteredRepository(repository, 'migrate the embedded controller installation');
-  requireStoppedWorkers(repository, { workerManager, reviewWorkerManager });
-  return migrator(repository.path);
+  return guarded(
+    repository,
+    { workerManager, reviewWorkerManager },
+    'migrate the embedded controller installation',
+    migrator,
+  );
 }
 
 export function reconcileEmbeddedMigrationFromManager(repository, {
@@ -46,7 +63,49 @@ export function reconcileEmbeddedMigrationFromManager(repository, {
   reviewWorkerManager = null,
   reconciler = reconcileExternalMigration,
 } = {}) {
-  requireRegisteredRepository(repository, 'reconcile the external-controller migration');
-  requireStoppedWorkers(repository, { workerManager, reviewWorkerManager });
-  return reconciler(repository.path);
+  return guarded(
+    repository,
+    { workerManager, reviewWorkerManager },
+    'reconcile the external-controller migration',
+    reconciler,
+  );
+}
+
+export function repairExternalRepositoryFromManager(repository, {
+  workerManager = null,
+  reviewWorkerManager = null,
+  repairer = repairExternalRepositoryIntegration,
+} = {}) {
+  return guarded(
+    repository,
+    { workerManager, reviewWorkerManager },
+    'repair the external controller integration',
+    repairer,
+  );
+}
+
+export function removeExternalRepositoryFromManager(repository, {
+  workerManager = null,
+  reviewWorkerManager = null,
+  remover = createExternalRemovalPullRequest,
+} = {}) {
+  return guarded(
+    repository,
+    { workerManager, reviewWorkerManager },
+    'remove the external controller integration',
+    remover,
+  );
+}
+
+export function reconcileExternalRemovalFromManager(repository, {
+  workerManager = null,
+  reviewWorkerManager = null,
+  reconciler = reconcileExternalRemoval,
+} = {}) {
+  return guarded(
+    repository,
+    { workerManager, reviewWorkerManager },
+    'reconcile external integration removal',
+    reconciler,
+  );
 }

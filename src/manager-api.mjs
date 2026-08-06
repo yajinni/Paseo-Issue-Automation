@@ -4,6 +4,9 @@ import {
   installExternalRepositoryFromManager,
   migrateEmbeddedRepositoryFromManager,
   reconcileEmbeddedMigrationFromManager,
+  reconcileExternalRemovalFromManager,
+  removeExternalRepositoryFromManager,
+  repairExternalRepositoryFromManager,
 } from './manager-installation.mjs';
 import {
   parseRepositoryApiPath,
@@ -120,29 +123,17 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     };
   }
   if (method === 'POST') {
-    if (context.pathname === '/api/install/external') {
-      return installationResult(
-        context,
-        options,
-        options.installHandler || installExternalRepositoryFromManager,
-        'installer',
-      );
-    }
-    if (context.pathname === '/api/migrate/external') {
-      return installationResult(
-        context,
-        options,
-        options.migrationHandler || migrateEmbeddedRepositoryFromManager,
-        'migrator',
-      );
-    }
-    if (context.pathname === '/api/migrate/reconcile') {
-      return installationResult(
-        context,
-        options,
-        options.migrationReconcileHandler || reconcileEmbeddedMigrationFromManager,
-        'reconciler',
-      );
+    const installationRoutes = new Map([
+      ['/api/install/external', [options.installHandler || installExternalRepositoryFromManager, 'installer']],
+      ['/api/migrate/external', [options.migrationHandler || migrateEmbeddedRepositoryFromManager, 'migrator']],
+      ['/api/migrate/reconcile', [options.migrationReconcileHandler || reconcileEmbeddedMigrationFromManager, 'reconciler']],
+      ['/api/maintenance/repair', [options.repairHandler || repairExternalRepositoryFromManager, 'repairer']],
+      ['/api/maintenance/remove', [options.removalHandler || removeExternalRepositoryFromManager, 'remover']],
+      ['/api/maintenance/reconcile', [options.removalReconcileHandler || reconcileExternalRemovalFromManager, 'reconciler']],
+    ]);
+    const installationRoute = installationRoutes.get(context.pathname);
+    if (installationRoute) {
+      return installationResult(context, options, installationRoute[0], installationRoute[1]);
     }
 
     const codingWorkerResult = workerAction(options.workerManager, context, context.pathname);
