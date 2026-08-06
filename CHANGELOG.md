@@ -22,3 +22,4 @@
 - Preserve guided setup, reversible installation, manual issue controls, fresh-attempt restarts, activity history, and package release checks.
 - Create one worktree workspace per issue attempt, retry failed agent creation in that recorded workspace, stop after three failed agent starts or three failed reconciliation checks, surface the exact failure, and archive only workspaces proven to contain no agents.
 - Add a versioned machine-local repository registry with standalone add, list, show, and remove commands as the first step toward one manager controlling multiple isolated repositories.
+- Add explicit `--repo` selection for existing commands while preserving current-directory fallback for legacy workflows.
