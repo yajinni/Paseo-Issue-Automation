@@ -260,15 +260,28 @@ Run a final **Recheck** covering:
 
 The readiness check must not modify application code, create a fake issue, publish a fake review, or leave behind a test branch/worktree. Prefer capability and permission checks over paid model prompts. If a real provider request is ever technically necessary, require explicit user notice rather than silently consuming usage.
 
-### First run
+### Finish and optional first run
 
 After readiness passes:
 
 - show the currently eligible issues in lowest-number-first order;
 - identify issues skipped because of native blockers, invalid template content, exclusions, or other safety conditions;
-- provide **Finish setup and start automation** as the primary action;
-- if no issue is currently eligible, finish setup successfully and leave the controller ready to claim a future eligible issue;
+- provide a **Start automation after setup** checkbox beside or immediately above the final action;
+- provide **Finish setup** as the final primary action;
+- when the checkbox is selected, finishing setup immediately enables the controller and allows it to claim eligible issues;
+- when the checkbox is not selected, finishing setup saves the complete configuration but leaves automation paused until the user starts it later from the dashboard;
+- default the checkbox to selected when at least one eligible issue exists;
+- default the checkbox to unselected when no issue is currently eligible;
+- if no issue is currently eligible and the user still selects it, enable the controller so it waits for a future eligible issue;
 - allow the walkthrough to be run again later to configure another repository.
+
+Suggested final control:
+
+```text
+☑ Start automation after setup
+
+[ Finish setup ]
+```
 
 ## Planning items resolved by this addendum
 
@@ -282,6 +295,7 @@ The following items from the main document are now resolved:
 - setup pull request targeting the selected base branch;
 - automatic setup-PR merge behavior;
 - automatic local clone and Paseo workspace behavior;
-- final readiness and first-run behavior.
+- final readiness and first-run behavior;
+- separate setup completion from optional automation startup.
 
 The product-level setup walkthrough decisions are now complete enough to begin implementation planning. Implementation must still inspect and reconcile the current code, labels, template validation, installation flow, workspace behavior, and tests before making changes.
