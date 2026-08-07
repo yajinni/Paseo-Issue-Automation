@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -200,8 +201,8 @@ export function cloneManagedRepository(repository, baseBranch, {
   mkdirSync(managedRoot, { recursive: true });
   const destination = availableManagedDestination(managedRoot, repository);
   const partial = `${destination}.partial-${randomUUID()}`;
-  mkdirSync(partial, { recursive: true });
-  markerWriter(path.join(partial, '.paseo-clone-incomplete'), 'Clone is incomplete and must not be used as a checkout.\n', 'utf8');
+  const marker = `${partial}.incomplete`;
+  markerWriter(marker, 'Clone is incomplete and must not be used as a checkout.\n', 'utf8');
 
   const result = runner('git', [
     'clone', '--origin', 'origin', '--branch', String(baseBranch), '--single-branch', cloneUrl(repository), partial,
@@ -211,6 +212,7 @@ export function cloneManagedRepository(repository, baseBranch, {
       ok: false,
       destination,
       partial,
+      marker,
       blocker: { code: 'checkout-clone-failed', message: 'Repository clone did not complete.', recoveryAction: 'Retry cloning. The incomplete directory is not considered a valid checkout.' },
     };
   }
@@ -221,16 +223,19 @@ export function cloneManagedRepository(repository, baseBranch, {
       ok: false,
       destination,
       partial,
+      marker,
       validation,
       blocker: { code: 'checkout-clone-invalid', message: 'The completed clone did not pass checkout validation.', recoveryAction: 'Inspect the technical details and retry with a new managed checkout.' },
     };
   }
 
   renameSync(partial, destination);
+  rmSync(marker, { force: true });
   return {
     ok: true,
     destination,
     partial: null,
+    marker: null,
     checkout: { ...validation, path: destination, root: destination, managed: true },
     blocker: null,
   };
