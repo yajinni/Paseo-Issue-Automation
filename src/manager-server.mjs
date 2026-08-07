@@ -14,6 +14,8 @@ import { issuesSetupPageApiRequest } from './setup-wizard/issues-page-api.mjs';
 import { enhanceSetupWizardWithIssuesPage } from './setup-wizard/issues-page-ui.mjs';
 import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs';
 import { paseoSetupPageApiRequest } from './setup-wizard/paseo-page-api.mjs';
+import { reviewSetupPageApiRequest } from './setup-wizard/review-page-api.mjs';
+import { enhanceSetupWizardWithReviewPage } from './setup-wizard/review-page-ui.mjs';
 import { setupPageIdFromPath, setupWizardHtml } from './setup-wizard/ui.mjs';
 import { workspaceSetupPageApiRequest } from './setup-wizard/workspace-page-api.mjs';
 import { enhanceSetupWizardWithWorkspacePage } from './setup-wizard/workspace-page-ui.mjs';
@@ -64,6 +66,7 @@ export async function startManagerServer({
   githubSetupOptions = {},
   workspaceSetupOptions = {},
   issuesSetupOptions = {},
+  reviewSetupOptions = {},
 } = {}) {
   const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const reviewWorkers = reviewWorkerManager || createManagerReviewWorkerPool();
@@ -92,7 +95,8 @@ export async function startManagerServer({
         const harnessHtml = enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage }));
         const githubHtml = enhanceSetupWizardWithGitHubPage(harnessHtml);
         const workspaceHtml = enhanceSetupWizardWithWorkspacePage(githubHtml);
-        response.end(enhanceSetupWizardWithIssuesPage(workspaceHtml));
+        const issuesHtml = enhanceSetupWizardWithIssuesPage(workspaceHtml);
+        response.end(enhanceSetupWizardWithReviewPage(issuesHtml));
         return;
       }
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method) ? await readBody(request) : {};
@@ -112,6 +116,9 @@ export async function startManagerServer({
 
       const issuesSetup = issuesSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, ...issuesSetupOptions });
       if (issuesSetup.handled) { json(response, issuesSetup.status, issuesSetup.body); return; }
+
+      const reviewSetup = await reviewSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, ...reviewSetupOptions });
+      if (reviewSetup.handled) { json(response, reviewSetup.status, reviewSetup.body); return; }
 
       const result = managerApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, workerManager: workers, reviewWorkerManager: reviewWorkers });
       if (!result.handled) { json(response, 404, { error: 'Not found' }); return; }
