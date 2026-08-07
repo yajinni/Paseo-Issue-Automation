@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { recoverFailedAttempt } from './attempt-recovery.mjs';
 import { dispatchSpecificIssue, restartIssue } from './attempts.mjs';
 import { acquireLease, releaseLease, renewLease } from './durable-lease.mjs';
 import { activeCodingCount } from './fix-jobs.mjs';
@@ -50,5 +51,21 @@ export function restartCodingIssue(root, number, options = {}) {
     const state = loadRun(root, number);
     requireAvailableCodingSlot(root, { replacingRunningIssue: state?.status === 'agent-running' });
     return restartIssue(root, number, options);
+  });
+}
+
+export function recoverOrRestartCodingIssue(root, number, options = {}) {
+  return withCodingSchedulerLease(root, () => {
+    const state = loadRun(root, number);
+    requireAvailableCodingSlot(root, { replacingRunningIssue: state?.status === 'agent-running' });
+    const branchAction = options.branchAction || 'keep';
+    const recovery = recoverFailedAttempt(root, number, { branchAction });
+    if (recovery.recovered) return recovery;
+    const fresh = restartIssue(root, number, options);
+    return {
+      ...fresh,
+      recovered: false,
+      recoveryFallbackReason: recovery.reason || null,
+    };
   });
 }
