@@ -138,8 +138,12 @@ export function saveReviewSetupPage(input = {}, options = {}) {
 export async function saveReviewChat(input = {}, options = {}) {
   const prior = selections(activeSession(options));
   const mode = input.mode === 'dedicated' ? 'dedicated' : 'existing';
+  // A dedicated chat may be created manually inside ChatGPT Profile. In that
+  // case its stable URL is supplied here and normalized exactly like an existing
+  // chat while the setup selection still records that it is dedicated.
+  const manuallyCreatedDedicated = mode === 'dedicated' && String(input.conversationUrl || '').trim();
   const configured = await configureChatGptReviewChat({
-    mode,
+    mode: manuallyCreatedDedicated ? 'existing' : mode,
     conversationUrl: input.conversationUrl,
     createDedicatedChat: options.createDedicatedChat,
     save: options.saveBrowserConfig,
