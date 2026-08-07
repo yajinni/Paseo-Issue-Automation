@@ -224,16 +224,18 @@ test('unchecked Finish setup completes configuration but leaves claims paused', 
   assert.equal(loadRuntime(repo).claimsEnabled, false);
 });
 
-test('Final readiness shows pending setup PRs as informational and uses only the footer Finish action', () => {
-  assert.match(FINAL_READINESS_SCRIPT, /once that PR has been created, it is informational and does not hold up finishing setup/);
-  assert.match(FINAL_READINESS_SCRIPT, /item\.informational===true/);
+test('Final readiness uses one consolidated setup checklist and only the footer Finish action', () => {
+  assert.match(FINAL_READINESS_SCRIPT, /Final setup check/);
+  assert.match(FINAL_READINESS_SCRIPT, /Confirm the saved setup and any repository repair before finishing/);
+  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /Approved setup summary/);
+  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /Final safe checks/);
+  assert.equal((FINAL_READINESS_SCRIPT.match(/class=\\"checklist\\"/g) || []).length, 1);
+  assert.match(FINAL_READINESS_SCRIPT, /pageById/);
   assert.match(FINAL_READINESS_SCRIPT, /Open setup PR/);
   assert.match(FINAL_READINESS_SCRIPT, /font-size:16px;font-weight:650/);
   assert.match(FINAL_READINESS_SCRIPT, /> Start automation after setup<\/label>/);
-  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /id="readiness-finish"/);
+  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /id=\\"readiness-finish\\"/);
   assert.match(FINAL_READINESS_SCRIPT, /closest\?\.\('#continue'\)/);
   assert.match(FINAL_READINESS_SCRIPT, /api\('\/api\/setup\/readiness\/finish'/);
   assert.match(FINAL_READINESS_SCRIPT, /querySelector\('#readiness-start'\)/);
-  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /eligible issue\(s\) are currently available/);
-  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /No eligible issue is currently available/);
 });
