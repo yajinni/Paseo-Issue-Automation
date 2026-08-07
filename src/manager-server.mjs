@@ -51,9 +51,32 @@ export function managerHasConfiguredRepository({ rootDir } = {}) {
 }
 
 function managerDashboardHtml() {
-  const html = managerHtml();
-  const setupLink = '<a href="/setup" data-manager-setup-link style="position:fixed;right:18px;bottom:18px;z-index:50;padding:10px 13px;border-radius:10px;background:#243044;color:#fff;text-decoration:none;border:1px solid #43526a;font:600 13px system-ui">Add repository via setup</a>';
-  return html.includes('</body>') ? html.replace('</body>', `${setupLink}</body>`) : `${html}${setupLink}`;
+  const setupLink = '<a href="/setup" data-manager-setup-link class="manager-setup-link">Add repository via setup</a>';
+  const manualForm = `  <form class="register" id="register-form">
+    <input id="repository-path" required placeholder="C:\\path\\to\\repository or /path/to/repository" aria-label="Repository path">
+    <button type="submit">Register repository</button>
+  </form>`;
+  const advancedRegistration = `  <section class="card manager-manual-registration" data-manager-manual-registration>
+    <details>
+      <summary>Advanced manual registration</summary>
+      <p class="muted">Compatibility and recovery only. Manual registration adds an existing checkout to the manager but does not run the setup walkthrough, verify GitHub or Paseo, create the workspace, install managed repository components, or mark setup complete.</p>
+${manualForm}
+    </details>
+  </section>`;
+  let html = managerHtml()
+    .replace(
+      '</style>',
+      `.manager-setup-link{display:inline-flex;align-items:center;border-radius:8px;padding:9px 13px;background:#2869d8;color:#fff;text-decoration:none;font-weight:600}.manager-setup-link:focus-visible{outline:2px solid #8ab8ff;outline-offset:2px}.manager-manual-registration{margin-top:16px}.manager-manual-registration summary{cursor:pointer;font-weight:600;color:#dce8fb}.manager-manual-registration .register{margin-top:12px}\n</style>`,
+    )
+    .replace(
+      '<button class="secondary" id="refresh-button">Refresh</button>',
+      `<button class="secondary" id="refresh-button">Refresh</button>\n      ${setupLink}`,
+    )
+    .replace(manualForm, advancedRegistration);
+  if (!html.includes('data-manager-setup-link')) {
+    html = html.includes('</body>') ? html.replace('</body>', `${setupLink}</body>`) : `${html}${setupLink}`;
+  }
+  return html;
 }
 
 export async function startManagerServer({
