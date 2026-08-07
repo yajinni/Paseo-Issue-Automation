@@ -33,10 +33,8 @@ Protocol:
 2. Follow the repository's own coding instructions. Do not assume a particular instruction filename.
 3. Implement only the approved issue scope. Block instead of guessing when the issue has a material contradiction, missing required decision, unsafe ambiguity, or a semantic integration conflict.
 4. Perform every validation and check required by the issue. The issue author owns selecting those checks; do not weaken or silently omit them.
-5. Create or update a draft pull request from ${branch} into ${config.baseBranch}. Include Closes #${issue.number}, changed areas, validation evidence, and unresolved concerns.
-6. After validation passes for the exact PR head, record it with the controller's installed CLI:
-   ${cli} record --issue ${issue.number} --event validation-summary --result PASS --commit <sha> --details '<summary>'
-   Do not finish the coding session until this record command exits successfully. If it fails, diagnose and retry it rather than silently ending the session.
+5. Commit all intended changes, push the exact branch head, and create or update a draft pull request from ${branch} into ${config.baseBranch}. Include Closes #${issue.number}, changed areas, validation evidence, and unresolved concerns. Do not finish with uncommitted worktree changes.
+6. The Issue Execution Controller owns the internal validation-summary bookkeeping after it verifies a clean worktree and exact PR-head alignment. Do not call Paseo's hooks command and do not search for or invent another validation-summary API.
 7. Send a heartbeat at phase transitions:
    ${cli} heartbeat --issue ${issue.number} --phase <phase>
 8. If blocked, record the terminal state and make sure this command succeeds before ending:
@@ -62,29 +60,27 @@ Return only the structured verdict requested by Paseo.`;
 }
 
 export function buildCompletionRecoveryPrompt({ issueNumber, branch, baseBranch, reason }) {
-  const cli = automationCliCommand();
-  return `The Issue Execution Controller could not verify completion evidence for issue #${issueNumber}. Reason: ${reason}
+  return `The Issue Execution Controller could not verify the mechanical completion handoff for issue #${issueNumber}. Reason: ${reason}
 
-Do not restart the implementation or broaden scope. Repair the completion handoff on the existing branch ${branch}:
-1. Inspect the current worktree and exact HEAD. Preserve completed work.
-2. Ensure there is an open draft pull request from ${branch} into ${baseBranch}. Create or update it if necessary.
-3. Run or rerun every validation/check required by the issue against the exact current PR HEAD. Never claim a check passed unless it actually passed.
-4. If all required validation passes, record a fresh exact-head event with:
-   ${cli} record --issue ${issueNumber} --event validation-summary --result PASS --commit <exact-current-head-sha> --details '<summary>'
-5. Do not end this recovery turn until the record command exits successfully. If required validation cannot pass, fix ordinary in-scope failures and revalidate; if genuinely blocked, record the block with:
-   ${cli} block --issue ${issueNumber} --reason '<reason>'
+Do not restart the implementation or broaden scope. Repair the existing branch ${branch}:
+1. Inspect the current worktree and preserve completed work.
+2. Commit every intended in-scope change so the worktree is clean. Do not discard completed work merely to make the worktree clean.
+3. Push the exact current branch head.
+4. Ensure there is an open draft pull request from ${branch} into ${baseBranch}. Create or update it if necessary.
+5. Run or rerun every validation/check required by the issue against the exact current PR HEAD. Never claim a check passed unless it actually passed.
+6. Finish only after the worktree is clean and the pushed PR head exactly matches local HEAD.
 
-Do not reuse stale validation evidence from an older commit.`;
+The controller owns its internal validation-summary record after those conditions are met. Do NOT call \`paseo hooks\`, \`$env:PASEO_CLI hooks\`, or any other validation-summary hook/API. Those are not the controller's completion record.
+
+If required validation cannot pass, fix ordinary in-scope failures and revalidate; if genuinely blocked, use the controller block command from the original protocol.`;
 }
 
 export function buildRepairPrompt({ issueNumber, findings }) {
-  const cli = automationCliCommand();
-  return `Independent review for issue #${issueNumber} requires changes:\n\n${findings}\n\nAddress only these findings within the approved issue scope. Rerun every issue-required validation, update the existing draft PR, and record a new exact-head validation-summary event with ${cli} record --issue ${issueNumber} --event validation-summary --result PASS --commit <sha> --details '<summary>'. Do not reuse the previous validation or review, and do not finish until the record command succeeds.`;
+  return `Independent review for issue #${issueNumber} requires changes:\n\n${findings}\n\nAddress only these findings within the approved issue scope. Rerun every issue-required validation, commit and push all intended changes, update the existing draft PR, and leave the worktree clean with local HEAD equal to the PR head. The controller owns validation-summary bookkeeping; do not call Paseo hooks or invent a validation-summary API.`;
 }
 
 export function buildBaseUpdatePrompt({ issueNumber, baseBranch, reason }) {
-  const cli = automationCliCommand();
-  return `Issue #${issueNumber} must be updated from origin/${baseBranch} before final review. Reason: ${reason}\n\nFetch the latest base, merge origin/${baseBranch} into the issue branch, and resolve ordinary conflicts without broadening scope. Do not rebase or force-push. If the conflict requires a product or architectural decision, block the issue instead. After any code change, rerun every required validation, update the draft PR, and record a new exact-head validation-summary event with ${cli} record --issue ${issueNumber} --event validation-summary --result PASS --commit <sha> --details '<summary>'. Do not finish until the record command succeeds.`;
+  return `Issue #${issueNumber} must be updated from origin/${baseBranch} before final review. Reason: ${reason}\n\nFetch the latest base, merge origin/${baseBranch} into the issue branch, and resolve ordinary conflicts without broadening scope. Do not rebase or force-push. If the conflict requires a product or architectural decision, block the issue instead. After any code change, rerun every required validation, commit and push the exact branch head, update the draft PR, and leave the worktree clean with local HEAD equal to the PR head. The controller owns validation-summary bookkeeping; do not call Paseo hooks or invent a validation-summary API.`;
 }
 
 export const REVIEW_OUTPUT_SCHEMA = JSON.stringify({
