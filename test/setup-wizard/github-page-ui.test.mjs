@@ -23,6 +23,19 @@ test('GitHub page exposes account, repository, base branch, search, and recovery
   assert.match(html, /Refresh repositories/);
 });
 
+test('GitHub page highlights required account, repository, and branch sections', () => {
+  assert.match(GITHUB_PAGE_SCRIPT, /cardClass\(accountMissing\)/);
+  assert.match(GITHUB_PAGE_SCRIPT, /cardClass\(repositoryMissing\)/);
+  assert.match(GITHUB_PAGE_SCRIPT, /cardClass\(branchMissing\)/);
+  assert.match(GITHUB_PAGE_SCRIPT, /required-missing/);
+});
+
+test('repository and base branch selections save immediately without a separate save button', () => {
+  assert.match(GITHUB_PAGE_SCRIPT, /github-repository[^]*addEventListener\('change'[^]*save\(\{ repository:/);
+  assert.match(GITHUB_PAGE_SCRIPT, /github-base-branch[^]*addEventListener\('change'[^]*baseBranch: event\.target\.value/);
+  assert.doesNotMatch(GITHUB_PAGE_SCRIPT, /id="github-save"/);
+});
+
 test('GitHub page explains unavailable repositories and intercepts Recheck only on its own route', () => {
   assert.match(GITHUB_PAGE_SCRIPT, /unavailable/);
   assert.match(GITHUB_PAGE_SCRIPT, /required read, write, issues, and label permissions|read, branch-push, pull-request, issue, and label capabilities/);
