@@ -6,13 +6,23 @@ import {
   MANAGER_CONFIG_INTEGRATION_STYLE,
 } from '../src/manager-config-integration-maintenance-ui.mjs';
 
-test('Configuration is grouped into setup-style operational sections', () => {
-  for (const group of ['Provider/Coding Harness', 'Review model', 'Issue processing', 'Review workflow', 'Runtime']) {
-    assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, new RegExp(group.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  }
-  for (const id of ['coding-harness', 'coder-model', 'reviewer-model', 'issue-selection-mode', 'review-workflow', 'base-branch']) {
-    assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, new RegExp(id));
-  }
+test('Coding harness configuration uses separate coder review and harness boxes in the requested order', () => {
+  const coder = MANAGER_CONFIG_INTEGRATION_SCRIPT.indexOf("['Coder model'");
+  const reviewer = MANAGER_CONFIG_INTEGRATION_SCRIPT.indexOf("['Review model'");
+  const harness = MANAGER_CONFIG_INTEGRATION_SCRIPT.indexOf("['Provider/Coding Harness'");
+  assert.ok(coder >= 0 && reviewer > coder && harness > reviewer);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['coder-model', 'coder-thinking'\]/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['reviewer-model', 'reviewer-thinking'\]/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['coding-harness'\]/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Refresh available harnesses/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /configuration\/harnesses/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Choose a Paseo coding harness/);
+});
+
+test('issue processing owns repository polling cadence', () => {
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['Issue processing'.*'poll-interval'\]/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['GitHub repository'.*\['base-branch'\]\]/);
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['GitHub repository'.*'poll-interval'/);
 });
 
 test('manager configuration uses the same review workflow wording as setup', () => {
@@ -22,6 +32,18 @@ test('manager configuration uses the same review workflow wording as setup', () 
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Light model review rounds/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /fullField\.hidden = workflow === 'quick-manual'/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Automatic merge is unavailable for Light model review → Manual review/);
+});
+
+test('Web ChatGPT workflow exposes live profile prerequisites login and saved chat configuration', () => {
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['ChatGPT Profile'/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /workflow === 'quick-web-chatgpt'/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Install Playwright/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Install Chromium/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Log into ChatGPT Profile/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /PR review chat URL/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /manager-review-chat-saved/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /configuration\/chatgpt-profile\/chat/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /dataset\.managerTransient/);
 });
 
 test('Configuration shows dirty state inline validation Save and Discard without changing submit semantics', () => {
@@ -52,6 +74,7 @@ test('Maintenance starts with health and recovery summary based on existing oper
 test('Configuration and context grids collapse to a single column on narrow screens', () => {
   assert.match(MANAGER_CONFIG_INTEGRATION_STYLE, /@media\(max-width:760px\)/);
   assert.match(MANAGER_CONFIG_INTEGRATION_STYLE, /manager-config-groups.*grid-template-columns:1fr/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_STYLE, /manager-config-group\[hidden\].*display:none!important/);
 });
 
 test('enhancer appends its assets and preserves the existing manager document', () => {
