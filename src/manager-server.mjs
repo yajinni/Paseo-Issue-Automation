@@ -2,6 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
 import { managerHtml } from './manager-maintenance-ui.mjs';
+import { enhanceManagerWithUiFoundation, enhanceSetupWithSharedUiTheme } from './manager-ui-foundation.mjs';
 import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
 import { listRepositories } from './repository-registry.mjs';
@@ -78,7 +79,7 @@ ${manualForm}
   if (!html.includes('data-manager-setup-link')) {
     html = html.includes('</body>') ? html.replace('</body>', `${setupLink}</body>`) : `${html}${setupLink}`;
   }
-  return html;
+  return enhanceManagerWithUiFoundation(html);
 }
 
 export async function startManagerServer({
@@ -120,7 +121,8 @@ export async function startManagerServer({
           return;
         }
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        const shellHtml = enhanceSetupWizardWithShellFeedback(setupWizardHtml({ requestedPage }));
+        const themedHtml = enhanceSetupWithSharedUiTheme(setupWizardHtml({ requestedPage }));
+        const shellHtml = enhanceSetupWizardWithShellFeedback(themedHtml);
         const requiredHtml = enhanceSetupWizardWithRequiredState(shellHtml);
         const harnessHtml = enhanceSetupWizardWithHarnessPage(requiredHtml);
         const githubHtml = enhanceSetupWizardWithGitHubPage(harnessHtml);
