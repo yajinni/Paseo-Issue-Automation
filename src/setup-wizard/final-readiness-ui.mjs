@@ -4,21 +4,24 @@ export const FINAL_READINESS_SCRIPT = String.raw`
   const content=()=>document.getElementById('page-content');
   const onPage=()=>location.pathname.replace(/\/$/,'').split('/').at(-1)==='readiness';
   const esc=(value)=>String(value==null?'':value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+  const labels={paseo:'Connect Paseo',harness:'Coding harness',repository:'GitHub repository',issues:'Issues setup',review:'Review setup'};
   function render(){
     if(!onPage()||!state||!content())return;
     const check=state.check||{};
-    const pages=(state.pages||[]).map((page)=>'<div class="check-row '+(page.completed?'ok':'bad')+'"><span class="check-dot">'+(page.completed?'✓':'!')+'</span><div><strong><a href="'+esc(page.href)+'">'+esc(page.id)+'</a></strong><div class="check-detail">'+esc(page.summary||'No successful check recorded.')+'</div></div></div>').join('');
-    const probes=(state.checks||[]).map((item)=>{
+    const pageById=new Map((state.pages||[]).map((page)=>[page.id,page]));
+    const rows=(state.checks||[]).map((item)=>{
       const informational=item.informational===true;
       const rowClass=informational?'info':(item.ok?'ok':'bad');
       const marker=informational?'i':(item.ok?'✓':'!');
+      const page=pageById.get(item.id);
+      const label=esc(item.label||labels[item.id]||item.id);
+      const heading=page?.href?'<a href="'+esc(page.href)+'">'+label+'</a>':label;
       const link=item.url?'<div class="check-detail"><a href="'+esc(item.url)+'" target="_blank" rel="noreferrer">Open setup PR'+(item.number?' #'+esc(item.number):'')+'</a></div>':'';
-      return '<div class="check-row '+rowClass+'"><span class="check-dot">'+marker+'</span><div><strong>'+esc(item.label||item.id)+'</strong><div class="check-detail">'+esc(item.summary||item.state||'')+'</div>'+link+'</div></div>';
+      return '<div class="check-row '+rowClass+'"><span class="check-dot">'+marker+'</span><div><strong>'+heading+'</strong><div class="check-detail">'+esc(item.summary||item.state||'')+'</div>'+link+'</div></div>';
     }).join('');
     content().className='';
     content().innerHTML='<div class="paseo-grid">'
-      +'<section class="setup-card"><h3>Approved setup summary</h3><p>Review each saved selection before enabling automation. Each section links back to its setup page.</p><div class="checklist">'+pages+'</div><div class="notice">Repository: <strong>'+esc(state.repository||'')+'</strong> · Base branch: <strong>'+esc(state.baseBranch||'')+'</strong></div></section>'
-      +'<section class="setup-card"><h3>Final safe checks</h3><p>Recheck verifies the selected workflows. Managed repository setup issues are repaired with a setup pull request; once that PR has been created, it is informational and does not hold up finishing setup.</p><div class="checklist">'+probes+'</div><div class="inline-actions"><button class="action" id="readiness-recheck" type="button">Recheck</button></div></section>'
+      +'<section class="setup-card"><h3>Final setup check</h3><p>Confirm the saved setup and any repository repair before finishing.</p><div class="checklist">'+rows+'</div><div class="notice">Repository: <strong>'+esc(state.repository||'')+'</strong> · Base branch: <strong>'+esc(state.baseBranch||'')+'</strong></div><div class="inline-actions" style="margin-top:12px"><button class="action" id="readiness-recheck" type="button">Recheck</button></div></section>'
       +'<section class="setup-card"><label class="choice" style="font-size:16px;font-weight:650"><input id="readiness-start" type="checkbox" '+(state.startAutomationDefault?'checked':'')+'> Start automation after setup</label></section></div>';
     document.getElementById('readiness-recheck')?.addEventListener('click',()=>refresh(true));
     const continueButton=document.getElementById('continue');if(continueButton)continueButton.disabled=check.ok!==true;
