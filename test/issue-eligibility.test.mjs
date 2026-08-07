@@ -29,16 +29,19 @@ function deps(ok = true, numbers = []) {
   return { ok, source: 'native', dependencies: numbers, unresolved: ok ? [] : numbers.map((number) => `Blocked by open issue #${number}.`) };
 }
 
-test('candidate source switches between recommended label and all open issues', () => {
+test('candidate source switches between recommended labels and all open issues while retaining rollout compatibility', () => {
   const calls = [];
   const jsonRunner = (_command, args) => { calls.push(args); return []; };
   listIssueCandidates('/repo', config('recommended-labels'), { jsonRunner });
   listIssueCandidates('/repo', config('all-open'), { jsonRunner });
+  assert.equal(calls.length, 3);
   assert.ok(calls[0].includes('--label'));
   assert.ok(calls[0].includes('paseo:ready'));
-  assert.equal(calls[1].includes('--label'), false);
-  assert.ok(calls[1].includes('--state'));
-  assert.ok(calls[1].includes('open'));
+  assert.ok(calls[1].includes('--label'));
+  assert.ok(calls[1].includes('agent-ready'));
+  assert.equal(calls[2].includes('--label'), false);
+  assert.ok(calls[2].includes('--state'));
+  assert.ok(calls[2].includes('open'));
 });
 
 test('blocked lowest-number candidate does not prevent the next eligible issue', () => {
@@ -110,7 +113,9 @@ test('dependency waiting is local state only and requires no blocked lifecycle l
   assert.equal(JSON.stringify(saved[0][1]).includes('paseo:blocked'), false);
 });
 
-test('recommended mode rejects an issue without paseo:ready even if its contract is valid', () => {
+test('recommended mode accepts rollout-compatible agent-ready but rejects an issue with no ready label', () => {
+  const legacy = baseIssueEligibility('/repo', issue(8, { labels: ['agent-ready'] }), config(), { claimed: () => false });
+  assert.equal(legacy.ok, true);
   const result = baseIssueEligibility('/repo', issue(9, { labels: [] }), config(), { claimed: () => false });
   assert.equal(result.ok, false);
   assert.equal(result.kind, 'not-ready');
