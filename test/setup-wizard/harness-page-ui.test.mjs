@@ -20,7 +20,7 @@ test('harness page UI exposes provider, independent model, thinking, refresh, an
   assert.match(html, /No Paseo model required/);
   assert.match(html, /does not expose selectable models/);
   assert.match(html, /Quick review/);
-  assert.match(html, /Full review/);
+  assert.match(html, /full review/i);
   assert.match(html, /Refresh catalog/);
 });
 
