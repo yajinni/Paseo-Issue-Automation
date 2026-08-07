@@ -8,6 +8,7 @@ import {
   configureChatGptReviewChat,
 } from './chatgpt-profile-readiness.mjs';
 import { installPlaywrightLibrary } from './playwright-installer.mjs';
+import { loadPrReviewStore, savePrAutomationConfig } from './pr-review-store.mjs';
 import { run as defaultRun } from './process.mjs';
 import { parseRepositoryApiPath, resolveRepositoryApiContext } from './repository-api-context.mjs';
 import { discoverPaseoCatalog } from './setup-discovery.mjs';
@@ -87,19 +88,28 @@ async function harnessCatalog(context, options = {}) {
   };
 }
 
-function chatGptStatus(options = {}) {
+function projectConversationUrl(root, options = {}) {
+  try {
+    const loadStore = options.loadPrReviewStore || loadPrReviewStore;
+    return loadStore(root)?.config?.browserReview?.projectConversationUrl || null;
+  } catch {
+    return null;
+  }
+}
+
+function chatGptStatus(root, options = {}) {
   const status = (options.chatGptPrerequisites || chatGptProfilePrerequisites)();
   return {
     libraryInstalled: status.libraryInstalled === true,
     chromiumInstalled: status.chromiumInstalled === true,
     profileExists: status.profileExists === true,
-    conversationUrl: status.conversationUrl || null,
+    conversationUrl: projectConversationUrl(root, options) || status.conversationUrl || null,
     state: status.state || null,
   };
 }
 
-async function openChatGptProfile(options = {}) {
-  const status = chatGptStatus(options);
+async function openChatGptProfile(root, options = {}) {
+  const status = chatGptStatus(root, options);
   if (!status.libraryInstalled || !status.chromiumInstalled) {
     throw new Error('Install Playwright and Chromium before opening the ChatGPT Profile.');
   }
@@ -111,20 +121,24 @@ async function openChatGptProfile(options = {}) {
     opened: true,
     sessionId: session?.leaseId || null,
     foreground,
-    status: chatGptStatus(options),
+    status: chatGptStatus(root, options),
   };
 }
 
-async function saveChatGptConversation(body = {}, options = {}) {
+async function saveChatGptConversation(root, body = {}, options = {}) {
   const configured = await configureChatGptReviewChat({
     mode: 'existing',
     conversationUrl: body.conversationUrl,
     save: options.saveBrowserConfig,
   });
+  const saveReviewConfig = options.savePrAutomationConfig || savePrAutomationConfig;
+  saveReviewConfig(root, {
+    browserReview: { projectConversationUrl: configured.conversationUrl },
+  });
   return {
     configured: true,
     conversationUrl: configured.conversationUrl,
-    status: chatGptStatus(options),
+    status: chatGptStatus(root, options),
   };
 }
 
@@ -142,23 +156,23 @@ export async function managerConfigurationApiRequest({ method, pathname, body = 
     return response(await harnessCatalog(context, options));
   }
   if (context.pathname === '/api/configuration/chatgpt-profile' && method === 'GET') {
-    return response({ status: chatGptStatus(options) });
+    return response({ status: chatGptStatus(context.root, options) });
   }
   if (context.pathname === '/api/configuration/chatgpt-profile/playwright/install' && method === 'POST') {
     const install = options.installPlaywright || installPlaywrightLibrary;
     const result = await install(options.playwrightOptions || {});
-    return response({ result, status: chatGptStatus(options) });
+    return response({ result, status: chatGptStatus(context.root, options) });
   }
   if (context.pathname === '/api/configuration/chatgpt-profile/chromium/install' && method === 'POST') {
     const install = options.installChromium || installPlaywrightChromium;
     const result = await install(options.browserOptions || {});
-    return response({ result, status: chatGptStatus(options) });
+    return response({ result, status: chatGptStatus(context.root, options) });
   }
   if (context.pathname === '/api/configuration/chatgpt-profile/open' && method === 'POST') {
-    return response(await openChatGptProfile(options));
+    return response(await openChatGptProfile(context.root, options));
   }
   if (context.pathname === '/api/configuration/chatgpt-profile/chat' && method === 'POST') {
-    return response(await saveChatGptConversation(body, options));
+    return response(await saveChatGptConversation(context.root, body, options));
   }
 
   return response({ error: `Configuration route ${context.pathname} is not available for ${method}.` }, method === 'GET' ? 404 : 405);
