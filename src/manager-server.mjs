@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
 import { enhanceManagerWithAutomationReviews } from './manager-automation-reviews-ui.mjs';
 import { enhanceManagerWithConfigIntegrationMaintenance } from './manager-config-integration-maintenance-ui.mjs';
+import { managerConfigurationApiRequest } from './manager-configuration-service.mjs';
 import { enhanceManagerWithConfigurationTabs } from './manager-configuration-tabs-ui.mjs';
 import { enhanceManagerWithInteractionPolish } from './manager-interaction-ui.mjs';
 import { enhanceManagerWithIssueProcessingFlow } from './manager-issue-processing-flow-ui.mjs';
@@ -114,6 +115,7 @@ export async function startManagerServer({
   issuesSetupOptions = {},
   reviewSetupOptions = {},
   readinessSetupOptions = {},
+  managerConfigurationOptions = {},
 } = {}) {
   const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const reviewWorkers = reviewWorkerManager || createManagerReviewWorkerPool();
@@ -154,6 +156,13 @@ export async function startManagerServer({
       }
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method) ? await readBody(request) : {};
       const pageApiOptions = { rootDir, credentialStore: credentials };
+
+      const managerConfiguration = await managerConfigurationApiRequest({ method: request.method, pathname: url.pathname, body }, {
+        rootDir,
+        credentialStore: credentials,
+        ...managerConfigurationOptions,
+      });
+      if (managerConfiguration.handled) { json(response, managerConfiguration.status, managerConfiguration.body); return; }
 
       const paseoSetup = await paseoSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { ...pageApiOptions, ...paseoSetupOptions });
       if (paseoSetup.handled) { json(response, paseoSetup.status, paseoSetup.body); return; }
