@@ -6,6 +6,8 @@ import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
 import { listRepositories } from './repository-registry.mjs';
 import { loadConfig } from './state.mjs';
+import { finalReadinessApiRequest } from './setup-wizard/final-readiness-api.mjs';
+import { enhanceSetupWizardWithFinalReadiness } from './setup-wizard/final-readiness-ui.mjs';
 import { githubSetupPageApiRequest } from './setup-wizard/github-page-api.mjs';
 import { enhanceSetupWizardWithGitHubPage } from './setup-wizard/github-page-ui.mjs';
 import { harnessSetupPageApiRequest } from './setup-wizard/harness-page-api.mjs';
@@ -67,6 +69,7 @@ export async function startManagerServer({
   workspaceSetupOptions = {},
   issuesSetupOptions = {},
   reviewSetupOptions = {},
+  readinessSetupOptions = {},
 } = {}) {
   const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const reviewWorkers = reviewWorkerManager || createManagerReviewWorkerPool();
@@ -96,7 +99,8 @@ export async function startManagerServer({
         const githubHtml = enhanceSetupWizardWithGitHubPage(harnessHtml);
         const workspaceHtml = enhanceSetupWizardWithWorkspacePage(githubHtml);
         const issuesHtml = enhanceSetupWizardWithIssuesPage(workspaceHtml);
-        response.end(enhanceSetupWizardWithReviewPage(issuesHtml));
+        const reviewHtml = enhanceSetupWizardWithReviewPage(issuesHtml);
+        response.end(enhanceSetupWizardWithFinalReadiness(reviewHtml));
         return;
       }
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method) ? await readBody(request) : {};
@@ -119,6 +123,14 @@ export async function startManagerServer({
 
       const reviewSetup = await reviewSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, ...reviewSetupOptions });
       if (reviewSetup.handled) { json(response, reviewSetup.status, reviewSetup.body); return; }
+
+      const readinessSetup = await finalReadinessApiRequest({ method: request.method, pathname: url.pathname, body }, {
+        rootDir,
+        workerManager: workers,
+        reviewWorkerManager: reviewWorkers,
+        ...readinessSetupOptions,
+      });
+      if (readinessSetup.handled) { json(response, readinessSetup.status, readinessSetup.body); return; }
 
       const result = managerApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, workerManager: workers, reviewWorkerManager: reviewWorkers });
       if (!result.handled) { json(response, 404, { error: 'Not found' }); return; }
