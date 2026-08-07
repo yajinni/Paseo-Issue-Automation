@@ -8,11 +8,7 @@ import {
   validateCheckoutCandidate,
 } from './repository-checkouts.mjs';
 import { ensurePaseoWorkspaceReadiness } from './paseo-workspace-readiness.mjs';
-import {
-  loadSetupSessionStore,
-  recordSetupPageCheck,
-  saveSetupPage,
-} from './store.mjs';
+import { loadSetupSessionStore, recordSetupPageCheck, saveSetupPage } from './store.mjs';
 
 function activeSession(options) {
   const store = loadSetupSessionStore(options);
@@ -48,18 +44,10 @@ async function paseoContext(session, credentialStore, options = {}) {
   if (!host) throw new Error('The verified Paseo host is missing. Recheck the Paseo page first.');
   let stored = null;
   if (credentialStore) {
-    try { stored = await credentialStore.read(host); }
-    catch { stored = null; }
+    try { stored = await credentialStore.read(host); } catch { stored = null; }
   }
   const contextFactory = options.contextFactory || createPaseoConnectionContext;
-  return contextFactory({
-    host,
-    password: stored?.password || null,
-    cwd: options.cwd,
-    env: options.env,
-    run: options.runner,
-    runJson: options.runJson,
-  });
+  return contextFactory({ host, password: stored?.password || null, cwd: options.cwd, env: options.env, run: options.runner, runJson: options.runJson });
 }
 
 function publicCandidate(candidate) {
@@ -74,9 +62,8 @@ function publicCandidate(candidate) {
   };
 }
 
-function publicStatus({ session, discovery, workspace = null, blocker = null }) {
+function publicStatus({ session, discovery, workspace = null, blocker = null, options = {} }) {
   const current = selection(session);
-  const pageCheck = session.pages?.checkout?.lastCheck || null;
   return {
     repository: repositoryFromSession(session),
     baseBranch: session.baseBranch,
@@ -84,14 +71,11 @@ function publicStatus({ session, discovery, workspace = null, blocker = null }) 
     candidates: (discovery?.candidates || []).map(publicCandidate),
     safeChoices: (discovery?.valid || []).map(publicCandidate),
     automaticAction: discovery?.valid?.length === 0 ? 'clone-managed' : discovery?.valid?.length === 1 ? 'reuse-existing' : 'choose-existing',
-    managedRoot: managedRepositoriesRoot({ rootDir: session.rootDir }),
+    managedRoot: options.managedRoot || managedRepositoriesRoot({ rootDir: options.rootDir }),
     workspace,
     blocker,
-    check: pageCheck || {
-      ok: false,
-      summary: blocker?.message || 'Prepare a safe local checkout and Paseo workspace.',
-      blockers: blocker ? [blocker] : [],
-    },
+    checkoutCheck: session.pages?.checkout?.lastCheck || null,
+    workspaceCheck: session.pages?.workspace?.lastCheck || null,
     technicalDetails: {
       searchedPaths: discovery?.searchedPaths || [],
       candidateCount: discovery?.candidates?.length || 0,
@@ -103,8 +87,7 @@ function publicStatus({ session, discovery, workspace = null, blocker = null }) 
 }
 
 function discoveryFor(session, options = {}) {
-  const repository = repositoryFromSession(session);
-  return (options.discover || discoverRepositoryCheckouts)(repository, session.baseBranch, {
+  return (options.discover || discoverRepositoryCheckouts)(repositoryFromSession(session), session.baseBranch, {
     registeredRepositories: options.registeredRepositories,
     paseoWorkspaces: options.paseoWorkspaces || [],
     managedRoot: options.managedRoot || managedRepositoriesRoot({ rootDir: options.rootDir }),
@@ -116,15 +99,13 @@ function discoveryFor(session, options = {}) {
 
 export function getWorkspaceSetupPageStatus(options = {}) {
   const session = activeSession(options);
-  const discovery = discoveryFor(session, options);
-  return publicStatus({ session, discovery });
+  return publicStatus({ session, discovery: discoveryFor(session, options), options });
 }
 
 function selectedExistingCheckout(session, input, options = {}) {
   const requested = String(input.checkoutPath || selection(session).checkoutPath || '').trim();
   if (!requested) return null;
-  const repository = repositoryFromSession(session);
-  const validation = (options.validateCheckout || validateCheckoutCandidate)(requested, repository, session.baseBranch, {
+  const validation = (options.validateCheckout || validateCheckoutCandidate)(requested, repositoryFromSession(session), session.baseBranch, {
     runner: options.runner || defaultRun,
     remoteProbe: options.remoteProbe,
   });
@@ -140,8 +121,17 @@ function selectedExistingCheckout(session, input, options = {}) {
     };
   }
   const register = options.register || ((checkoutPath) => addRepository(checkoutPath, { rootDir: options.rootDir, runner: options.runner || defaultRun }));
-  const registration = register(validation.path);
-  return { ok: true, checkout: validation, registration };
+  return { ok: true, checkout: validation, registration: register(validation.path) };
+}
+
+function recordCheckoutReady(checkout, options) {
+  let session = saveSetupPage('checkout', { selections: { checkoutPath: checkout.path, checkoutManaged: checkout.managed === true } }, options);
+  session = recordSetupPageCheck('checkout', {
+    ok: true,
+    summary: 'A clean registered checkout is ready.',
+    blockers: [],
+  }, options);
+  return session;
 }
 
 export async function prepareWorkspaceSetupPage(input = {}, options = {}) {
@@ -149,6 +139,7 @@ export async function prepareWorkspaceSetupPage(input = {}, options = {}) {
   const repository = repositoryFromSession(session);
   const priorDiscovery = discoveryFor(session, options);
   let checkoutResult = selectedExistingCheckout(session, input, options);
+
   if (!checkoutResult) {
     checkoutResult = (options.ensureCheckout || ensureRepositoryCheckout)(repository, session.baseBranch, {
       registeredRepositories: options.registeredRepositories,
@@ -160,12 +151,8 @@ export async function prepareWorkspaceSetupPage(input = {}, options = {}) {
       register: options.register,
     });
     if (checkoutResult.status === 'choice-required') {
-      session = recordSetupPageCheck('checkout', {
-        ok: false,
-        summary: checkoutResult.blocker.message,
-        blockers: [checkoutResult.blocker],
-      }, options);
-      return publicStatus({ session, discovery: { ...priorDiscovery, valid: checkoutResult.choices || priorDiscovery.valid }, blocker: checkoutResult.blocker });
+      session = recordSetupPageCheck('checkout', { ok: false, summary: checkoutResult.blocker.message, blockers: [checkoutResult.blocker] }, options);
+      return publicStatus({ session, discovery: priorDiscovery, blocker: checkoutResult.blocker, options });
     }
     if (checkoutResult.status === 'blocked') checkoutResult = { ok: false, blocker: checkoutResult.blocker };
     else if (checkoutResult.checkout) checkoutResult = { ok: true, checkout: checkoutResult.checkout, registration: checkoutResult.registration };
@@ -178,11 +165,12 @@ export async function prepareWorkspaceSetupPage(input = {}, options = {}) {
       recoveryAction: 'Inspect checkout details and retry.',
     };
     session = recordSetupPageCheck('checkout', { ok: false, summary: blocker.message, blockers: [blocker] }, options);
-    return publicStatus({ session, discovery: priorDiscovery, blocker });
+    return publicStatus({ session, discovery: priorDiscovery, blocker, options });
   }
 
-  const context = await paseoContext(session, options.credentialStore, options);
   const checkout = checkoutResult.checkout;
+  session = recordCheckoutReady(checkout, options);
+  const context = await paseoContext(session, options.credentialStore, options);
   const workspaceResult = (options.ensureWorkspace || ensurePaseoWorkspaceReadiness)(context, {
     checkout: checkout.path,
     repositoryRemote: checkout.remote,
@@ -191,40 +179,32 @@ export async function prepareWorkspaceSetupPage(input = {}, options = {}) {
     platform: options.platform,
     title: `Issue Coding Automation — ${repository.nameWithOwner}`,
   });
+
   if (!workspaceResult.ok) {
-    session = saveSetupPage('checkout', { selections: { checkoutPath: checkout.path, checkoutManaged: checkout.managed === true } }, options);
-    session = recordSetupPageCheck('checkout', {
-      ok: false,
-      summary: workspaceResult.blocker?.message || 'Paseo workspace readiness failed.',
-      blockers: workspaceResult.blocker ? [workspaceResult.blocker] : [],
-    }, options);
-    return publicStatus({ session, discovery: priorDiscovery, workspace: workspaceResult, blocker: workspaceResult.blocker });
+    const blocker = workspaceResult.blocker || {
+      code: 'paseo-workspace-readiness-failed',
+      message: 'Paseo workspace readiness failed.',
+      recoveryAction: 'Inspect the workspace readiness details and retry.',
+    };
+    session = recordSetupPageCheck('workspace', { ok: false, summary: blocker.message, blockers: [blocker] }, options);
+    return publicStatus({ session, discovery: priorDiscovery, workspace: workspaceResult, blocker, options });
   }
 
   const workspaceId = String(workspaceResult.workspace?.workspace?.id || workspaceResult.workspace?.id || '').trim();
   session = saveSetupPage('checkout', {
-    selections: {
-      checkoutPath: checkout.path,
-      checkoutManaged: checkout.managed === true,
-      workspaceId,
-    },
-    managedCheckout: {
-      path: checkout.path,
-      managed: checkout.managed === true,
-      workspaceId,
-    },
+    selections: { checkoutPath: checkout.path, checkoutManaged: checkout.managed === true, workspaceId },
+    managedCheckout: { path: checkout.path, managed: checkout.managed === true, workspaceId },
   }, options);
-  session = recordSetupPageCheck('checkout', {
+  session = recordSetupPageCheck('workspace', {
     ok: true,
-    summary: 'Local checkout and Paseo workspace are ready for isolated issue worktrees.',
+    summary: 'Paseo workspace and isolated-worktree readiness are verified.',
     blockers: [],
   }, options);
-  return publicStatus({ session, discovery: priorDiscovery, workspace: workspaceResult });
+  return publicStatus({ session, discovery: priorDiscovery, workspace: workspaceResult, options });
 }
 
 export async function recheckWorkspaceSetupPage(options = {}) {
   const session = activeSession(options);
   const current = selection(session);
-  if (!current.checkoutPath) return prepareWorkspaceSetupPage({}, options);
-  return prepareWorkspaceSetupPage({ checkoutPath: current.checkoutPath }, options);
+  return prepareWorkspaceSetupPage(current.checkoutPath ? { checkoutPath: current.checkoutPath } : {}, options);
 }
