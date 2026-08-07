@@ -15,6 +15,15 @@ test('Configuration is grouped into setup-style operational sections', () => {
   }
 });
 
+test('manager configuration uses the same review workflow wording as setup', () => {
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Light model review → Manual review/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Light model review → Web ChatGPT full review/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /I selected a heavy review model to do the job\./);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Light model review rounds/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /fullField\.hidden = workflow === 'quick-manual'/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Automatic merge is unavailable for Light model review → Manual review/);
+});
+
 test('Configuration shows dirty state inline validation Save and Discard without changing submit semantics', () => {
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /snapshotConfigForm/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /validateConfigForm/);
