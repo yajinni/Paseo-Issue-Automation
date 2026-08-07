@@ -56,10 +56,6 @@ function branches(repository) {
   };
 }
 
-test('GitHub page selects repository and recommends its default base branch', () => {
-  const rootDir = root(test.mock ? { after: test.mock.fn() } : { after() {} });
-});
-
 test('repository selection loads branches, defaults to the recommended branch, and completes the page', (t) => {
   const rootDir = root(t);
   const options = { rootDir, accountStatus: () => accountStatus(), repositoryLoader: repos, branchLoader: branches };
