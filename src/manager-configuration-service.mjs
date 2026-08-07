@@ -57,6 +57,57 @@ function publicCatalog(catalog) {
   };
 }
 
+function commandDiagnostic(args, result = {}) {
+  const stderr = String(result?.stderr || '').trim();
+  const stdout = String(result?.stdout || '').trim();
+  const message = stderr || (result?.ok === true ? '' : stdout);
+  return redactSensitive({
+    command: `paseo ${args.map(String).join(' ')}`,
+    ok: result?.ok === true,
+    exitCode: result?.exitCode ?? null,
+    timedOut: result?.timedOut === true,
+    timeoutMs: result?.timeoutMs ?? null,
+    resolvedCommand: result?.resolvedCommand || null,
+    resolutionSource: result?.resolutionSource || null,
+    message: message.slice(0, 1200) || null,
+  });
+}
+
+function harnessDiagnostics(host, catalog, commands) {
+  const providerList = commands.find((item) => item.command === 'paseo provider ls --json') || null;
+  return {
+    host,
+    providerCount: catalog.providers.length,
+    catalogComplete: catalog.complete,
+    catalogErrors: catalog.errors,
+    providerList,
+    commands,
+  };
+}
+
+function emptyHarnessMessage(diagnostics) {
+  const parts = [`Paseo did not return any available coding harnesses from ${diagnostics.host}.`];
+  const providerList = diagnostics.providerList;
+  if (providerList) {
+    if (providerList.resolvedCommand) {
+      const source = providerList.resolutionSource ? `; source: ${providerList.resolutionSource}` : '';
+      parts.push(`CLI resolved to ${providerList.resolvedCommand}${source}.`);
+    }
+    if (!providerList.ok) {
+      const exit = providerList.exitCode == null ? '' : ` (exit ${providerList.exitCode})`;
+      const timeout = providerList.timedOut ? ' The command timed out.' : '';
+      const detail = providerList.message ? ` ${providerList.message}` : '';
+      parts.push(`paseo provider ls --json failed${exit}.${timeout}${detail}`.trim());
+    } else {
+      parts.push('paseo provider ls --json succeeded, but no enabled/available provider was usable.');
+    }
+  } else {
+    parts.push('Paseo provider discovery did not record a provider-list command.');
+  }
+  if (diagnostics.catalogErrors.length) parts.push(`Catalog detail: ${diagnostics.catalogErrors.join(' | ')}`);
+  return parts.join(' ');
+}
+
 async function harnessCatalog(context, options = {}) {
   const session = matchingSetupSession(context.repository.repository, options);
   if (!session) throw new Error('No saved Paseo setup connection was found for this repository. Open Connect Paseo and verify it first.');
@@ -73,18 +124,32 @@ async function harnessCatalog(context, options = {}) {
     runJson: options.runJson,
   });
   const loader = options.catalogLoader || ((root, discoveryOptions) => discoverPaseoCatalog(root, discoveryOptions));
+  const commands = [];
   const runner = (command, args, runnerOptions = {}) => {
-    if (command === 'paseo') return paseo.command(args, runnerOptions);
+    if (command === 'paseo') {
+      const result = paseo.command(args, runnerOptions);
+      commands.push(commandDiagnostic(args, result));
+      return result;
+    }
     return (options.run || defaultRun)(command, args, runnerOptions);
   };
-  const catalog = await loader(context.root, {
+  const rawCatalog = await loader(context.root, {
     runner,
     commandTimeoutMs: options.commandTimeoutMs,
     totalTimeoutMs: options.totalTimeoutMs,
   });
+  const catalog = publicCatalog(rawCatalog);
+  const diagnostics = harnessDiagnostics(host, catalog, commands);
+  if (!catalog.providers.length) {
+    const error = new Error(emptyHarnessMessage(diagnostics));
+    error.code = 'PASEO_HARNESS_DISCOVERY_EMPTY';
+    error.diagnostics = diagnostics;
+    throw error;
+  }
   return {
     host,
-    catalog: publicCatalog(catalog),
+    catalog,
+    diagnostics,
   };
 }
 
