@@ -1,6 +1,10 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { LEGACY_LABELS, PASEO_LABELS, isManagedLifecycleLabel } from '../label-catalog.mjs';
 import { validateIssueBody } from '../issue-contract.mjs';
-import { loadConfig, loadRuntime, saveConfig, saveRuntime } from '../state.mjs';
+import { atomicWrite, loadConfig, loadRuntime, saveConfig, saveRuntime, statePaths } from '../state.mjs';
+
+export const EXISTING_INSTALL_MIGRATION_VERSION = 1;
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
@@ -8,6 +12,30 @@ function unique(values) {
 
 function issueLabels(issue) {
   return unique((issue?.labels || []).map((label) => typeof label === 'string' ? label : label?.name).filter(Boolean));
+}
+
+function migrationFile(root) {
+  return path.join(statePaths(root).root, 'setup-existing-install-migration.json');
+}
+
+export function loadExistingInstallMigration(root) {
+  try {
+    const file = migrationFile(root);
+    if (!existsSync(file)) return null;
+    const value = JSON.parse(readFileSync(file, 'utf8'));
+    return value?.version === EXISTING_INSTALL_MIGRATION_VERSION ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveExistingInstallMigration(root, value) {
+  const normalized = {
+    version: EXISTING_INSTALL_MIGRATION_VERSION,
+    ...value,
+  };
+  atomicWrite(migrationFile(root), `${JSON.stringify(normalized, null, 2)}\n`);
+  return normalized;
 }
 
 export function classifyLegacyIssueForMigration(issue) {
@@ -67,14 +95,24 @@ export function classifyLegacyIssueForMigration(issue) {
   };
 }
 
+function pendingSetupPullRequest(value) {
+  if (!value?.number) return false;
+  if (value.state === 'open') return true;
+  return value.state === 'merged' && (!value.syncedAt || !value.installationVerifiedAt);
+}
+
 export function buildExistingInstallMigrationPlan({
   configVersion = null,
+  controllerMode = null,
   issues = [],
   templateCurrent = false,
+  setupPullRequest = null,
   activeCoding = [],
   openPullRequests = [],
   reviewJobs = [],
   fixJobs = [],
+  skippedIssueNumbers = [],
+  historyCount = 0,
 } = {}) {
   const issueChanges = issues.map(classifyLegacyIssueForMigration)
     .filter((item) => item.addLabels.length || item.removeLabels.length || item.dependencyWaiting || item.notes.length);
@@ -84,8 +122,17 @@ export function buildExistingInstallMigrationPlan({
     code: 'ambiguous-legacy-blocked-state',
     message: `${ambiguous.length} legacy blocked issue(s) cannot be migrated automatically.`,
     issueNumbers: ambiguous.map((item) => item.issueNumber),
+    recoveryAction: 'Inspect the native dependency state for these issues and resolve the ambiguity before migration.',
+  });
+  if (pendingSetupPullRequest(setupPullRequest)) blockers.push({
+    code: 'pending-setup-pull-request',
+    message: `Setup pull request #${setupPullRequest.number} must be reconciled before existing-install migration.`,
+    pullRequestNumber: Number(setupPullRequest.number),
+    recoveryAction: 'Merge or otherwise resolve the setup pull request, synchronize the configured base branch, and verify installed content before retrying migration.',
   });
   return {
+    version: EXISTING_INSTALL_MIGRATION_VERSION,
+    controllerMode,
     config: {
       fromVersion: configVersion,
       toVersion: 3,
@@ -96,14 +143,26 @@ export function buildExistingInstallMigrationPlan({
       current: templateCurrent === true,
       setupPullRequestRequired: templateCurrent !== true,
       trackedFileMutationAllowedDirectly: false,
+      guidance: templateCurrent === true
+        ? 'The installed issue template already matches the current managed template.'
+        : 'Update managed issue-template content only through the reviewed setup pull-request flow.',
     },
     preserved: {
       activeCodingCount: activeCoding.length,
       openPullRequestCount: openPullRequests.length,
       reviewJobCount: reviewJobs.length,
       fixJobCount: fixJobs.length,
+      skippedIssueNumbers: unique(skippedIssueNumbers.map(Number).filter(Number.isInteger)).sort((a, b) => a - b),
+      historyCount: Math.max(0, Number(historyCount) || 0),
       activeWorkRestarted: false,
       prHeadsRewritten: false,
+      userOwnedLabelsDeleted: false,
+      currentReviewLabelsRewritten: false,
+    },
+    rollback: {
+      machineLocalState: 'Back up the repository Git common-dir paseo-issue-automation state directory before Apply. Restore that backup only while coding/review workers are stopped and claims are paused.',
+      repositoryFiles: 'No tracked repository file is changed directly by this migration. Template changes remain isolated to the reviewed setup pull-request flow.',
+      pullRequests: 'Existing pull-request heads and branches are never rewritten by this migration.',
     },
     blockers,
     canApply: blockers.length === 0,
@@ -149,19 +208,17 @@ export function applyExistingInstallMigration(root, {
     appliedIssues.push(change.issueNumber);
   }
 
-  const audit = {
-    completedAt: now().toISOString(),
+  const audit = saveExistingInstallMigration(root, {
+    status: plan.template.setupPullRequestRequired ? 'awaiting-template-reconciliation' : 'completed',
+    appliedAt: now().toISOString(),
     configVersion: 3,
     claimsEnabled: false,
     issueNumbers: appliedIssues,
     templateSetupPullRequestRequired: plan.template.setupPullRequestRequired === true,
     preserved: plan.preserved,
-  };
-  saveRuntime(root, {
-    ...loadRuntime(root),
-    claimsEnabled: false,
-    existingInstallMigration: audit,
+    rollback: plan.rollback,
   });
+  saveRuntime(root, { ...loadRuntime(root), claimsEnabled: false });
   return audit;
 }
 
