@@ -26,7 +26,7 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
       + '<p class="muted">GitHub access is verified for the selected repository using the safe review-protocol capability check. The check must not modify repository state.</p></section>';
   }
   function autoMergeControl() {
-    if (!autoMergeAvailable()) return '<div class="notice">Automatic merge is unavailable for Quick → Manual review. A person must merge the coding PR after full manual review.</div>';
+    if (!autoMergeAvailable()) return '<div class="notice">Automatic merge is unavailable for Light model review → Manual review. A person must merge the coding PR after manual review.</div>';
     const checked = state?.selection?.autoMergeApproved === true ? 'checked' : '';
     return '<label class="choice"><input id="review-auto-merge" type="checkbox" ' + checked + '> Automatically merge approved coding PRs</label>'
       + '<div class="notice">Off by default. Paseo can request GitHub auto-merge only after the exact current head has full approval, required checks pass, the configured base is still current, no findings remain, and repository policy permits merge. Paseo never bypasses checks, reviews, protections, or rulesets.</div>';
@@ -34,24 +34,26 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   function render() {
     if (!onPage() || !state || !content()) return;
     const s = state.selection || {};
+    const manualReview = s.workflow === 'quick-manual';
     const workflowMissing = !['quick-manual', 'quick-web-chatgpt', 'full-immediate'].includes(s.workflow);
     const roundsMissing = !Number.isInteger(Number(s.quickMaxRounds)) || Number(s.quickMaxRounds) < 1 || Number(s.quickMaxRounds) > 20
-      || !Number.isInteger(Number(s.fullMaxRounds)) || Number(s.fullMaxRounds) < 1 || Number(s.fullMaxRounds) > 20;
+      || (!manualReview && (!Number.isInteger(Number(s.fullMaxRounds)) || Number(s.fullMaxRounds) < 1 || Number(s.fullMaxRounds) > 20));
+    const fullRoundsControl = manualReview ? ''
+      : '<div class="field"><label for="review-full-rounds">Maximum full-review and correction rounds</label><input id="review-full-rounds" type="number" min="1" max="20" value="' + escape(s.fullMaxRounds ?? 3) + '"></div>';
     content().className = '';
     content().innerHTML = '<div class="paseo-grid">'
-      + '<section class="' + cardClass(workflowMissing) + '"><h3>Review workflow</h3><p>Choose the full-review path explicitly. The coding and review models were selected earlier; this page controls how review proceeds.</p>'
-      + '<label class="choice"><input type="radio" name="review-workflow" value="quick-manual" ' + (s.workflow === 'quick-manual' ? 'checked' : '') + '> Quick review → Manual review</label>'
-      + '<label class="choice"><input type="radio" name="review-workflow" value="quick-web-chatgpt" ' + (s.workflow === 'quick-web-chatgpt' ? 'checked' : '') + '> Quick review → Web ChatGPT full review</label>'
-      + '<label class="choice"><input type="radio" name="review-workflow" value="full-immediate" ' + (s.workflow === 'full-immediate' ? 'checked' : '') + '> Full pull request review immediately</label>'
+      + '<section class="' + cardClass(workflowMissing) + '"><h3>Review workflow</h3><p>Choose the review path. The coding and review models were selected earlier; this page controls how review proceeds.</p>'
+      + '<label class="choice"><input type="radio" name="review-workflow" value="quick-manual" ' + (s.workflow === 'quick-manual' ? 'checked' : '') + '> Light model review → Manual review</label>'
+      + '<label class="choice"><input type="radio" name="review-workflow" value="quick-web-chatgpt" ' + (s.workflow === 'quick-web-chatgpt' ? 'checked' : '') + '> Light model review → Web ChatGPT full review</label>'
+      + '<label class="choice"><input type="radio" name="review-workflow" value="full-immediate" ' + (s.workflow === 'full-immediate' ? 'checked' : '') + '> I selected a heavy review model to do the job.</label>'
       + '<div class="notice">' + escape(state.explanations?.quick || '') + '</div></section>'
       + '<section class="' + cardClass(roundsMissing) + '"><h3>Review rounds</h3>'
-      + '<div class="field"><label for="review-quick-rounds">Maximum quick-review and correction rounds</label><input id="review-quick-rounds" type="number" min="1" max="20" value="' + escape(s.quickMaxRounds ?? 3) + '"></div>'
-      + '<div class="field"><label for="review-full-rounds">Maximum full-review and correction rounds</label><input id="review-full-rounds" type="number" min="1" max="20" value="' + escape(s.fullMaxRounds ?? 3) + '"></div>'
-      + '<p>Initial review counts as round 1. Quick-review exhaustion hands unresolved findings to the selected full reviewer instead of stopping the PR.</p>'
+      + '<div class="field"><label for="review-quick-rounds">Maximum light-model review and correction rounds</label><input id="review-quick-rounds" type="number" min="1" max="20" value="' + escape(s.quickMaxRounds ?? 3) + '"></div>'
+      + fullRoundsControl
+      + '<p>Initial review counts as round 1. Light-model review exhaustion hands unresolved findings to the selected next reviewer instead of stopping the PR.</p>'
       + autoMergeControl()
       + '<p class="muted">Review settings save automatically when changed.</p></section>'
       + profileCard()
-      + '<section class="setup-card"><h3>Prompt previews</h3><p>Quick and full review prompts are versioned defaults. They are copyable but not editable during initial setup.</p><div class="notice">Quick prompt: focused issue/acceptance/validation check. Full prompt: broader changed-area and surrounding-code review.</div></section>'
       + '</div>';
     document.querySelectorAll('input[name="review-workflow"]').forEach((input) => input.addEventListener('change', saveSettings));
     document.getElementById('review-quick-rounds')?.addEventListener('change', saveSettings);
@@ -70,7 +72,7 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   async function saveSettings() {
     if (loading) return; loading = true;
     try {
-      state = await api('/api/setup/review/save', { method: 'POST', body: JSON.stringify({ workflow: selectedWorkflow(), quickMaxRounds: Number(document.getElementById('review-quick-rounds')?.value || 3), fullMaxRounds: Number(document.getElementById('review-full-rounds')?.value || 3), autoMergeApproved: autoMergeAvailable() && document.getElementById('review-auto-merge')?.checked === true }) });
+      state = await api('/api/setup/review/save', { method: 'POST', body: JSON.stringify({ workflow: selectedWorkflow(), quickMaxRounds: Number(document.getElementById('review-quick-rounds')?.value || state?.selection?.quickMaxRounds || 3), fullMaxRounds: Number(document.getElementById('review-full-rounds')?.value || state?.selection?.fullMaxRounds || 3), autoMergeApproved: autoMergeAvailable() && document.getElementById('review-auto-merge')?.checked === true }) });
       await syncShell(); render();
     } catch (error) { if (typeof showError === 'function') showError(error); }
     finally { loading = false; }
