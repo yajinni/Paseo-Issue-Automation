@@ -1,5 +1,6 @@
 import {
   installChatGptChromium,
+  installChatGptPlaywright,
   openChatGptProfile,
   recheckReviewSetupPage,
   saveReviewChat,
@@ -18,6 +19,7 @@ export async function reviewSetupPageApiRequest({ method, pathname, body = {} },
     if (pathname === '/api/setup/review/save' && method === 'POST') return response(saveReviewSetupPage(body, options));
     if (pathname === '/api/setup/review/chat' && method === 'POST') return response(await saveReviewChat(body, options));
     if (pathname === '/api/setup/review/profile/open' && method === 'POST') return response(await openChatGptProfile(options));
+    if (pathname === '/api/setup/review/playwright/install' && method === 'POST') return response(installChatGptPlaywright(options));
     if (pathname === '/api/setup/review/chromium/install' && method === 'POST') return response(installChatGptChromium(options));
     if (pathname === '/api/setup/review/recheck' && method === 'POST') return response(await recheckReviewSetupPage(options));
     return response({ error: { code: 'review-setup-route-unavailable', message: `Review setup route ${pathname} is not available for ${method}.` } }, method === 'GET' ? 404 : 405);
