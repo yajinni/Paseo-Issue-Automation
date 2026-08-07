@@ -113,41 +113,60 @@ test('a closed historical setup PR does not block when repository setup files ar
   });
   const setup = result.checks.find((item) => item.id === 'setup-pull-request');
   assert.equal(setup.ok, true);
+  assert.equal(setup.informational, false);
   assert.equal(setup.state, 'none');
   assert.equal(setup.pullRequestState, 'closed');
   assert.equal(setup.summary, 'Repository setup files and lifecycle labels are current.');
   assert.equal(result.check.ok, true);
 });
 
-test('final readiness automatically starts a setup repair PR when managed files need fixing', async (t) => {
-  const { rootDir } = fixture(t);
-  let repairCalls = 0;
+test('an open setup repair PR is informational and does not block finishing setup', async (t) => {
+  const { rootDir, repo } = fixture(t);
   const result = await runFinalReadinessChecks({
     rootDir,
-    setupRepairer: async () => {
-      repairCalls += 1;
-      return {
-        ready: false,
-        issuesDetected: true,
-        action: 'created-pr',
-        summary: 'Setup issues detected. Paseo created setup PR #18 to fix them. Auto-merge was requested through normal repository policy.',
-        files: [TEMPLATE_PATH],
-        pullRequest: { number: 18, url: 'https://github.test/pr/18', state: 'open' },
-        autoMerge: { requested: true, enabled: true },
-      };
-    },
+    setupRepairer: async () => ({
+      ready: false,
+      issuesDetected: true,
+      action: 'created-pr',
+      summary: 'Setup issues detected. Paseo created setup PR #18 to fix them. Auto-merge was requested through normal repository policy.',
+      files: [TEMPLATE_PATH],
+      pullRequest: { number: 18, url: 'https://github.test/pr/18', state: 'open' },
+      autoMerge: { requested: true, enabled: true },
+    }),
   });
   const setup = result.checks.find((item) => item.id === 'setup-pull-request');
-  assert.equal(repairCalls, 1);
   assert.equal(setup.ok, false);
+  assert.equal(setup.informational, true);
   assert.equal(setup.label, 'setup pull request');
   assert.equal(setup.state, 'created-pr');
   assert.equal(setup.number, 18);
   assert.equal(setup.url, 'https://github.test/pr/18');
-  assert.match(setup.summary, /created setup PR #18 to fix them/);
   assert.deepEqual(setup.pendingFiles, [TEMPLATE_PATH]);
-  assert.equal(result.check.ok, false);
-  assert.equal(result.check.blockers.some((item) => item.code === 'readiness-repository-setup-pending'), true);
+  assert.equal(result.check.ok, true);
+  assert.equal(result.check.blockers.some((item) => item.code === 'readiness-repository-setup-pending'), false);
+  assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.readiness.completed, true);
+
+  const finished = await finishSetup({ startAutomation: false }, { rootDir });
+  assert.equal(finished.completed, true);
+  assert.equal(loadConfig(repo).setupComplete, true);
+});
+
+test('a merged setup PR waiting for local synchronization is also informational', async (t) => {
+  const { rootDir } = fixture(t);
+  const result = await runFinalReadinessChecks({
+    rootDir,
+    setupRepairer: async () => ({
+      ready: false,
+      issuesDetected: true,
+      action: 'waiting-sync',
+      summary: 'Setup PR #18 merged with the required fixes. Paseo is waiting to synchronize the selected base branch.',
+      files: [TEMPLATE_PATH],
+      pullRequest: { number: 18, url: 'https://github.test/pr/18', state: 'merged' },
+    }),
+  });
+  const setup = result.checks.find((item) => item.id === 'setup-pull-request');
+  assert.equal(setup.informational, true);
+  assert.equal(result.check.ok, true);
 });
 
 test('final readiness reports a repair failure and remains retryable', async (t) => {
@@ -158,6 +177,7 @@ test('final readiness reports a repair failure and remains retryable', async (t)
   });
   const setup = result.checks.find((item) => item.id === 'setup-pull-request');
   assert.equal(setup.ok, false);
+  assert.equal(setup.informational, false);
   assert.equal(setup.state, 'repair-failed');
   assert.match(setup.summary, /cannot push setup branch/);
   assert.equal(result.check.blockers.some((item) => item.code === 'readiness-repository-setup-repair-failed'), true);
@@ -204,14 +224,16 @@ test('unchecked Finish setup completes configuration but leaves claims paused', 
   assert.equal(loadRuntime(repo).claimsEnabled, false);
 });
 
-test('Final readiness explains automatic repair PR behavior and keeps the simplified Finish card', () => {
-  assert.match(FINAL_READINESS_SCRIPT, /If managed repository setup files are missing or outdated, Paseo creates a setup pull request to fix them/);
-  assert.match(FINAL_READINESS_SCRIPT, /item\.label\|\|item\.id/);
+test('Final readiness shows pending setup PRs as informational and uses only the footer Finish action', () => {
+  assert.match(FINAL_READINESS_SCRIPT, /once that PR has been created, it is informational and does not hold up finishing setup/);
+  assert.match(FINAL_READINESS_SCRIPT, /item\.informational===true/);
   assert.match(FINAL_READINESS_SCRIPT, /Open setup PR/);
   assert.match(FINAL_READINESS_SCRIPT, /font-size:16px;font-weight:650/);
   assert.match(FINAL_READINESS_SCRIPT, /> Start automation after setup<\/label>/);
-  assert.match(FINAL_READINESS_SCRIPT, /id="readiness-finish"/);
-  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /<h3>Finish setup<\/h3>/);
+  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /id="readiness-finish"/);
+  assert.match(FINAL_READINESS_SCRIPT, /closest\?\.\('#continue'\)/);
+  assert.match(FINAL_READINESS_SCRIPT, /api\('\/api\/setup\/readiness\/finish'/);
+  assert.match(FINAL_READINESS_SCRIPT, /querySelector\('#readiness-start'\)/);
   assert.doesNotMatch(FINAL_READINESS_SCRIPT, /eligible issue\(s\) are currently available/);
   assert.doesNotMatch(FINAL_READINESS_SCRIPT, /No eligible issue is currently available/);
 });
