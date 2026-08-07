@@ -30,11 +30,7 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     ['Review workflow', 'review'],
   ]);
   let built = false;
-  let activeStep = localStorage.getItem('paseo-manager-config-tab') || 'harness';
-
-  function cardHeading(card) {
-    return card?.querySelector('h2,h3')?.textContent.trim() || '';
-  }
+  let activeStep = localStorage.getItem('paseo-manager-config-tab') || 'paseo';
 
   function setupLinkCard(step) {
     const meta = STEPS.find(([id]) => id === step);
@@ -81,7 +77,7 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
   }
 
   function showStep(step, { focus = false } = {}) {
-    if (!STEPS.some(([id]) => id === step)) step = 'harness';
+    if (!STEPS.some(([id]) => id === step)) step = 'paseo';
     activeStep = step;
     localStorage.setItem('paseo-manager-config-tab', step);
     for (const button of document.querySelectorAll('.manager-config-tab')) {
