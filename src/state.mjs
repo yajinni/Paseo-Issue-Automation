@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { LEGACY_LABELS } from './label-catalog.mjs';
 import { run } from './process.mjs';
 import {
   DEFAULT_REPOSITORY_CONFIG,
@@ -8,13 +9,8 @@ import {
 
 export const WORKSPACE_TITLE = 'Issue Coding Automation';
 
-export const LABELS = Object.freeze({
-  ready: 'agent-ready',
-  running: 'agent-running',
-  blocked: 'agent-blocked',
-  failed: 'agent-failed',
-  humanReview: 'human-review',
-});
+// Compatibility accessor for legacy runtime/install code. New lifecycle work should use label-catalog.mjs.
+export const LABELS = LEGACY_LABELS;
 
 export const DEFAULT_CONFIG = Object.freeze({
   ...DEFAULT_REPOSITORY_CONFIG,
