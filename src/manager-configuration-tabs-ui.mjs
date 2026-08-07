@@ -176,6 +176,10 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     showStep(activeStep);
     redirectLegacyViews();
 
+    document.getElementById('review-workflow')?.addEventListener('change', () => {
+      queueMicrotask(() => showStep(activeStep));
+    });
+
     const title = document.getElementById('manager-view-title');
     const description = document.getElementById('manager-view-description');
     const navObserver = document.querySelector('.manager-sidebar-nav');
