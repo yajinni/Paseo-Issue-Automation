@@ -8,22 +8,37 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   function selectedWorkflow() { return document.querySelector('input[name="review-workflow"]:checked')?.value || state?.selection?.workflow || 'quick-manual'; }
   function autoMergeAvailable() { const workflow = selectedWorkflow(); return workflow === 'full-immediate' || workflow === 'quick-web-chatgpt'; }
   function cardClass(missing) { return 'setup-card' + (missing ? ' required-missing' : ''); }
+  function prerequisiteRow(label, installed, actionHtml = '') {
+    return '<div class="check-row ' + (installed ? 'ok' : 'bad') + '"><span class="check-dot">' + (installed ? '✓' : '!') + '</span><div style="flex:1"><strong>' + escape(label) + '</strong><div class="check-detail">' + (installed ? 'Installed and ready.' : 'Not installed.') + '</div></div>' + actionHtml + '</div>';
+  }
   function profileCard() {
     if (selectedWorkflow() !== 'quick-web-chatgpt') return '';
     const profile = state?.profile || {};
     const ui = profile.ui || {};
     const ready = profile.ready === true;
+    const playwrightReady = profile.libraryInstalled === true;
+    const chromiumReady = profile.chromiumInstalled === true;
+    const browserReady = playwrightReady && chromiumReady;
     const conversation = state?.selection?.conversationUrl || '';
     const missing = !ready || !conversation;
+    const playwrightAction = playwrightReady ? '' : '<button class="action" id="review-install-playwright" type="button">Install Playwright</button>';
+    const chromiumAction = chromiumReady ? '' : '<button class="action" id="review-install-chromium" type="button" ' + (playwrightReady ? '' : 'disabled') + '>Install Chromium</button>';
+    const profileDetail = !playwrightReady
+      ? 'Install Playwright before logging into ChatGPT.'
+      : !chromiumReady
+        ? 'Install Chromium before logging into ChatGPT.'
+        : profile.message || (ready ? 'Signed-in profile and review chat are ready.' : 'Log into ChatGPT Profile, then Recheck.');
     return '<section class="' + cardClass(missing) + '" id="chatgpt-profile-card"><h3>ChatGPT Profile</h3>'
       + '<p>The ChatGPT Profile is an isolated signed-in browser session used only for Web ChatGPT full review. Paseo never asks for or stores your ChatGPT password.</p>'
-      + '<div class="checklist"><div class="check-row ' + (ready ? 'ok' : 'bad') + '"><span class="check-dot">' + (ready ? '✓' : '!') + '</span><div><strong>' + escape(ui.statusText || (ready ? 'Signed in and ready' : 'Not ready')) + '</strong><div class="check-detail">' + escape(profile.message || (ready ? 'Authenticated session, review chat, repository access, and session persistence verified.' : 'Open ChatGPT Profile, sign in if needed, choose a review chat, then Recheck.')) + '</div></div></div></div>'
-      + '<div class="field"><label for="review-chat-url">PR review chat URL</label><input id="review-chat-url" type="text" autocomplete="off" value="' + escape(conversation) + '" placeholder="https://chatgpt.com/c/..."></div>'
-      + '<label class="choice"><input type="radio" name="review-chat-mode" value="dedicated" ' + (state?.selection?.reviewChatMode !== 'existing' ? 'checked' : '') + '> Create/use a dedicated PR review chat — recommended</label>'
-      + '<label class="choice"><input type="radio" name="review-chat-mode" value="existing" ' + (state?.selection?.reviewChatMode === 'existing' ? 'checked' : '') + '> Use an existing chat <span class="muted">(prior context may influence reviews)</span></label>'
-      + '<div class="notice">For a dedicated chat, open ChatGPT Profile, create a clean chat, copy its stable URL here, and save it. Setup verifies the selected chat has a usable composer and survives closing/reopening the profile.</div>'
-      + '<div class="inline-actions"><button class="action" id="review-install-chromium" type="button">Install Chromium</button><button class="action" id="review-open-profile" type="button">Open ChatGPT Profile</button><button class="action" id="review-save-chat" type="button">Save review chat</button><button class="action primary" id="review-profile-recheck" type="button">Recheck</button></div>'
-      + '<p class="muted">GitHub access is verified for the selected repository using the safe review-protocol capability check. The check must not modify repository state.</p></section>';
+      + '<div class="checklist">'
+      + prerequisiteRow('Playwright', playwrightReady, playwrightAction)
+      + prerequisiteRow('Chromium', chromiumReady, chromiumAction)
+      + '<div class="check-row ' + (ready ? 'ok' : 'bad') + '"><span class="check-dot">' + (ready ? '✓' : '!') + '</span><div><strong>' + escape(ui.statusText || (ready ? 'Signed in and ready' : 'Not ready')) + '</strong><div class="check-detail">' + escape(profileDetail) + '</div></div></div>'
+      + '</div>'
+      + '<div class="inline-actions"><button class="action" id="review-open-profile" type="button" ' + (browserReady ? '' : 'disabled') + '>Log into ChatGPT Profile</button><button class="action primary" id="review-profile-recheck" type="button">Recheck</button></div>'
+      + '<div class="notice">Log into ChatGPT Profile, open or create the chat you want Paseo to use for PR reviews, then paste that chat URL below. The URL saves automatically when changed.</div>'
+      + '<div class="field"><label for="review-chat-url">PR review chat URL</label><div style="display:flex;align-items:center;gap:12px"><input id="review-chat-url" style="flex:1" type="text" autocomplete="off" value="' + escape(conversation) + '" placeholder="https://chatgpt.com/c/..."><span id="review-chat-saved" style="color:#65c987;font-weight:700;' + (conversation ? '' : 'display:none;') + '">Saved</span></div></div>'
+      + '</section>';
   }
   function autoMergeControl() {
     if (!autoMergeAvailable()) return '<div class="notice">Automatic merge is unavailable for Light model review → Manual review. A person must merge the coding PR after manual review.</div>';
@@ -59,8 +74,10 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
     document.getElementById('review-quick-rounds')?.addEventListener('change', saveSettings);
     document.getElementById('review-full-rounds')?.addEventListener('change', saveSettings);
     document.getElementById('review-auto-merge')?.addEventListener('change', saveSettings);
-    document.getElementById('review-save-chat')?.addEventListener('click', saveChat);
+    document.getElementById('review-chat-url')?.addEventListener('input', () => { const saved = document.getElementById('review-chat-saved'); if (saved) saved.style.display = 'none'; });
+    document.getElementById('review-chat-url')?.addEventListener('change', saveChat);
     document.getElementById('review-open-profile')?.addEventListener('click', openProfile);
+    document.getElementById('review-install-playwright')?.addEventListener('click', installPlaywright);
     document.getElementById('review-install-chromium')?.addEventListener('click', installChromium);
     document.getElementById('review-profile-recheck')?.addEventListener('click', () => refresh(true));
     if (typeof technical !== 'undefined') technical = state.technicalDetails || {};
@@ -78,11 +95,12 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
     finally { loading = false; }
   }
   async function saveChat() {
-    if (loading) return; loading = true;
+    if (loading) return;
+    const conversationUrl = String(document.getElementById('review-chat-url')?.value || '').trim();
+    if (!conversationUrl || conversationUrl === String(state?.selection?.conversationUrl || '')) { render(); return; }
+    loading = true;
     try {
-      const mode = document.querySelector('input[name="review-chat-mode"]:checked')?.value || 'dedicated';
-      const conversationUrl = String(document.getElementById('review-chat-url')?.value || '').trim();
-      state = await api('/api/setup/review/chat', { method: 'POST', body: JSON.stringify({ mode, conversationUrl }) });
+      state = await api('/api/setup/review/chat', { method: 'POST', body: JSON.stringify({ mode: 'existing', conversationUrl }) });
       await syncShell(); render();
     } catch (error) { if (typeof showError === 'function') showError(error); }
     finally { loading = false; }
@@ -90,6 +108,12 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   async function openProfile() {
     try { await api('/api/setup/review/profile/open', { method: 'POST', body: '{}' }); }
     catch (error) { if (typeof showError === 'function') showError(error); }
+  }
+  async function installPlaywright() {
+    if (loading) return; loading = true;
+    try { await api('/api/setup/review/playwright/install', { method: 'POST', body: '{}' }); await refresh(true); }
+    catch (error) { if (typeof showError === 'function') showError(error); }
+    finally { loading = false; }
   }
   async function installChromium() {
     if (loading) return; loading = true;
