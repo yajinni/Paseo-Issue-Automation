@@ -41,7 +41,7 @@ test('configured manager promotes setup walkthrough and demotes manual path regi
   const setupAnchor = /<a href="\/setup" data-manager-setup-link class="manager-setup-link">Add repository via setup<\/a>/g;
   assert.equal((html.match(setupAnchor) || []).length, 1);
   assert.match(html, /class="manager-setup-link">Add repository via setup<\/a>/);
-  assert.doesNotMatch(html, /position:fixed;right:18px;bottom:18px/);
+  assert.doesNotMatch(html, /\.manager-setup-link\{[^}]*position:fixed/);
   assert.match(html, /data-manager-manual-registration/);
   assert.match(html, /<summary>Advanced manual registration<\/summary>/);
   assert.match(html, /Compatibility and recovery only/);
