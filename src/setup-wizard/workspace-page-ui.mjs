@@ -15,6 +15,7 @@ export const WORKSPACE_PAGE_SCRIPT = String.raw`
     return '<div class="check-row ' + (ok ? 'ok' : 'bad') + '"><span class="check-dot">' + (ok ? '✓' : '!') + '</span><div><strong>' + escape(label) + '</strong><div class="check-detail">' + escape(detail || '') + '</div></div></div>';
   }
   function currentCheck() { return pageId() === 'workspace' ? state?.workspaceCheck : state?.checkoutCheck; }
+  function cardClass(missing) { return 'setup-card' + (missing ? ' required-missing' : ''); }
 
   function render() {
     if (!onPage() || !state || !content()) return;
@@ -37,22 +38,24 @@ export const WORKSPACE_PAGE_SCRIPT = String.raw`
     const workspace = state.workspace || null;
     const workspaceId = selection.workspaceId || workspace?.workspace?.workspace?.id || workspace?.workspace?.id || '';
     const cleanup = workspace?.readiness?.cleanup || state.technicalDetails?.cleanup || null;
+    const checkoutMissing = state.checkoutCheck?.ok !== true;
+    const workspaceMissing = state.workspaceCheck?.ok !== true;
 
     content().className = '';
     content().innerHTML = '<div class="paseo-grid">'
       + '<section class="setup-card"><h3>' + (checkoutPage ? 'Local checkout' : 'Paseo workspace') + '</h3><p>Repository: <strong>' + escape(state.repository?.nameWithOwner) + '</strong> · Base branch: <strong>' + escape(state.baseBranch) + '</strong></p>'
       + (checkoutPage ? '<div class="notice">' + escape(actionText) + '</div>' : '<div class="notice">The permanent Paseo workspace is verified against the registered checkout, then a temporary isolated worktree is created and safely cleaned up without sending a paid model request.</div>')
       + '</section>'
-      + (checkoutPage ? '<section class="setup-card"><h3>Safe checkout discovery</h3><p>Setup checks only manager-known repositories, Paseo workspaces, and the manager-owned clone directory. Dirty user clones are shown but never altered.</p><div class="checklist">' + (candidateRows || '<div class="notice">No known checkout candidates were found.</div>') + '</div>'
+      + (checkoutPage ? '<section class="' + cardClass(checkoutMissing) + '"><h3>Safe checkout discovery</h3><p>Setup checks only manager-known repositories, Paseo workspaces, and the manager-owned clone directory. Dirty user clones are shown but never altered.</p><div class="checklist">' + (candidateRows || '<div class="notice">No known checkout candidates were found.</div>') + '</div>'
         + (safeChoices.length > 1 ? '<div class="field"><label for="workspace-checkout-choice">Checkout to use</label><select id="workspace-checkout-choice">' + choiceOptions + '</select></div>' : '')
         + '<div class="inline-actions"><button class="action primary" id="workspace-prepare" type="button">' + (state.automaticAction === 'clone-managed' ? 'Clone and prepare workspace' : 'Use checkout and prepare workspace') + '</button><button class="action" id="workspace-refresh" type="button">Refresh checkouts</button></div></section>' : '')
-      + '<section class="setup-card"><h3>Workspace readiness</h3><div class="checklist">'
+      + '<section class="' + cardClass(workspaceMissing) + '"><h3>Workspace readiness</h3><div class="checklist">'
       + checkRow('Registered checkout', Boolean(selection.checkoutPath), selection.checkoutPath || 'Not prepared yet.')
       + checkRow('Permanent Paseo workspace', Boolean(workspaceId), workspaceId || 'Not verified yet.')
       + checkRow('Isolated worktree probe', Boolean(cleanup && cleanup.pathRemoved && cleanup.branchRemoved && cleanup.directoryRemoved), cleanup ? 'Temporary worktree, branch, and directory cleanup verified.' : 'Readiness probe has not passed yet.')
       + checkRow('Paid model request', state.technicalDetails?.paidModelRequestSent !== true, 'No paid model prompt is sent during readiness checks.')
       + '</div>'
-      + (!checkoutPage ? '<div class="inline-actions"><button class="action primary" id="workspace-prepare" type="button">Verify workspace readiness</button><button class="action" id="workspace-refresh" type="button">Recheck</button></div>' : '')
+      + (!checkoutPage ? '<div class="inline-actions"><button class="action primary" id="workspace-prepare" type="button">Verify workspace readiness</button><button class="action" id="workspace-refresh" type="button">Check workspace again</button></div>' : '')
       + (state.blocker ? '<div class="notice">' + escape(state.blocker.message) + ' ' + escape(state.blocker.recoveryAction || '') + '</div>' : '')
       + '</section></div>';
 
