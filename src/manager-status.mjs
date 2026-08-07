@@ -4,6 +4,7 @@ import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
 import { inspectRepository } from './repository-registry.mjs';
 import { managedRepositoryOperationalSummary } from './repository-health.mjs';
+import { managerReviewProfileStatus } from './manager-review-profile-status.mjs';
 import { managerWorkQueue } from './manager-work-queue.mjs';
 import { loadSetupPullRequest, setupChangeStatus } from './setup-pr.mjs';
 import {
@@ -37,6 +38,7 @@ export function managerRepositoryStatus(repository, {
   platform = process.platform,
   workerManager = null,
   reviewWorkerManager = null,
+  rootDir = undefined,
 } = {}) {
   if (!repository?.path) throw new Error('A registered repository path is required.');
   const inspected = inspectRepository(repository.path, { runner, platform });
@@ -62,6 +64,8 @@ export function managerRepositoryStatus(repository, {
   const embeddedController = controllerMode === CONTROLLER_MODES.embedded;
   const migrationPending = migration?.state === 'open' || (migration?.state === 'merged' && !migration.syncedAt);
   const adoptionReady = migrationAdoption?.ready === true && !migrationPending;
+  const repositoryIdentity = inspected.repository || repository.repository || null;
+  const chatGptProfile = managerReviewProfileStatus(repositoryIdentity, config, { rootDir });
 
   const status = {
     repository: {
@@ -69,7 +73,7 @@ export function managerRepositoryStatus(repository, {
       name: repository.name || inspected.name,
       path: inspected.path,
       remote: inspected.remote,
-      repository: inspected.repository || repository.repository || null,
+      repository: repositoryIdentity,
       branch: safeBranch(inspected.path, runner),
     },
     setup: {
@@ -97,6 +101,7 @@ export function managerRepositoryStatus(repository, {
     },
     maintenance,
     workQueue,
+    chatGptProfile,
     automation: {
       claimsEnabled: runtime.claimsEnabled === true,
       maxActive: config.maxActive,
