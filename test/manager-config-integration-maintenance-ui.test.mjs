@@ -6,6 +6,15 @@ import {
   MANAGER_CONFIG_INTEGRATION_STYLE,
 } from '../src/manager-config-integration-maintenance-ui.mjs';
 
+test('Connect Paseo is configured directly in the manager and setup-link cards are removed', () => {
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['Paseo connection'/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /configuration\/paseo-connection/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Connect & check/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Paseo host/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /removeSetupLinkCards/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /manager-config-step-link/);
+});
+
 test('Coding harness configuration uses separate coder review and harness boxes in the requested order', () => {
   const coder = MANAGER_CONFIG_INTEGRATION_SCRIPT.indexOf("['Coder model'");
   const reviewer = MANAGER_CONFIG_INTEGRATION_SCRIPT.indexOf("['Review model'");
