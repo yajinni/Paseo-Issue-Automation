@@ -16,6 +16,7 @@ import {
 } from './repository-api-context.mjs';
 import { findRepository } from './repository-registry.mjs';
 import { managerRepositoryStatus } from './manager-status.mjs';
+import { setupWizardApiRequest } from './setup-wizard/api.mjs';
 
 function workerAction(workerManager, context, pathname) {
   const workerRoute = ['/api/worker/start', '/api/worker/stop', '/api/worker/restart'].includes(pathname);
@@ -93,6 +94,9 @@ function installationResult(context, options, handler, dependencyKey) {
 }
 
 export function managerApiRequest({ method, pathname, body = {} }, options = {}) {
+  const setup = setupWizardApiRequest({ method, pathname, body }, options);
+  if (setup.handled) return setup;
+
   const manager = managerRequest(method, pathname, body, options);
   if (manager) return manager;
   if (method === 'GET' && pathname === '/api/workers') {
