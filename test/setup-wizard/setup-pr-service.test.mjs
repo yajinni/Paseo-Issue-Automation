@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,7 @@ function setup(t) {
     rmSync(rootDir, { recursive: true, force: true });
     rmSync(checkoutPath, { recursive: true, force: true });
   });
+  execFileSync('git', ['init', '-b', 'release'], { cwd: checkoutPath, stdio: 'ignore' });
   startSetupSession({ rootDir });
   saveSetupPage('repository', {
     repository: { owner: 'octo', name: 'app', id: 'R1', url: 'https://github.com/octo/app' },
