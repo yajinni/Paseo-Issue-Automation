@@ -1,8 +1,9 @@
 import { LEGACY_LABELS, PASEO_LABELS } from './label-catalog.mjs';
 import { validateIssueBody } from './issue-contract.mjs';
+import { recordInvalidIssueAttention, restoreCorrectedIssue } from './issue-attention.mjs';
 import { evaluateIssueDependencies } from './dependencies.mjs';
 import { runJson } from './process.mjs';
-import { loadRun, saveRun } from './state.mjs';
+import { listRuns, loadRun, saveRun } from './state.mjs';
 
 function nowIso() { return new Date().toISOString(); }
 
@@ -22,25 +23,33 @@ function listWithArgs(root, args, jsonRunner) {
   return fallback;
 }
 
-export function listIssueCandidates(root, config, { jsonRunner = runJson } = {}) {
+function viewIssueForRecheck(root, number, jsonRunner) {
+  return jsonRunner('gh', [
+    'issue', 'view', String(number),
+    '--json', candidateFields(),
+  ], { cwd: root, allowFailure: true });
+}
+
+export function listIssueCandidates(root, config, { jsonRunner = runJson, runLister = listRuns } = {}) {
   const mode = config?.issueSelection?.mode || 'recommended-labels';
   const base = ['issue', 'list', '--state', 'open', '--limit', '1000'];
   if (mode === 'all-open') return listWithArgs(root, base, jsonRunner);
   if (mode !== 'recommended-labels') throw new Error(`Unsupported issue selection mode: ${mode}.`);
 
-  // New installations use paseo:ready. Until the dedicated migration PR removes
-  // legacy compatibility, also consume agent-ready without requiring repositories
-  // to be migrated mid-rollout.
   const current = listWithArgs(root, [...base, '--label', PASEO_LABELS.ready], jsonRunner);
   const legacy = listWithArgs(root, [...base, '--label', LEGACY_LABELS.ready], jsonRunner);
-  return [...new Map([...current, ...legacy].map((issue) => [Number(issue.number), issue])).values()];
+  const invalid = (runLister(root) || [])
+    .filter((state) => state?.phase === 'invalid-issue' && Number.isInteger(Number(state.issueNumber)))
+    .map((state) => viewIssueForRecheck(root, state.issueNumber, jsonRunner))
+    .filter(Boolean);
+  return [...new Map([...current, ...legacy, ...invalid].map((issue) => [Number(issue.number), issue])).values()];
 }
 
 export function issueAlreadyClaimed(root, issue, { runLoader = loadRun } = {}) {
   const state = runLoader(root, issue.number);
   if (!state) return false;
   if (state.completedAt) return false;
-  if (['waiting-for-dependencies', 'invalid-issue', 'ready'].includes(String(state.phase || ''))) return false;
+  if (['waiting-for-dependencies', 'invalid-issue', 'ready', 'retry-pending'].includes(String(state.phase || ''))) return false;
   return Boolean(state.branch || state.workspaceId || state.agentId || state.coderAgentId || state.controllerPid || state.startedAt);
 }
 
@@ -53,7 +62,10 @@ export function baseIssueEligibility(root, issue, config, options = {}) {
   const excluded = new Set((config?.issueSelection?.excludedLabels || []).map(String));
   const matchedExcluded = [...labels].filter((label) => excluded.has(label));
   if (matchedExcluded.length) return { ok: false, kind: 'excluded-label', reason: `Issue #${number} has excluded label ${matchedExcluded[0]}.` };
+  const prior = (options.runLoader || loadRun)(root, issue.number);
+  const recheckingInvalid = prior?.phase === 'invalid-issue';
   if ((config?.issueSelection?.mode || 'recommended-labels') === 'recommended-labels'
+    && !recheckingInvalid
     && !labels.has(PASEO_LABELS.ready)
     && !labels.has(LEGACY_LABELS.ready)) {
     return { ok: false, kind: 'not-ready', reason: `Issue #${number} is not labeled ${PASEO_LABELS.ready}.` };
@@ -61,7 +73,7 @@ export function baseIssueEligibility(root, issue, config, options = {}) {
   const contract = (options.validateBody || validateIssueBody)(issue?.body || '');
   if (!contract.ok) return { ok: false, kind: 'invalid-contract', reason: contract.reason, contract };
   if ((options.claimed || issueAlreadyClaimed)(root, issue, options)) return { ok: false, kind: 'duplicate-claim', reason: `Issue #${number} already has an active automation attempt.` };
-  return { ok: true, kind: 'candidate', contract };
+  return { ok: true, kind: 'candidate', contract, correctedInvalidIssue: recheckingInvalid };
 }
 
 function recordDependencyWait(root, issue, dependency, { runLoader = loadRun, runSaver = saveRun } = {}) {
@@ -117,8 +129,14 @@ export function evaluateIssueQueue(root, config, options = {}) {
   for (const issue of sorted) {
     const base = baseIssueEligibility(root, issue, config, options);
     if (!base.ok) {
+      if (base.kind === 'invalid-contract') {
+        (options.recordInvalid || recordInvalidIssueAttention)(root, issue, base.contract, config, options);
+      }
       rejected.push({ issueNumber: Number(issue.number), kind: base.kind, reason: base.reason });
       continue;
+    }
+    if (base.correctedInvalidIssue) {
+      (options.restoreInvalid || restoreCorrectedIssue)(root, issue, config, options);
     }
     const dependency = (options.evaluateDependencies || evaluateIssueDependencies)(root, issue, config, options.dependencyOptions || {});
     if (!dependency.ok) {
