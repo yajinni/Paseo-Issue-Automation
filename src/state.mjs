@@ -1,6 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from './process.mjs';
+import {
+  DEFAULT_REPOSITORY_CONFIG,
+  validateRepositoryConfig,
+} from './setup-wizard/schema.mjs';
 
 export const WORKSPACE_TITLE = 'Issue Coding Automation';
 
@@ -13,20 +17,7 @@ export const LABELS = Object.freeze({
 });
 
 export const DEFAULT_CONFIG = Object.freeze({
-  version: 2,
-  setupComplete: false,
-  baseBranch: '',
-  pollIntervalSeconds: 120,
-  maxActive: 1,
-  maxReviewRounds: 4,
-  controller: { type: 'deterministic' },
-  models: {
-    orchestrator: '',
-    coder: '',
-    coderThinking: '',
-    reviewer: '',
-    reviewerThinking: '',
-  },
+  ...DEFAULT_REPOSITORY_CONFIG,
   workspace: { id: null, title: WORKSPACE_TITLE },
 });
 
@@ -79,71 +70,14 @@ function readJson(file, fallback) {
   return JSON.parse(readFileSync(file, 'utf8'));
 }
 
-function normalizedInteger(value, fallback, min, max, label) {
-  const number = Number(value ?? fallback);
-  if (!Number.isInteger(number) || number < min || number > max) {
-    throw new Error(`${label} must be an integer from ${min} through ${max}.`);
-  }
-  return number;
-}
-
-function normalizedModel(value, label) {
-  const selection = String(value || '').trim();
-  if (!selection) return '';
-  if (selection.length > 240 || /\s/.test(selection) || !selection.includes('/')) {
-    throw new Error(`${label} must use Paseo's provider/model form.`);
-  }
-  return selection;
-}
-
-function normalizedThinking(value, label) {
-  const selection = String(value || '').trim();
-  if (!selection) return '';
-  if (selection.length > 100 || /\s/.test(selection)) {
-    throw new Error(`${label} must be a valid Paseo thinking option ID.`);
-  }
-  return selection;
-}
-
-function normalizedBranch(value) {
-  const branch = String(value || '').trim();
-  if (!branch) return '';
-  if (branch.length > 200 || /\s|\.\.|@\{|\\|~|\^|:|\?|\*|\[/.test(branch)) {
-    throw new Error('Base branch is not a safe Git branch name.');
-  }
-  return branch;
-}
-
 export function validateConfig(input = {}) {
-  const coder = normalizedModel(input.models?.coder, 'Coder model');
-  const reviewer = normalizedModel(input.models?.reviewer, 'Reviewer model');
-  const coderThinking = normalizedThinking(input.models?.coderThinking, 'Coder thinking level');
-  const reviewerThinking = normalizedThinking(input.models?.reviewerThinking, 'Reviewer thinking level');
-  const legacyOrchestrator = normalizedModel(input.models?.orchestrator, 'Legacy Orchestrator model') || coder;
-  return {
-    version: 2,
-    setupComplete: input.setupComplete === true,
-    baseBranch: normalizedBranch(input.baseBranch),
-    pollIntervalSeconds: normalizedInteger(input.pollIntervalSeconds, 120, 60, 3600, 'Polling interval'),
-    maxActive: normalizedInteger(input.maxActive, 1, 1, 10, 'Maximum active issues'),
-    maxReviewRounds: normalizedInteger(input.maxReviewRounds, 4, 1, 10, 'Maximum review rounds'),
-    controller: { type: 'deterministic' },
-    models: {
-      // Retained only so existing saved configuration and the pre-migration setup UI continue to load.
-      // The Issue Execution Controller never launches this model.
-      orchestrator: legacyOrchestrator,
-      coder,
-      coderThinking,
-      reviewer,
-      reviewerThinking,
-    },
-    workspace: { id: input.workspace?.id ? String(input.workspace.id) : null, title: WORKSPACE_TITLE },
-  };
+  return validateRepositoryConfig(input, { workspaceTitle: WORKSPACE_TITLE });
 }
 
 export function loadConfig(root) {
   const file = statePaths(root).config;
-  return validateConfig({ ...clone(DEFAULT_CONFIG), ...readJson(file, DEFAULT_CONFIG) });
+  const stored = readJson(file, DEFAULT_CONFIG);
+  return validateConfig(stored);
 }
 
 export function saveConfig(root, input) {
