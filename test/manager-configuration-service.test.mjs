@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { managerConfigurationApiRequest } from '../src/manager-configuration-service.mjs';
+import { loadPrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
 import { addRepository } from '../src/repository-registry.mjs';
 import { saveSetupPage, startSetupSession } from '../src/setup-wizard/store.mjs';
 
@@ -21,7 +22,7 @@ function fixture(t) {
     repository: { owner: 'yajinni', name: 'Example' },
     selections: { repository: 'yajinni/Example' },
   }, { rootDir });
-  return { rootDir, repository };
+  return { rootDir, repositoryRoot, repository };
 }
 
 function route(repository, suffix) {
@@ -75,8 +76,29 @@ test('manager configuration exposes live ChatGPT browser prerequisites', async (
   assert.equal(response.body.status.conversationUrl, 'https://chatgpt.com/c/example');
 });
 
-test('manager configuration saves a replacement Web ChatGPT review chat', async (t) => {
-  const { rootDir, repository } = fixture(t);
+test('repository-specific PR review chat takes precedence over the browser profile fallback', async (t) => {
+  const { rootDir, repositoryRoot, repository } = fixture(t);
+  savePrAutomationConfig(repositoryRoot, {
+    browserReview: { projectConversationUrl: 'https://chatgpt.com/c/project-review' },
+  });
+  const response = await managerConfigurationApiRequest({
+    method: 'GET',
+    pathname: route(repository, 'chatgpt-profile'),
+  }, {
+    rootDir,
+    chatGptPrerequisites: () => ({
+      libraryInstalled: true,
+      chromiumInstalled: true,
+      profileExists: true,
+      conversationUrl: 'https://chatgpt.com/c/global-fallback',
+      state: 'verification-required',
+    }),
+  });
+  assert.equal(response.body.status.conversationUrl, 'https://chatgpt.com/c/project-review');
+});
+
+test('manager configuration saves the review chat to both browser profile and runtime PR-review config', async (t) => {
+  const { rootDir, repositoryRoot, repository } = fixture(t);
   let stored = null;
   const response = await managerConfigurationApiRequest({
     method: 'POST',
@@ -95,11 +117,15 @@ test('manager configuration saves a replacement Web ChatGPT review chat', async 
   });
   assert.equal(response.status, 200);
   assert.equal(stored.globalConversationUrl, 'https://chatgpt.com/c/new-review-chat');
+  assert.equal(loadPrReviewStore(repositoryRoot).config.browserReview.projectConversationUrl, 'https://chatgpt.com/c/new-review-chat');
   assert.equal(response.body.status.conversationUrl, 'https://chatgpt.com/c/new-review-chat');
 });
 
-test('manager configuration opens the ChatGPT Profile only after browser prerequisites are ready', async (t) => {
-  const { rootDir, repository } = fixture(t);
+test('manager configuration opens the ChatGPT Profile at the repository review chat when available', async (t) => {
+  const { rootDir, repositoryRoot, repository } = fixture(t);
+  savePrAutomationConfig(repositoryRoot, {
+    browserReview: { projectConversationUrl: 'https://chatgpt.com/c/project-review' },
+  });
   let opened = false;
   const response = await managerConfigurationApiRequest({
     method: 'POST',
@@ -110,10 +136,10 @@ test('manager configuration opens the ChatGPT Profile only after browser prerequ
       libraryInstalled: true,
       chromiumInstalled: true,
       profileExists: true,
-      conversationUrl: 'https://chatgpt.com/c/example',
+      conversationUrl: 'https://chatgpt.com/c/global-fallback',
       state: 'verification-required',
     }),
-    openProfile: async ({ conversationUrl }) => { opened = conversationUrl === 'https://chatgpt.com/c/example'; return { leaseId: 'lease', page: {} }; },
+    openProfile: async ({ conversationUrl }) => { opened = conversationUrl === 'https://chatgpt.com/c/project-review'; return { leaseId: 'lease', page: {} }; },
     focusProfile: async () => ({ focused: true }),
   });
   assert.equal(response.status, 200);
