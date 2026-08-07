@@ -4,6 +4,7 @@ import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
 import { inspectRepository } from './repository-registry.mjs';
 import { managedRepositoryOperationalSummary } from './repository-health.mjs';
+import { managerWorkQueue } from './manager-work-queue.mjs';
 import { loadSetupPullRequest, setupChangeStatus } from './setup-pr.mjs';
 import {
   listRuns,
@@ -51,6 +52,7 @@ export function managerRepositoryStatus(repository, {
     ? inspectExternalMigrationAdoption(inspected.path, { runner })
     : null;
   const runs = listRuns(inspected.path);
+  const workQueue = managerWorkQueue(runs, config);
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'closed'].includes(String(item?.status || '')),
   );
@@ -94,6 +96,7 @@ export function managerRepositoryStatus(repository, {
       },
     },
     maintenance,
+    workQueue,
     automation: {
       claimsEnabled: runtime.claimsEnabled === true,
       maxActive: config.maxActive,
