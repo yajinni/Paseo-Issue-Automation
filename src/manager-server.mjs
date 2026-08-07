@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
 import { enhanceManagerWithAutomationReviews } from './manager-automation-reviews-ui.mjs';
 import { enhanceManagerWithConfigIntegrationMaintenance } from './manager-config-integration-maintenance-ui.mjs';
+import { enhanceManagerWithConfigurationTabs } from './manager-configuration-tabs-ui.mjs';
 import { enhanceManagerWithInteractionPolish } from './manager-interaction-ui.mjs';
 import { enhanceManagerWithIssueProcessingFlow } from './manager-issue-processing-flow-ui.mjs';
 import { enhanceManagerWithIssuesPrReviews } from './manager-issues-pr-reviews-ui.mjs';
@@ -93,7 +94,8 @@ ${manualForm}
   const queued = enhanceManagerWithWorkQueue(navigated);
   const operations = enhanceManagerWithAutomationReviews(queued);
   const organized = enhanceManagerWithConfigIntegrationMaintenance(operations);
-  const issueAndReviewViews = enhanceManagerWithIssuesPrReviews(organized);
+  const configured = enhanceManagerWithConfigurationTabs(organized);
+  const issueAndReviewViews = enhanceManagerWithIssuesPrReviews(configured);
   const issueFlow = enhanceManagerWithIssueProcessingFlow(issueAndReviewViews);
   return enhanceManagerWithInteractionPolish(issueFlow);
 }
