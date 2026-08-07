@@ -106,7 +106,34 @@ function eventDetail(event = {}) {
   return bits.join(' · ') || null;
 }
 
+function lifecycleEvidenceDetail(event = {}) {
+  const message = firstString(event.message, event.details, event.detail) || null;
+  const evidence = event.evidence && typeof event.evidence === 'object' ? event.evidence : {};
+  const facts = Object.entries(evidence)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${key}=${String(value)}`);
+  if (!facts.length) return message;
+  return [message, facts.join(' · ')].filter(Boolean).join('\n');
+}
+
 function timelineFromRun(run = {}) {
+  if (Array.isArray(run.lifecycle) && run.lifecycle.length) {
+    return run.lifecycle
+      .map((event) => ({
+        id: event.id || null,
+        type: firstString(event.type) || 'lifecycle',
+        at: eventTimestamp(event),
+        detail: lifecycleEvidenceDetail(event),
+        source: firstString(event.source) || 'lifecycle',
+        status: firstString(event.status),
+        attempt: firstNumber(event.attempt),
+        evidence: event.evidence && typeof event.evidence === 'object' ? event.evidence : {},
+      }))
+      .filter((entry) => entry.at || entry.detail)
+      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+      .slice(0, 100);
+  }
+
   const entries = [];
   for (const event of run.activity || []) {
     entries.push({
@@ -224,6 +251,7 @@ export function managerWorkQueueItem(run = {}, config = {}) {
     pullRequest: pullRequestFromRun(run),
     review: reviewFromRun(run, config),
     timeline: timelineFromRun(run),
+    lifecycle: Array.isArray(run.lifecycle) ? run.lifecycle : [],
   };
 }
 
