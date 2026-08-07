@@ -4,6 +4,7 @@ export const SETUP_SHELL_FEEDBACK_SCRIPT = String.raw`
   let taskSequence = 0;
   let visibleTaskId = null;
   let elapsedTimer = null;
+  let syncingShell = false;
 
   function requestPath(input) {
     try {
@@ -126,9 +127,23 @@ export const SETUP_SHELL_FEEDBACK_SCRIPT = String.raw`
     }, passed ? 650 : 1400);
   }
 
+  async function refreshShellState(path) {
+    if (path.includes('/session') || syncingShell) return;
+    if (typeof window.reloadStore !== 'function') return;
+    syncingShell = true;
+    try {
+      await window.reloadStore();
+      if (typeof window.render === 'function') window.render();
+    } catch {
+      // Page-specific handlers still render the response. Shell refresh is best-effort feedback only.
+    } finally {
+      syncingShell = false;
+    }
+  }
+
   window.fetch = async function setupAwareFetch(input, init = {}) {
     const path = requestPath(input);
-    if (!path.startsWith('/api/setup/')) return nativeFetch(input, init);
+    if (syncingShell || !path.startsWith('/api/setup/')) return nativeFetch(input, init);
     const method = String(init?.method || (typeof input === 'object' && input?.method) || 'GET').toUpperCase();
     const task = {
       id: ++taskSequence,
@@ -149,6 +164,7 @@ export const SETUP_SHELL_FEEDBACK_SCRIPT = String.raw`
       const response = await nativeFetch(input, init);
       let body = null;
       try { body = await response.clone().json(); } catch {}
+      if (response.ok) await refreshShellState(path);
       task.done = true;
       clearTimeout(task.timer);
       if (task.shown) renderFinished(task, response.ok, body, response.ok ? '' : 'The setup request failed.');
