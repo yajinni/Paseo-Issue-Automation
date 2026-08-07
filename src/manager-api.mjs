@@ -9,6 +9,7 @@ import {
   removeExternalRepositoryFromManager,
   repairExternalRepositoryFromManager,
 } from './manager-installation.mjs';
+import { managerIssuePlan } from './manager-issues.mjs';
 import {
   parseRepositoryApiPath,
   repositoryRegistryRequest,
@@ -17,6 +18,7 @@ import {
 import { findRepository } from './repository-registry.mjs';
 import { managerRepositoryStatus } from './manager-status.mjs';
 import { setupWizardApiRequest } from './setup-wizard/api.mjs';
+import { loadConfig } from './state.mjs';
 
 function workerAction(workerManager, context, pathname) {
   const workerRoute = ['/api/worker/start', '/api/worker/stop', '/api/worker/restart'].includes(pathname);
@@ -92,6 +94,36 @@ function lightweightAcceptedResult(result) {
   };
 }
 
+function issuePlanResult(context, options) {
+  const planner = options.issuePlanner || managerIssuePlan;
+  const configLoader = options.repositoryConfigLoader || loadConfig;
+  try {
+    return {
+      handled: true,
+      status: 200,
+      body: { issuePlan: { available: true, error: null, ...planner(context.root, configLoader(context.root)) } },
+    };
+  } catch (error) {
+    return {
+      handled: true,
+      status: 200,
+      body: {
+        issuePlan: {
+          available: false,
+          error: error instanceof Error ? error.message : String(error),
+          items: [],
+          total: 0,
+          eligible: 0,
+          blocked: 0,
+          skipped: 0,
+          active: 0,
+          nextIssueNumber: null,
+        },
+      },
+    };
+  }
+}
+
 function installationResult(context, options, handler, dependencyKey) {
   const result = handler(context.repository, {
     workerManager: options.workerManager,
@@ -139,6 +171,7 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
       body: { status: statusReader(context.repository, options) },
     };
   }
+  if (method === 'GET' && context.pathname === '/api/issues-plan') return issuePlanResult(context, options);
   if (method === 'POST') {
     if (context.pathname === '/api/migrate/adopt') {
       const result = finalizeExistingMigrationFromManager(context.repository, {
