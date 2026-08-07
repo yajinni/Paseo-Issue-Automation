@@ -23,7 +23,7 @@ function fakeTimers() {
   };
 }
 
-test('PR review workers start independently and recover only their repository roots', () => {
+test('PR review workers start immediately and defer repository recovery', () => {
   const timers = fakeTimers();
   const recovered = [];
   const pool = createManagerReviewWorkerPool({
@@ -43,13 +43,40 @@ test('PR review workers start independently and recover only their repository ro
   const duplicate = pool.start({ id: 'repo-a', name: 'A', path: '/repo-a' });
   const second = pool.start({ id: 'repo-b', name: 'B', path: '/repo-b' });
   assert.equal(first.running, true);
+  assert.equal(first.startupRecoveryPending, true);
   assert.equal(duplicate.startedAt, first.startedAt);
   assert.equal(second.running, true);
-  assert.deepEqual(recovered, ['/repo-a', '/repo-b']);
+  assert.deepEqual(recovered, []);
   assert.equal(timers.intervals.length, 2);
   assert.ok(timers.intervals.every((timer) => timer.milliseconds === 5_000));
-  assert.equal(timers.timeouts.length, 2);
-  assert.ok(timers.timeouts.every((timer) => timer.milliseconds === 300_000));
+  assert.equal(timers.timeouts.filter((timer) => timer.milliseconds === 0).length, 2);
+  assert.equal(timers.timeouts.filter((timer) => timer.milliseconds === 300_000).length, 2);
+
+  for (const timer of timers.timeouts.filter((entry) => entry.milliseconds === 0)) timer.callback();
+  assert.deepEqual(recovered, ['/repo-a', '/repo-b']);
+  assert.equal(pool.status('repo-a').startupRecoveryPending, false);
+  assert.equal(pool.status('repo-a').startupRecovery.ok, true);
+});
+
+test('review ticks wait until deferred startup recovery has completed', () => {
+  const timers = fakeTimers();
+  const reviewRoots = [];
+  const pool = createManagerReviewWorkerPool({
+    recover: () => ({ recovered: true }),
+    reviewTick: (root) => { reviewRoots.push(root); return { started: false }; },
+    loadStore: () => ({ config: { reconciliation: { enabled: false } }, managedPullRequests: [] }),
+    reconciliationDelayForStore: () => 300_000,
+    setIntervalFn: timers.setIntervalFn,
+    clearIntervalFn: timers.clearIntervalFn,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  pool.start({ id: 'repo-a', name: 'A', path: '/repo-a' });
+  pool.tick('repo-a');
+  assert.deepEqual(reviewRoots, []);
+  timers.timeouts.find((timer) => timer.milliseconds === 0).callback();
+  pool.tick('repo-a');
+  assert.deepEqual(reviewRoots, ['/repo-a']);
 });
 
 test('review scheduler and reconciliation failures remain repository isolated', () => {
@@ -80,6 +107,7 @@ test('review scheduler and reconciliation failures remain repository isolated', 
   });
   pool.start({ id: 'repo-a', name: 'A', path: '/repo-a' });
   pool.start({ id: 'repo-b', name: 'B', path: '/repo-b' });
+  for (const timer of timers.timeouts.filter((entry) => entry.milliseconds === 0)) timer.callback();
 
   pool.tick('repo-a');
   pool.tick('repo-b');
@@ -113,13 +141,15 @@ test('reconciliation uses repository-specific dynamic delays and reschedules', (
   });
   pool.start({ id: 'repo-a', name: 'A', path: '/repo-a' });
   assert.equal(pool.status('repo-a').nextReconciliationDelayMs, 300_000);
+  timers.timeouts.find((timer) => timer.milliseconds === 0).callback();
+  const firstReconciliation = timers.timeouts.find((timer) => timer.milliseconds === 300_000);
   active = true;
   pool.reconcileTick('repo-a');
   assert.equal(pool.status('repo-a').nextReconciliationDelayMs, 45_000);
-  assert.equal(timers.timeouts[0].cleared, true);
+  assert.equal(firstReconciliation.cleared, true);
 });
 
-test('stopping and closing PR review workers clears both timer types', () => {
+test('stopping and closing PR review workers clears review, recovery, and reconciliation timers', () => {
   const timers = fakeTimers();
   const pool = createManagerReviewWorkerPool({
     recover: () => ({}),
@@ -133,14 +163,17 @@ test('stopping and closing PR review workers clears both timer types', () => {
   pool.start({ id: 'repo-a', name: 'A', path: '/repo-a' });
   pool.start({ id: 'repo-b', name: 'B', path: '/repo-b' });
   const firstInterval = timers.intervals[0];
-  const firstTimeout = timers.timeouts[0];
+  const firstRecovery = timers.timeouts[0];
+  const firstReconciliation = timers.timeouts[1];
   const stopped = pool.stop('repo-a');
   assert.equal(stopped.changed, true);
   assert.equal(firstInterval.cleared, true);
-  assert.equal(firstTimeout.cleared, true);
+  assert.equal(firstRecovery.cleared, true);
+  assert.equal(firstReconciliation.cleared, true);
   assert.equal(pool.status('repo-b').running, true);
   pool.close();
   assert.equal(pool.list().length, 0);
   assert.equal(timers.intervals[1].cleared, true);
-  assert.equal(timers.timeouts[1].cleared, true);
+  assert.equal(timers.timeouts[2].cleared, true);
+  assert.equal(timers.timeouts[3].cleared, true);
 });
