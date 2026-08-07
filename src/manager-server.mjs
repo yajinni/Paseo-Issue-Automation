@@ -10,6 +10,8 @@ import { githubSetupPageApiRequest } from './setup-wizard/github-page-api.mjs';
 import { enhanceSetupWizardWithGitHubPage } from './setup-wizard/github-page-ui.mjs';
 import { harnessSetupPageApiRequest } from './setup-wizard/harness-page-api.mjs';
 import { enhanceSetupWizardWithHarnessPage } from './setup-wizard/harness-page-ui.mjs';
+import { issuesSetupPageApiRequest } from './setup-wizard/issues-page-api.mjs';
+import { enhanceSetupWizardWithIssuesPage } from './setup-wizard/issues-page-ui.mjs';
 import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs';
 import { paseoSetupPageApiRequest } from './setup-wizard/paseo-page-api.mjs';
 import { setupPageIdFromPath, setupWizardHtml } from './setup-wizard/ui.mjs';
@@ -61,6 +63,7 @@ export async function startManagerServer({
   harnessSetupOptions = {},
   githubSetupOptions = {},
   workspaceSetupOptions = {},
+  issuesSetupOptions = {},
 } = {}) {
   const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const reviewWorkers = reviewWorkerManager || createManagerReviewWorkerPool();
@@ -88,7 +91,8 @@ export async function startManagerServer({
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
         const harnessHtml = enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage }));
         const githubHtml = enhanceSetupWizardWithGitHubPage(harnessHtml);
-        response.end(enhanceSetupWizardWithWorkspacePage(githubHtml));
+        const workspaceHtml = enhanceSetupWizardWithWorkspacePage(githubHtml);
+        response.end(enhanceSetupWizardWithIssuesPage(workspaceHtml));
         return;
       }
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method) ? await readBody(request) : {};
@@ -105,6 +109,9 @@ export async function startManagerServer({
 
       const workspaceSetup = await workspaceSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { ...pageApiOptions, ...workspaceSetupOptions });
       if (workspaceSetup.handled) { json(response, workspaceSetup.status, workspaceSetup.body); return; }
+
+      const issuesSetup = issuesSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, ...issuesSetupOptions });
+      if (issuesSetup.handled) { json(response, issuesSetup.status, issuesSetup.body); return; }
 
       const result = managerApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, workerManager: workers, reviewWorkerManager: reviewWorkers });
       if (!result.handled) { json(response, 404, { error: 'Not found' }); return; }
