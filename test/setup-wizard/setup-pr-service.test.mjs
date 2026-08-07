@@ -8,13 +8,16 @@ import {
   confirmedSetupPullRequestReady,
   getSetupPullRequestConfirmation,
   installConfirmedLifecycleLabels,
+  repairSetupRepository,
   requestSetupPullRequestAutoMerge,
   validateSetupPullRequestConfirmation,
 } from '../../src/setup-wizard/setup-pr-service.mjs';
 import { saveSetupPage, startSetupSession } from '../../src/setup-wizard/store.mjs';
 import { saveConfig } from '../../src/state.mjs';
 
-function setup(t) {
+const TEMPLATE_PATH = '.github/ISSUE_TEMPLATE/automated-coding-task.md';
+
+function setup(t, { legacyCheckoutPage = true } = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'setup-pr-confirmation-'));
   const checkoutPath = mkdtempSync(path.join(os.tmpdir(), 'setup-pr-checkout-'));
   t.after(() => {
@@ -26,11 +29,19 @@ function setup(t) {
   saveSetupPage('repository', {
     repository: { owner: 'octo', name: 'app', id: 'R1', url: 'https://github.com/octo/app' },
     baseBranch: 'release',
-    selections: { host: 'github.com', account: 'octo', repository: 'octo/app', baseBranch: 'release' },
+    selections: {
+      host: 'github.com',
+      account: 'octo',
+      repository: 'octo/app',
+      baseBranch: 'release',
+      checkoutPath,
+    },
   }, { rootDir });
-  saveSetupPage('checkout', {
-    selections: { checkoutPath, checkoutManaged: true },
-  }, { rootDir });
+  if (legacyCheckoutPage) {
+    saveSetupPage('checkout', {
+      selections: { checkoutPath, checkoutManaged: true },
+    }, { rootDir });
+  }
   saveConfig(checkoutPath, { setupComplete: false, baseBranch: 'release', maxActive: 1, models: {}, workspace: {} });
   return { rootDir, checkoutPath };
 }
@@ -41,7 +52,20 @@ function preview() {
       { name: 'paseo:ready', status: 'reused', existingColor: 'abcdef', existingDescription: 'custom' },
       { name: 'paseo:queued', status: 'missing', existingColor: null, existingDescription: null },
     ],
-    setupPullRequestChanges: ['.github/ISSUE_TEMPLATE/automated-coding-task.md'],
+    labelSummary: { missing: 1, reused: 1, pending: 0 },
+    setupPullRequestChanges: [TEMPLATE_PATH],
+    template: { path: TEMPLATE_PATH, status: 'update', setupPrChangeRequired: true },
+    previewErrors: { labels: null, template: null },
+  };
+}
+
+function currentPreview() {
+  return {
+    labels: [],
+    labelSummary: { missing: 0, reused: 0, pending: 0 },
+    setupPullRequestChanges: [],
+    template: { path: TEMPLATE_PATH, status: 'current', setupPrChangeRequired: false },
+    previewErrors: { labels: null, template: null },
   };
 }
 
@@ -52,8 +76,15 @@ test('confirmation binds repository, future issue base, setup branch, files, and
   assert.equal(confirmation.selectedBaseBranch, 'release');
   assert.equal(confirmation.issuePullRequestBaseBranch, 'release');
   assert.equal(confirmation.setupBranch, 'ai/install-paseo-automation');
-  assert.deepEqual(confirmation.files, ['.github/ISSUE_TEMPLATE/automated-coding-task.md']);
+  assert.deepEqual(confirmation.files, [TEMPLATE_PATH]);
   assert.equal(confirmation.autoMerge, true);
+});
+
+test('simplified setup can resolve the checkout directly from the repository page', (t) => {
+  const { rootDir } = setup(t, { legacyCheckoutPage: false });
+  const confirmation = getSetupPullRequestConfirmation({ rootDir, previewBuilder: preview });
+  assert.equal(confirmation.repository, 'octo/app');
+  assert.deepEqual(confirmation.files, [TEMPLATE_PATH]);
 });
 
 test('confirmation fails closed when the issue PR target or file list changes', (t) => {
@@ -96,6 +127,83 @@ test('confirmed label installation reuses custom metadata and creates only missi
   assert.equal(reused.description, 'user custom');
   assert.equal(calls.some((call) => call.includes('paseo:ready')), false);
   assert.equal(result.filter((item) => item.action === 'created').length, result.length - 1);
+});
+
+test('automatic setup repair fixes missing direct labels without creating a PR when managed files are current', (t) => {
+  const { rootDir } = setup(t, { legacyCheckoutPage: false });
+  let pullRequestCreated = false;
+  const result = repairSetupRepository({
+    rootDir,
+    reconciler: () => null,
+    previewBuilder: () => ({
+      ...currentPreview(),
+      labelSummary: { missing: 1, reused: 0, pending: 0 },
+      labels: [{ name: 'paseo:ready', status: 'missing' }],
+    }),
+    labelInstaller: () => [{ name: 'paseo:ready', action: 'created' }],
+    pullRequestCreator: () => { pullRequestCreated = true; return { created: true }; },
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.action, 'repaired-directly');
+  assert.match(result.summary, /Created 1 missing lifecycle label/);
+  assert.equal(pullRequestCreated, false);
+});
+
+test('automatic setup repair creates a new fix PR for missing or outdated managed files', (t) => {
+  const { rootDir, checkoutPath } = setup(t, { legacyCheckoutPage: false });
+  let installedTemplateAt = null;
+  let createdAt = null;
+  let autoMergeRequested = null;
+  const result = repairSetupRepository({
+    rootDir,
+    reconciler: () => ({ number: 17, state: 'closed', url: 'https://github.test/pr/17' }),
+    previewBuilder: preview,
+    labelInstaller: () => [],
+    templateInstaller: (root) => { installedTemplateAt = root; return { path: TEMPLATE_PATH, updated: true }; },
+    pullRequestCreator: (root) => {
+      createdAt = root;
+      return {
+        created: true,
+        pullRequest: {
+          number: 18,
+          url: 'https://github.test/pr/18',
+          state: 'open',
+          branch: 'ai/install-paseo-automation-20260807t154500z',
+          baseBranch: 'release',
+          files: [TEMPLATE_PATH],
+        },
+      };
+    },
+    autoMergeRequester: (root, pullRequest) => {
+      autoMergeRequested = { root, number: pullRequest.number };
+      return { requested: true, enabled: true, reason: null, action: null };
+    },
+  });
+  assert.equal(result.ready, false);
+  assert.equal(result.action, 'created-pr');
+  assert.equal(result.pullRequest.number, 18);
+  assert.equal(installedTemplateAt, checkoutPath);
+  assert.equal(createdAt, checkoutPath);
+  assert.deepEqual(autoMergeRequested, { root: checkoutPath, number: 18 });
+  assert.match(result.summary, /Setup issues detected\. Paseo created setup PR #18 to fix them/);
+  assert.match(result.summary, /Auto-merge was requested/);
+});
+
+test('automatic setup repair reuses an already-open setup PR instead of creating a duplicate', (t) => {
+  const { rootDir } = setup(t, { legacyCheckoutPage: false });
+  let created = false;
+  const result = repairSetupRepository({
+    rootDir,
+    reconciler: () => ({ number: 21, state: 'open', url: 'https://github.test/pr/21' }),
+    previewBuilder: preview,
+    labelInstaller: () => [],
+    pullRequestCreator: () => { created = true; return { created: true }; },
+  });
+  assert.equal(result.ready, false);
+  assert.equal(result.action, 'waiting-pr');
+  assert.equal(result.pullRequest.number, 21);
+  assert.equal(created, false);
+  assert.match(result.summary, /Setup issues detected\. Setup PR #21 is open to fix them/);
 });
 
 test('auto-merge failure remains policy-respecting and actionable instead of bypassing protections', () => {
