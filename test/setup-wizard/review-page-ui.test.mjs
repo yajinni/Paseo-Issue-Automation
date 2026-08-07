@@ -43,23 +43,43 @@ test('Prompt previews are not shown in Review setup', () => {
   assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Full prompt:/);
 });
 
-test('Web ChatGPT conditional section uses ChatGPT Profile and highlights missing required readiness', () => {
-  assert.match(REVIEW_PAGE_SCRIPT, /<h3>ChatGPT Profile<\/h3>/);
-  assert.match(REVIEW_PAGE_SCRIPT, /Open ChatGPT Profile/);
-  assert.match(REVIEW_PAGE_SCRIPT, /never asks for or stores your ChatGPT password/);
-  assert.match(REVIEW_PAGE_SCRIPT, /cardClass\(missing\)/);
-  assert.match(REVIEW_PAGE_SCRIPT, /required-missing/);
-  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /dedicated Chromium profile/);
-  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /dedicated ChatGPT browser/);
+test('ChatGPT Profile shows real Playwright and Chromium prerequisite checks with conditional installers', () => {
+  assert.match(REVIEW_PAGE_SCRIPT, /prerequisiteRow\('Playwright', playwrightReady, playwrightAction\)/);
+  assert.match(REVIEW_PAGE_SCRIPT, /prerequisiteRow\('Chromium', chromiumReady, chromiumAction\)/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Install Playwright/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Install Chromium/);
+  assert.match(REVIEW_PAGE_SCRIPT, /playwrightReady \? ''/);
+  assert.match(REVIEW_PAGE_SCRIPT, /chromiumReady \? ''/);
+  assert.match(REVIEW_PAGE_SCRIPT, /review\/playwright\/install/);
+  assert.match(REVIEW_PAGE_SCRIPT, /review\/chromium\/install/);
 });
 
-test('review setup supports dedicated or existing stable chat URLs and safe repository readiness', () => {
-  assert.match(REVIEW_PAGE_SCRIPT, /Create\/use a dedicated PR review chat/);
-  assert.match(REVIEW_PAGE_SCRIPT, /Use an existing chat/);
-  assert.match(REVIEW_PAGE_SCRIPT, /stable URL/);
-  assert.match(REVIEW_PAGE_SCRIPT, /safe review-protocol capability check/);
-  assert.match(REVIEW_PAGE_SCRIPT, /must not modify repository state/);
-  assert.match(REVIEW_PAGE_SCRIPT, /Recheck/);
+test('ChatGPT Profile login is disabled until Playwright and Chromium are both ready', () => {
+  assert.match(REVIEW_PAGE_SCRIPT, /const browserReady = playwrightReady && chromiumReady/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Log into ChatGPT Profile/);
+  assert.match(REVIEW_PAGE_SCRIPT, /browserReady \? '' : 'disabled'/);
+  assert.match(REVIEW_PAGE_SCRIPT, /never asks for or stores your ChatGPT password/);
+});
+
+test('PR review chat URL is last in the profile card, auto-saves, and shows a green Saved indicator', () => {
+  const loginIndex = REVIEW_PAGE_SCRIPT.indexOf('Log into ChatGPT Profile');
+  const urlIndex = REVIEW_PAGE_SCRIPT.indexOf('PR review chat URL');
+  assert.ok(urlIndex > loginIndex);
+  assert.match(REVIEW_PAGE_SCRIPT, /review-chat-saved/);
+  assert.match(REVIEW_PAGE_SCRIPT, /color:#65c987/);
+  assert.match(REVIEW_PAGE_SCRIPT, />Saved<\/span>/);
+  assert.match(REVIEW_PAGE_SCRIPT, /review-chat-url[^]*addEventListener\('input'/);
+  assert.match(REVIEW_PAGE_SCRIPT, /review-chat-url[^]*addEventListener\('change', saveChat\)/);
+  assert.match(REVIEW_PAGE_SCRIPT, /mode: 'existing'/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Save review chat/);
+});
+
+test('removed ChatGPT Profile controls and repository-access copy stay absent', () => {
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Create\/use a dedicated PR review chat/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Use an existing chat/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /safe review-protocol capability check/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /must not modify repository state/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, />Open ChatGPT Profile</);
 });
 
 test('review page enhancer injects the progressive page script once', () => {
