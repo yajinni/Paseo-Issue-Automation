@@ -36,6 +36,9 @@ export function windowsPaseoCandidates(env = process.env) {
   const push = (...parts) => {
     if (parts[0]) candidates.push(path.join(...parts));
   };
+  push(env.USERPROFILE, '.local', 'bin', 'paseo.cmd');
+  push(env.HOME, '.local', 'bin', 'paseo.cmd');
+  if (env.HOMEDRIVE && env.HOMEPATH) push(`${env.HOMEDRIVE}${env.HOMEPATH}`, '.local', 'bin', 'paseo.cmd');
   push(env.LOCALAPPDATA, 'Programs', 'Paseo', 'resources', 'bin', 'paseo.cmd');
   push(env.LOCALAPPDATA, 'Programs', 'paseo', 'resources', 'bin', 'paseo.cmd');
   push(env.LOCALAPPDATA, 'Paseo', 'resources', 'bin', 'paseo.cmd');
