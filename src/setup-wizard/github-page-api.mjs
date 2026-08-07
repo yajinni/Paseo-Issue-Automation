@@ -76,6 +76,24 @@ function publicPaseoStatus(session, blocker = null, extra = {}) {
   };
 }
 
+function commitValidatedRepositoryIdentity(status, options = {}) {
+  let session = activeSession(options);
+  if (session.repository && session.baseBranch) return session;
+  const selection = status?.selection || session.pages?.repository?.selections || {};
+  const selected = (status?.repositories || []).find((repository) => repository.nameWithOwner === selection.repository) || null;
+  if (!selected || !selection.baseBranch) return session;
+  session = saveSetupPage('repository', {
+    repository: {
+      owner: selected.owner,
+      name: selected.name,
+      id: selected.id,
+      url: selected.url,
+    },
+    baseBranch: selection.baseBranch,
+  }, options);
+  return session;
+}
+
 async function ensureRepositoryPaseo(options = {}) {
   let session = activeSession(options);
   if (!session.repository || !session.baseBranch) {
@@ -141,6 +159,7 @@ async function decorateGitHubStatus(status, options = {}) {
   if (!status?.check?.ok) {
     return { ...status, githubReady: false, paseoReady: false, paseo: publicPaseoStatus(activeSession(options)) };
   }
+  commitValidatedRepositoryIdentity(status, options);
   const paseo = await ensureRepositoryPaseo(options);
   const session = activeSession(options);
   const check = session.pages?.repository?.lastCheck || status.check;
