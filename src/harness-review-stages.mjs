@@ -4,8 +4,16 @@ import {
   REVIEW_WORKFLOW_RESULTS,
 } from './review-workflow-prompts.mjs';
 
+export const HARNESS_RUNTIME_STAGES = Object.freeze({
+  quick: 'quick',
+  fullImmediate: 'full-immediate',
+  fullManual: 'full-manual',
+  fullWebChatgpt: 'full-web-chatgpt',
+});
+
 export const HARNESS_REVIEW_EVENTS = Object.freeze({
   result: 'harness-review',
+  repair: 'harness-review-repair',
   handoff: 'harness-review-handoff',
 });
 
@@ -13,8 +21,16 @@ function workflow(config = {}) {
   return String(config.review?.workflow || 'full-immediate');
 }
 
+export function harnessRuntimeStage(config = {}) {
+  return workflow(config) === 'full-immediate'
+    ? HARNESS_RUNTIME_STAGES.fullImmediate
+    : HARNESS_RUNTIME_STAGES.quick;
+}
+
 export function harnessReviewStage(config = {}) {
-  return workflow(config) === 'full-immediate' ? REVIEW_STAGES.full : REVIEW_STAGES.quick;
+  return harnessRuntimeStage(config) === HARNESS_RUNTIME_STAGES.quick
+    ? REVIEW_STAGES.quick
+    : REVIEW_STAGES.full;
 }
 
 export function harnessReviewRoundLimit(config = {}, stage = harnessReviewStage(config)) {
@@ -39,7 +55,7 @@ export function unresolvedQuickFindings(state = {}) {
     .filter((event) => (
       event.event === HARNESS_REVIEW_EVENTS.result
       && event.stage === REVIEW_STAGES.quick
-      && event.result === 'CHANGES_REQUIRED'
+      && event.result === 'changes'
     ))
     .flatMap((event) => Array.isArray(event.findings) ? event.findings : [])
     .filter((finding) => finding && finding.severity === 'blocking');
@@ -47,9 +63,22 @@ export function unresolvedQuickFindings(state = {}) {
 
 export function quickExhaustionHandoff(config = {}) {
   const selected = workflow(config);
-  if (selected === 'quick-manual') return 'manual';
-  if (selected === 'quick-web-chatgpt') return 'web-chatgpt';
+  if (selected === 'quick-manual') return HARNESS_RUNTIME_STAGES.fullManual;
+  if (selected === 'quick-web-chatgpt') return HARNESS_RUNTIME_STAGES.fullWebChatgpt;
   return null;
+}
+
+export function reviewFreshness({ requestedHeadSha, currentHeadSha, requestedBaseSha = null, currentBaseSha = null } = {}) {
+  const expectedHead = String(requestedHeadSha || '').trim();
+  const actualHead = String(currentHeadSha || '').trim();
+  if (!expectedHead || !actualHead || expectedHead !== actualHead) {
+    return { fresh: false, reason: 'head-changed' };
+  }
+  if (requestedBaseSha !== null && currentBaseSha !== null
+      && String(requestedBaseSha) !== String(currentBaseSha)) {
+    return { fresh: false, reason: 'base-changed' };
+  }
+  return { fresh: true, reason: null };
 }
 
 export function reviewStageDecision({ config = {}, state = {}, stage, verdict }) {
@@ -72,9 +101,16 @@ export function reviewStageDecision({ config = {}, state = {}, stage, verdict })
       target: quickExhaustionHandoff(config),
       round,
       limit,
+      needsAttention: false,
     };
   }
-  return { action: 'attention', round, limit };
+  return {
+    action: 'attention',
+    round,
+    limit,
+    changesRequested: true,
+    needsAttention: true,
+  };
 }
 
 export function validateHarnessReviewVerdict(verdict, expected = {}) {
@@ -94,6 +130,67 @@ export function validateHarnessReviewVerdict(verdict, expected = {}) {
   if (!REVIEW_WORKFLOW_RESULTS.includes(verdict.result)) throw new Error('Reviewer verdict result is invalid.');
   if (!Array.isArray(verdict.findings)) throw new Error('Reviewer verdict findings must be an array.');
   return verdict;
+}
+
+export function createHarnessReviewEvent(verdict, expected = {}, { at = new Date().toISOString() } = {}) {
+  validateHarnessReviewVerdict(verdict, expected);
+  return Object.freeze({
+    event: HARNESS_REVIEW_EVENTS.result,
+    stage: verdict.stage,
+    round: verdict.round,
+    result: verdict.result,
+    headSha: verdict.headSha,
+    promptVersion: verdict.promptVersion,
+    summary: String(verdict.summary || ''),
+    findings: verdict.findings.map((finding) => ({ ...finding })),
+    at,
+  });
+}
+
+export function invalidateAfterRepair(state = {}, {
+  previousHeadSha,
+  newHeadSha,
+  at = new Date().toISOString(),
+} = {}) {
+  const previous = String(previousHeadSha || state.currentHeadSha || '').trim();
+  const next = String(newHeadSha || '').trim();
+  if (!previous || !next || previous === next) {
+    throw new Error('A repair must produce a new exact PR head SHA.');
+  }
+  return {
+    ...state,
+    currentHeadSha: next,
+    validationApproved: false,
+    validationHeadSha: null,
+    reviewApproved: false,
+    approvedHeadSha: null,
+    events: [
+      ...(state.events || []),
+      {
+        event: HARNESS_REVIEW_EVENTS.repair,
+        previousHeadSha: previous,
+        newHeadSha: next,
+        invalidatedValidation: true,
+        invalidatedReviewApproval: true,
+        at,
+      },
+    ],
+  };
+}
+
+export function createQuickHandoffEvent(config = {}, state = {}, {
+  at = new Date().toISOString(),
+} = {}) {
+  const target = quickExhaustionHandoff(config);
+  if (!target) throw new Error('Quick-review handoff requires a quick review workflow.');
+  return Object.freeze({
+    event: HARNESS_REVIEW_EVENTS.handoff,
+    from: HARNESS_RUNTIME_STAGES.quick,
+    to: target,
+    unresolvedFindings: unresolvedQuickFindings(state).map((finding) => ({ ...finding })),
+    needsAttention: false,
+    at,
+  });
 }
 
 export function summarizeReviewFindings(verdict = {}) {
