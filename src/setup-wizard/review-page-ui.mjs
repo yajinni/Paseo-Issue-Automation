@@ -65,7 +65,7 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
     try {
       const mode = document.querySelector('input[name="review-chat-mode"]:checked')?.value || 'dedicated';
       const conversationUrl = String(document.getElementById('review-chat-url')?.value || '').trim();
-      state = await api('/api/setup/review/chat', { method: 'POST', body: JSON.stringify({ mode: mode === 'dedicated' ? 'existing' : mode, conversationUrl }) });
+      state = await api('/api/setup/review/chat', { method: 'POST', body: JSON.stringify({ mode, conversationUrl }) });
       await syncShell(); render();
     } catch (error) { if (typeof showError === 'function') showError(error); }
     finally { loading = false; }
