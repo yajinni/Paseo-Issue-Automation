@@ -25,29 +25,34 @@ test('coder prompt is controlled directly without an orchestrator model', () => 
   assert.match(prompt, /Do not rebase or force-push/);
 });
 
-test('coder completion leaves validation bookkeeping to the controller', () => {
+test('coder completion leaves missing PR creation and validation bookkeeping to the controller', () => {
   const prompt = buildCoderPrompt({ repository: 'owner/repo', issue, branch: 'ai/issue-7-test', config });
   assert.doesNotMatch(prompt, /npx --no-install/);
   assert.doesNotMatch(prompt, /record --issue 7 --event validation-summary/);
-  assert.match(prompt, /Controller owns the internal validation-summary bookkeeping/i);
+  assert.match(prompt, /controller will create the draft after it verifies a clean worktree and exact pushed head/i);
+  assert.match(prompt, /Issue Execution Controller owns ensuring a missing draft PR exists/i);
+  assert.match(prompt, /internal validation-summary bookkeeping/i);
   assert.match(prompt, /Do not call Paseo's hooks command/i);
-  assert.match(prompt, /Commit all intended changes, push the exact branch head/i);
+  assert.match(prompt, /Commit all intended changes and push the exact branch head/i);
   assert.match(prompt, /Do not finish with uncommitted worktree changes/i);
   assert.match(prompt, /block --issue 7 --reason/);
 });
 
-test('completion recovery repairs only the mechanical handoff and forbids Paseo hooks', () => {
+test('completion recovery repairs the pushed exact-head handoff while the controller owns a missing PR', () => {
   const prompt = buildCompletionRecoveryPrompt({
     issueNumber: 7,
     branch: 'ai/issue-7-test',
     baseBranch: 'main',
-    reason: 'Coder finished without an open pull request.',
+    reason: 'Coder finished without pushing the exact local head.',
   });
   assert.match(prompt, /preserve completed work/i);
-  assert.match(prompt, /open draft pull request from ai\/issue-7-test into main/i);
+  assert.match(prompt, /Push the exact current branch head/i);
+  assert.match(prompt, /If a draft pull request from ai\/issue-7-test into main already exists/i);
+  assert.match(prompt, /If no PR exists, do not spend time creating one; the controller will create the draft mechanically/i);
   assert.match(prompt, /Run or rerun every validation\/check required by the issue/i);
   assert.match(prompt, /worktree is clean/i);
-  assert.match(prompt, /PR head exactly matches local HEAD/i);
+  assert.match(prompt, /pushed branch head exactly matches local HEAD/i);
+  assert.match(prompt, /controller owns missing-PR creation/i);
   assert.match(prompt, /Do NOT call `paseo hooks`/i);
   assert.doesNotMatch(prompt, /validation-summary --result PASS --commit/);
 });
