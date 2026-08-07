@@ -7,6 +7,7 @@ import {
   buildReviewerPrompt,
 } from './controller-prompts.mjs';
 import { markHumanReview, recordEvent, terminalState } from './automation.mjs';
+import { currentPr, ensureDraftPr } from './controller-draft-pr.mjs';
 import { postReviewerAuditComment } from './reviewer-audit.mjs';
 import { handoffValidatedPullRequest, prReviewAutomationEnabled } from './pr-review-handoff.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
@@ -56,14 +57,6 @@ function latestValidation(state) {
     .find((event) => event.event === 'validation-summary' && event.result === 'PASS' && event.commit);
 }
 
-function currentPr(root, state) {
-  const prs = runJson('gh', [
-    'pr', 'list', '--state', 'open', '--head', state.branch, '--limit', '10',
-    '--json', 'number,url,isDraft,headRefOid,baseRefName,baseRefOid,mergeable,mergeStateStatus,statusCheckRollup',
-  ], { cwd: root, allowFailure: true }) || [];
-  return prs.find((pr) => pr.baseRefName === loadConfig(root).baseBranch) || prs[0] || null;
-}
-
 function worktreeHead(root, state) {
   const cwd = state.worktreePath || root;
   const result = run('git', ['rev-parse', 'HEAD'], { cwd, allowFailure: true });
@@ -94,7 +87,7 @@ function controllerValidation(root, issueNumber, state, head) {
     event: 'validation-summary',
     result: 'PASS',
     commit: head,
-    details: 'Controller recorded the exact-head validation handoff after the coder completed with a clean worktree and matching open PR. Issue-required validation remains subject to independent review and GitHub CI.',
+    details: 'Controller recorded the exact-head validation handoff after the coder completed with a clean worktree, exact pushed branch head, and matching open PR. Issue-required validation remains subject to independent review and GitHub CI.',
   });
   updateState(root, issueNumber, {}, {
     type: 'controller-validation-recorded',
@@ -107,16 +100,34 @@ function requireValidatedPr(root, issueNumber) {
   const state = loadRun(root, issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${issueNumber}.`);
   if (state.status !== 'agent-running') return { terminal: true, state };
-  const pr = currentPr(root, state);
-  if (!pr) throw completionEvidenceError(`Coder finished without an open pull request for ${state.branch}.`);
+
   const head = worktreeHead(root, state);
-  if (!head || head !== pr.headRefOid) {
-    throw completionEvidenceError('Worktree HEAD and pull-request HEAD do not identify the same exact commit.');
-  }
+  if (!head) throw completionEvidenceError('Coder finished without a readable worktree HEAD.');
   const cleanliness = worktreeClean(root, state);
   if (!cleanliness.ok) {
     const detail = cleanliness.reason ? ` ${cleanliness.reason}` : '';
     throw completionEvidenceError(`Coder finished with uncommitted worktree changes or an unreadable worktree status.${detail}`);
+  }
+
+  let pr = currentPr(root, state);
+  if (!pr) {
+    try {
+      const ensured = ensureDraftPr(root, issueNumber, state, head);
+      pr = ensured.pr;
+      if (ensured.created) {
+        updateState(root, issueNumber, { prNumber: pr.number, prUrl: pr.url }, {
+          type: 'controller-draft-pr-created',
+          details: `Controller created draft PR #${pr.number} for exact pushed head ${head}.`,
+        });
+      }
+    } catch (error) {
+      if (error?.code === 'CODER_BRANCH_NOT_PUSHED') throw completionEvidenceError(error.message);
+      throw error;
+    }
+  }
+
+  if (!pr || head !== pr.headRefOid) {
+    throw completionEvidenceError('Worktree HEAD and pull-request HEAD do not identify the same exact commit.');
   }
   const recorded = controllerValidation(root, issueNumber, state, head);
   return { terminal: false, state: recorded.state, validation: recorded.validation, pr, head };
