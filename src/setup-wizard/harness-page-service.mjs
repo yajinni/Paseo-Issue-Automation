@@ -61,7 +61,7 @@ function checkSelection(catalog, selection) {
       message: selection.harness
         ? 'The selected coding harness is no longer available from Paseo.'
         : 'Choose an available coding harness.',
-      recoveryAction: 'Refresh the catalog and choose an available harness.',
+      recoveryAction: 'Refresh the coding harness list and choose an available harness.',
     });
     return { ok: false, provider: null, blockers };
   }
@@ -83,12 +83,12 @@ function checkSelection(catalog, selection) {
   if (!coding) blockers.push({
     code: 'paseo-coding-model-required',
     message: 'Choose an available coding model for the selected harness.',
-    recoveryAction: 'Select a coding model from the refreshed catalog.',
+    recoveryAction: 'Select a coding model from the refreshed list.',
   });
   if (!review) blockers.push({
     code: 'paseo-review-model-required',
     message: 'Choose an available review model for the selected harness.',
-    recoveryAction: 'Select a review model from the refreshed catalog.',
+    recoveryAction: 'Select a review model from the refreshed list.',
   });
   if (coding && selection.codingThinking && !coding.thinkingOptionIds?.map(String).includes(selection.codingThinking)) {
     blockers.push({
@@ -196,8 +196,8 @@ function response(catalog, session) {
       blockers: validation.blockers,
     },
     reviewExplanation: {
-      quick: 'Quick review uses the selected review model for focused feedback before manual or Web ChatGPT review.',
-      full: 'Full review uses a fresh review session to inspect the complete pull request before merge eligibility is decided.',
+      quick: 'Select a light or same model as the coding model if you just want to do a quick check on the code before letting it move on to human PR review, another heavy external PR review workflow, or will use our web ChatGPT setup for review.',
+      full: 'Pick your heavy PR review model if you wont be doing one of the above bullet options and want the PR review cycle to start immediately.',
     },
     technicalDetails: {
       providerCount: catalog.providers.length,
@@ -208,6 +208,15 @@ function response(catalog, session) {
   };
 }
 
+function recordCurrentValidation(catalog, session, options) {
+  const validation = checkSelection(catalog, selectionFromPage(session));
+  return recordSetupPageCheck('harness', {
+    ok: validation.ok,
+    summary: validation.ok ? 'Coding harness and model selections are ready.' : validation.blockers[0]?.message || 'Harness setup needs attention.',
+    blockers: validation.blockers,
+  }, options);
+}
+
 export async function getHarnessSetupPageStatus(options = {}) {
   const { session, catalog } = await loadCatalog(options);
   const prior = selectionFromPage(session);
@@ -216,6 +225,7 @@ export async function getHarnessSetupPageStatus(options = {}) {
   if (JSON.stringify(prior) !== JSON.stringify(preserved)) {
     currentSession = saveSetupPage('harness', { selections: preserved }, options);
   }
+  currentSession = recordCurrentValidation(catalog, currentSession, options);
   return response(catalog, currentSession);
 }
 
@@ -242,12 +252,7 @@ export async function saveHarnessSetupPage(input = {}, options = {}) {
     candidate.reviewThinking = normalizeThinking(review, input.reviewThinking ?? candidate.reviewThinking);
   }
   let session = saveSetupPage('harness', { selections: candidate }, options);
-  const validation = checkSelection(catalog, selectionFromPage(session));
-  session = recordSetupPageCheck('harness', {
-    ok: validation.ok,
-    summary: validation.ok ? 'Coding harness and model selections are ready.' : validation.blockers[0]?.message || 'Harness setup needs attention.',
-    blockers: validation.blockers,
-  }, options);
+  session = recordCurrentValidation(catalog, session, options);
   return response(catalog, session);
 }
 
@@ -256,11 +261,6 @@ export async function recheckHarnessSetupPage(options = {}) {
   const prior = selectionFromPage(activeSession(options));
   const preserved = preservedSelection(catalog, prior);
   let session = saveSetupPage('harness', { selections: preserved }, options);
-  const validation = checkSelection(catalog, preserved);
-  session = recordSetupPageCheck('harness', {
-    ok: validation.ok,
-    summary: validation.ok ? 'Coding harness and model selections are ready.' : validation.blockers[0]?.message || 'Harness setup needs attention.',
-    blockers: validation.blockers,
-  }, options);
+  session = recordCurrentValidation(catalog, session, options);
   return response(catalog, session);
 }
