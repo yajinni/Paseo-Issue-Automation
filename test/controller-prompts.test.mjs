@@ -25,35 +25,42 @@ test('coder prompt is controlled directly without an orchestrator model', () => 
   assert.match(prompt, /Do not rebase or force-push/);
 });
 
-test('coder completion uses the installed controller CLI and requires a successful handoff', () => {
+test('coder completion leaves validation bookkeeping to the controller', () => {
   const prompt = buildCoderPrompt({ repository: 'owner/repo', issue, branch: 'ai/issue-7-test', config });
   assert.doesNotMatch(prompt, /npx --no-install/);
-  assert.match(prompt, /node ["'][^\n]*paseo-issue-automation\.mjs["'] record --issue 7 --event validation-summary --result PASS/);
-  assert.match(prompt, /Do not finish the coding session until this record command exits successfully/);
+  assert.doesNotMatch(prompt, /record --issue 7 --event validation-summary/);
+  assert.match(prompt, /Controller owns the internal validation-summary bookkeeping/i);
+  assert.match(prompt, /Do not call Paseo's hooks command/i);
+  assert.match(prompt, /Commit all intended changes, push the exact branch head/i);
+  assert.match(prompt, /Do not finish with uncommitted worktree changes/i);
   assert.match(prompt, /block --issue 7 --reason/);
 });
 
-test('completion recovery preserves work and repairs PR plus exact-head validation evidence', () => {
+test('completion recovery repairs only the mechanical handoff and forbids Paseo hooks', () => {
   const prompt = buildCompletionRecoveryPrompt({
     issueNumber: 7,
     branch: 'ai/issue-7-test',
     baseBranch: 'main',
-    reason: 'Coder finished without recording a passing validation-summary event.',
+    reason: 'Coder finished without an open pull request.',
   });
-  assert.match(prompt, /Preserve completed work/);
-  assert.match(prompt, /open draft pull request from ai\/issue-7-test into main/);
-  assert.match(prompt, /Run or rerun every validation\/check required by the issue/);
-  assert.match(prompt, /validation-summary --result PASS --commit <exact-current-head-sha>/);
-  assert.match(prompt, /Do not reuse stale validation evidence/);
+  assert.match(prompt, /preserve completed work/i);
+  assert.match(prompt, /open draft pull request from ai\/issue-7-test into main/i);
+  assert.match(prompt, /Run or rerun every validation\/check required by the issue/i);
+  assert.match(prompt, /worktree is clean/i);
+  assert.match(prompt, /PR head exactly matches local HEAD/i);
+  assert.match(prompt, /Do NOT call `paseo hooks`/i);
+  assert.doesNotMatch(prompt, /validation-summary --result PASS --commit/);
 });
 
-test('repair and base-update prompts require fresh recorded exact-head validation', () => {
+test('repair and base-update prompts require clean exact-head PRs without coder bookkeeping', () => {
   const repair = buildRepairPrompt({ issueNumber: 7, findings: 'Fix the test.' });
   const update = buildBaseUpdatePrompt({ issueNumber: 7, baseBranch: 'main', reason: 'base advanced' });
   for (const prompt of [repair, update]) {
-    assert.doesNotMatch(prompt, /npx --no-install/);
-    assert.match(prompt, /validation-summary --result PASS --commit <sha>/);
-    assert.match(prompt, /do not finish until the record command succeeds/i);
+    assert.match(prompt, /controller owns validation-summary bookkeeping/i);
+    assert.match(prompt, /do not call Paseo hooks/i);
+    assert.match(prompt, /worktree clean|worktree is clean/i);
+    assert.match(prompt, /PR head/i);
+    assert.doesNotMatch(prompt, /record --issue 7 --event validation-summary/);
   }
 });
 
