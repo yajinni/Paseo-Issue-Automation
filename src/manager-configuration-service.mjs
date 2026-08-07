@@ -9,7 +9,7 @@ import {
 } from './chatgpt-profile-readiness.mjs';
 import { installPlaywrightLibrary } from './playwright-installer.mjs';
 import { run as defaultRun } from './process.mjs';
-import { resolveRepositoryApiContext } from './repository-api-context.mjs';
+import { parseRepositoryApiPath, resolveRepositoryApiContext } from './repository-api-context.mjs';
 import { discoverPaseoCatalog } from './setup-discovery.mjs';
 import { createPaseoConnectionContext, redactSensitive } from './setup-wizard/paseo-connection.mjs';
 import { loadSetupSessionStore } from './setup-wizard/store.mjs';
@@ -133,8 +133,10 @@ function response(body, status = 200) {
 }
 
 export async function managerConfigurationApiRequest({ method, pathname, body = {} }, options = {}) {
+  const route = parseRepositoryApiPath(pathname);
+  if (!route.matched || !route.selector || !route.repositoryPath?.startsWith('/configuration/')) return { handled: false };
   const context = resolveRepositoryApiContext(pathname, options);
-  if (!context || !context.pathname.startsWith('/api/configuration/')) return { handled: false };
+  if (!context) return { handled: false };
 
   if (context.pathname === '/api/configuration/harnesses' && method === 'GET') {
     return response(await harnessCatalog(context, options));
@@ -144,12 +146,12 @@ export async function managerConfigurationApiRequest({ method, pathname, body = 
   }
   if (context.pathname === '/api/configuration/chatgpt-profile/playwright/install' && method === 'POST') {
     const install = options.installPlaywright || installPlaywrightLibrary;
-    const result = install(options.playwrightOptions || {});
+    const result = await install(options.playwrightOptions || {});
     return response({ result, status: chatGptStatus(options) });
   }
   if (context.pathname === '/api/configuration/chatgpt-profile/chromium/install' && method === 'POST') {
     const install = options.installChromium || installPlaywrightChromium;
-    const result = install(options.browserOptions || {});
+    const result = await install(options.browserOptions || {});
     return response({ result, status: chatGptStatus(options) });
   }
   if (context.pathname === '/api/configuration/chatgpt-profile/open' && method === 'POST') {
