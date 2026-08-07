@@ -2,6 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
 import { managerHtml } from './manager-maintenance-ui.mjs';
+import { enhanceManagerWithNavigation } from './manager-navigation-ui.mjs';
 import { enhanceManagerWithUiFoundation, enhanceSetupWithSharedUiTheme } from './manager-ui-foundation.mjs';
 import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
@@ -79,7 +80,7 @@ ${manualForm}
   if (!html.includes('data-manager-setup-link')) {
     html = html.includes('</body>') ? html.replace('</body>', `${setupLink}</body>`) : `${html}${setupLink}`;
   }
-  return enhanceManagerWithUiFoundation(html);
+  return enhanceManagerWithNavigation(enhanceManagerWithUiFoundation(html));
 }
 
 export async function startManagerServer({
