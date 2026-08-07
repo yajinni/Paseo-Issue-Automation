@@ -2,7 +2,6 @@ import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
 import { inspectExternalMigrationAdoption } from './external-adoption.mjs';
 import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
-import { managerIssuePlan } from './manager-issues.mjs';
 import { inspectRepository } from './repository-registry.mjs';
 import { managedRepositoryOperationalSummary } from './repository-health.mjs';
 import { managerReviewProfileStatus } from './manager-review-profile-status.mjs';
@@ -34,25 +33,6 @@ function safeBranch(root, runner = run) {
   return result.ok && result.stdout ? result.stdout : null;
 }
 
-function safeIssuePlan(root, config) {
-  try {
-    return { available: true, error: null, ...managerIssuePlan(root, config) };
-  } catch (error) {
-    return {
-      available: false,
-      error: error instanceof Error ? error.message : String(error),
-      mode: config.issueSelection?.mode || 'recommended-labels',
-      total: 0,
-      eligible: 0,
-      blocked: 0,
-      skipped: 0,
-      active: 0,
-      nextIssueNumber: null,
-      items: [],
-    };
-  }
-}
-
 export function managerRepositoryStatus(repository, {
   runner = run,
   platform = process.platform,
@@ -75,7 +55,6 @@ export function managerRepositoryStatus(repository, {
     : null;
   const runs = listRuns(inspected.path);
   const workQueue = managerWorkQueue(runs, config);
-  const issuePlan = safeIssuePlan(inspected.path, config);
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'closed'].includes(String(item?.status || '')),
   );
@@ -122,7 +101,6 @@ export function managerRepositoryStatus(repository, {
     },
     maintenance,
     workQueue,
-    issuePlan,
     chatGptProfile,
     automation: {
       claimsEnabled: runtime.claimsEnabled === true,
