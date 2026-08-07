@@ -18,7 +18,7 @@ import {
   startSetupSession,
 } from '../../src/setup-wizard/store.mjs';
 
-const PRIOR_PAGES = ['paseo', 'harness', 'repository', 'checkout', 'workspace', 'issues', 'review'];
+const PRIOR_PAGES = ['paseo', 'harness', 'repository', 'issues', 'review'];
 
 function fixture(t, { eligibleIssueCount = 0 } = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'paseo-readiness-manager-'));
@@ -43,20 +43,30 @@ function fixture(t, { eligibleIssueCount = 0 } = {}) {
   saveSetupPage('repository', {
     repository: { owner: 'octo', name: 'app', id: 'R1', url: 'https://github.com/octo/app' },
     baseBranch: 'main',
-    selections: { repository: 'octo/app', baseBranch: 'main' },
+    selections: {
+      repository: 'octo/app',
+      baseBranch: 'main',
+      checkoutPath: repo,
+      paseoRepository: 'octo/app',
+      paseoBaseBranch: 'main',
+      paseoProjectName: 'app',
+      paseoWorkspaceId: 'ws-1',
+      paseoWorkspaceName: 'Issue Coding Automation',
+    },
+    managedCheckout: { path: repo, managed: false, workspaceId: 'ws-1' },
   }, { rootDir });
-  saveSetupPage('checkout', { selections: { checkoutPath: repo } }, { rootDir });
   saveSetupPage('issues', { selections: { eligibleIssueCount } }, { rootDir });
   for (const page of PRIOR_PAGES) recordSetupPageCheck(page, { ok: true, summary: `${page} ready`, blockers: [] }, { rootDir });
   return { rootDir, repo };
 }
 
-test('summary links every approved setup page and defaults start based on current eligibility', (t) => {
+test('summary links every visible prerequisite setup page and defaults start based on current eligibility', (t) => {
   const { rootDir } = fixture(t, { eligibleIssueCount: 2 });
   const summary = buildFinalReadinessSummary({ rootDir, eligibleIssueCount: 2 });
   assert.equal(summary.repository, 'octo/app');
   assert.equal(summary.baseBranch, 'main');
-  assert.equal(summary.pages.length, 7);
+  assert.equal(summary.pages.length, 5);
+  assert.deepEqual(summary.pages.map((page) => page.id), PRIOR_PAGES);
   assert.ok(summary.pages.every((page) => page.href === `/setup/${page.id}` && page.completed));
   assert.equal(summary.startAutomationDefault, true);
   assert.equal(buildFinalReadinessSummary({ rootDir, eligibleIssueCount: 0 }).startAutomationDefault, false);

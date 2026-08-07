@@ -12,7 +12,7 @@ import {
   reconcileConfirmedSetupPullRequest,
 } from './setup-pr-service.mjs';
 
-const REQUIRED_PAGES = Object.freeze(['paseo', 'harness', 'repository', 'checkout', 'workspace', 'issues', 'review']);
+const REQUIRED_PAGES = Object.freeze(['paseo', 'harness', 'repository', 'issues', 'review']);
 
 function activeSession(options = {}) {
   const store = loadSetupSessionStore(options);
@@ -21,7 +21,7 @@ function activeSession(options = {}) {
 }
 
 function checkoutPath(session) {
-  const page = session.pages?.checkout?.selections || {};
+  const page = session.pages?.repository?.selections || {};
   const value = page.checkoutPath || session.managedCheckout?.path || session.managedCheckoutChoice;
   return value ? path.resolve(String(value)) : null;
 }
@@ -79,7 +79,7 @@ export async function runFinalReadinessChecks(options = {}) {
 
   const root = checkoutPath(session);
   if (!root) {
-    blockers.push(blocker('readiness-checkout-missing', 'The managed checkout path is unavailable.', 'Return to Local checkout and prepare the managed repository.'));
+    blockers.push(blocker('readiness-checkout-missing', 'The Paseo project checkout is unavailable.', 'Return to GitHub repository setup and Recheck.'));
   } else {
     let setupPr = null;
     try {
@@ -92,7 +92,7 @@ export async function runFinalReadinessChecks(options = {}) {
         setupPr?.autoMerge?.action || 'Open the setup pull request, satisfy repository policy, merge it, synchronize the checkout, then Recheck.',
       ));
     } catch (error) {
-      blockers.push(blocker('readiness-setup-pr-check-failed', String(error?.message || error), 'Resolve the setup PR or checkout problem, then Recheck.'));
+      blockers.push(blocker('readiness-setup-pr-check-failed', String(error?.message || error), 'Resolve the setup PR or repository problem, then Recheck.'));
     }
 
     const probes = Array.isArray(options.safeProbes) ? options.safeProbes : [];
@@ -149,9 +149,9 @@ export async function finishSetup({ startAutomation = false } = {}, options = {}
   }
 
   const root = checkoutPath(session);
-  if (!root) throw new Error('Managed checkout is unavailable at Finish setup.');
+  if (!root) throw new Error('Paseo project checkout is unavailable at Finish setup.');
   const repository = findRepository(root, { rootDir: options.rootDir, platform: options.platform });
-  if (!repository) throw new Error('The managed checkout is not registered with the standalone manager.');
+  if (!repository) throw new Error('The Paseo project checkout is not registered with the standalone manager.');
 
   // Commit durable setup state before any worker is started. If worker startup
   // later fails, setup remains complete but automation stays safely paused.

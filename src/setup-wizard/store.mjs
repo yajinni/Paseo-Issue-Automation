@@ -4,7 +4,20 @@ import path from 'node:path';
 import { managerHome } from '../repository-registry.mjs';
 
 export const SETUP_SESSION_STORE_VERSION = 1;
+
+// The visible setup flow is intentionally short. Legacy checkout/workspace
+// records remain readable internally so existing saved sessions can migrate
+// without forcing a reset.
 export const SETUP_PAGE_IDS = Object.freeze([
+  'paseo',
+  'harness',
+  'repository',
+  'issues',
+  'review',
+  'readiness',
+]);
+export const SETUP_FLOW_PAGE_IDS = SETUP_PAGE_IDS;
+const SETUP_STATE_PAGE_IDS = Object.freeze([
   'paseo',
   'harness',
   'repository',
@@ -103,12 +116,17 @@ function normalizeRepositoryIdentity(identity) {
   };
 }
 
+function visiblePage(pageId) {
+  if (pageId === 'checkout' || pageId === 'workspace') return 'repository';
+  return SETUP_PAGE_IDS.includes(pageId) ? pageId : SETUP_PAGE_IDS[0];
+}
+
 function normalizeSession(session) {
   if (!session || typeof session !== 'object') throw new Error('Setup session is invalid.');
   assertNoSecrets(session);
   const pages = {};
-  for (const pageId of SETUP_PAGE_IDS) pages[pageId] = normalizePage(session.pages?.[pageId]);
-  const currentPage = SETUP_PAGE_IDS.includes(session.currentPage) ? session.currentPage : SETUP_PAGE_IDS[0];
+  for (const pageId of SETUP_STATE_PAGE_IDS) pages[pageId] = normalizePage(session.pages?.[pageId]);
+  const currentPage = visiblePage(session.currentPage);
   return {
     id: String(session.id || randomUUID()),
     status: ['active', 'cancelled', 'completed'].includes(session.status) ? session.status : 'active',
@@ -234,7 +252,7 @@ export function completeSetupSession(options = {}) {
 }
 
 export function saveSetupPage(pageId, input = {}, options = {}) {
-  if (!SETUP_PAGE_IDS.includes(pageId)) throw new Error(`Unknown setup page: ${pageId}.`);
+  if (!SETUP_STATE_PAGE_IDS.includes(pageId)) throw new Error(`Unknown setup page: ${pageId}.`);
   assertNoSecrets(input);
   return updateSetupSession((session) => {
     if (input.repository) {
@@ -264,7 +282,7 @@ export function saveSetupPage(pageId, input = {}, options = {}) {
 }
 
 export function recordSetupPageCheck(pageId, result, options = {}) {
-  if (!SETUP_PAGE_IDS.includes(pageId)) throw new Error(`Unknown setup page: ${pageId}.`);
+  if (!SETUP_STATE_PAGE_IDS.includes(pageId)) throw new Error(`Unknown setup page: ${pageId}.`);
   const check = normalizeCheck(result);
   return updateSetupSession((session) => {
     const prior = session.pages[pageId] || normalizePage();
@@ -281,13 +299,14 @@ export function recordSetupPageCheck(pageId, result, options = {}) {
 export function navigateSetupSession(direction, options = {}) {
   if (!['forward', 'back'].includes(direction)) throw new Error('Setup navigation direction must be forward or back.');
   return updateSetupSession((session) => {
-    const index = SETUP_PAGE_IDS.indexOf(session.currentPage);
+    const currentPage = visiblePage(session.currentPage);
+    const index = SETUP_PAGE_IDS.indexOf(currentPage);
     if (direction === 'back') {
       session.currentPage = SETUP_PAGE_IDS[Math.max(0, index - 1)];
       return session;
     }
-    if (session.pages[session.currentPage]?.completed !== true) {
-      throw new Error(`Setup page ${session.currentPage} must pass its requirements before continuing.`);
+    if (session.pages[currentPage]?.completed !== true) {
+      throw new Error(`Setup page ${currentPage} must pass its requirements before continuing.`);
     }
     session.currentPage = SETUP_PAGE_IDS[Math.min(SETUP_PAGE_IDS.length - 1, index + 1)];
     return session;

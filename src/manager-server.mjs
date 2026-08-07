@@ -22,10 +22,12 @@ import { issuesSetupPageApiRequest } from './setup-wizard/issues-page-api.mjs';
 import { enhanceSetupWizardWithIssuesPage } from './setup-wizard/issues-page-ui.mjs';
 import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs';
 import { paseoSetupPageApiRequest } from './setup-wizard/paseo-page-api.mjs';
+import { enhanceSetupWizardWithRepositoryPaseo } from './setup-wizard/repository-paseo-ui.mjs';
 import { enhanceSetupWizardWithRequiredState } from './setup-wizard/required-state-ui.mjs';
 import { reviewSetupPageApiRequest } from './setup-wizard/review-page-api.mjs';
 import { enhanceSetupWizardWithReviewPage } from './setup-wizard/review-page-ui.mjs';
 import { enhanceSetupWizardWithShellFeedback } from './setup-wizard/shell-feedback-ui.mjs';
+import { enhanceSetupWizardWithSimplifiedFlow } from './setup-wizard/simplified-flow-ui.mjs';
 import { setupPageIdFromPath, setupWizardHtml } from './setup-wizard/ui.mjs';
 import { workspaceSetupPageApiRequest } from './setup-wizard/workspace-page-api.mjs';
 import { enhanceSetupWizardWithWorkspacePage } from './setup-wizard/workspace-page-ui.mjs';
@@ -136,10 +138,12 @@ export async function startManagerServer({
         const requiredHtml = enhanceSetupWizardWithRequiredState(shellHtml);
         const harnessHtml = enhanceSetupWizardWithHarnessPage(requiredHtml);
         const githubHtml = enhanceSetupWizardWithGitHubPage(harnessHtml);
-        const workspaceHtml = enhanceSetupWizardWithWorkspacePage(githubHtml);
+        const repositoryPaseoHtml = enhanceSetupWizardWithRepositoryPaseo(githubHtml);
+        const workspaceHtml = enhanceSetupWizardWithWorkspacePage(repositoryPaseoHtml);
         const issuesHtml = enhanceSetupWizardWithIssuesPage(workspaceHtml);
         const reviewHtml = enhanceSetupWizardWithReviewPage(issuesHtml);
-        response.end(enhanceSetupWizardWithFinalReadiness(reviewHtml));
+        const readinessHtml = enhanceSetupWizardWithFinalReadiness(reviewHtml);
+        response.end(enhanceSetupWizardWithSimplifiedFlow(readinessHtml));
         return;
       }
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method) ? await readBody(request) : {};
@@ -151,7 +155,7 @@ export async function startManagerServer({
       const harnessSetup = await harnessSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { ...pageApiOptions, ...harnessSetupOptions });
       if (harnessSetup.handled) { json(response, harnessSetup.status, harnessSetup.body); return; }
 
-      const githubSetup = githubSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, ...githubSetupOptions });
+      const githubSetup = await githubSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { ...pageApiOptions, ...githubSetupOptions });
       if (githubSetup.handled) { json(response, githubSetup.status, githubSetup.body); return; }
 
       const workspaceSetup = await workspaceSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { ...pageApiOptions, ...workspaceSetupOptions });
