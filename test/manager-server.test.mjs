@@ -92,7 +92,9 @@ test('manager API scopes coding and PR review workers to one repository', () => 
     method: 'POST',
     pathname: `/api/repositories/${encodeURIComponent(repository.id)}/review-worker/start`,
   }, { rootDir, workerManager, reviewWorkerManager });
-  assert.equal(reviewStart.status, 200);
+  assert.equal(reviewStart.status, 202);
+  assert.equal(reviewStart.body.result.running, true);
+  assert.equal(reviewStart.body.status, undefined);
   assert.deepEqual(reviewCalls[0], ['start', repository.id, repositoryRoot]);
 
   const calls = [];

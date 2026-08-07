@@ -28,6 +28,8 @@ function snapshot(worker) {
     lastReconciliationError: worker.lastReconciliationError,
     nextReconciliationDelayMs: worker.nextReconciliationDelayMs,
     startupRecovery: worker.startupRecovery,
+    startupRecoveryPending: worker.startupRecoveryPending === true,
+    startupRecovering: worker.startupRecovering === true,
     reviewTicking: worker.reviewTicking === true,
     reconciling: worker.reconciling === true,
   };
@@ -49,7 +51,7 @@ export function createManagerReviewWorkerPool({
 
   function tick(repositoryId) {
     const worker = workers.get(String(repositoryId));
-    if (!worker?.running || worker.reviewTicking) return snapshot(worker);
+    if (!worker?.running || worker.reviewTicking || worker.startupRecoveryPending || worker.startupRecovering) return snapshot(worker);
     worker.reviewTicking = true;
     worker.lastReviewTickAt = now().toISOString();
     try {
@@ -62,6 +64,30 @@ export function createManagerReviewWorkerPool({
       worker.reviewTicking = false;
     }
     return snapshot(worker);
+  }
+
+  function startupRecoveryTick(repositoryId) {
+    const worker = workers.get(String(repositoryId));
+    if (!worker?.running || worker.startupRecovering) return snapshot(worker);
+    worker.startupRecoveryTimer = null;
+    worker.startupRecoveryPending = false;
+    worker.startupRecovering = true;
+    try {
+      worker.startupRecovery = { ok: true, result: recover(worker.root) };
+    } catch (error) {
+      worker.startupRecovery = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      worker.startupRecovering = false;
+    }
+    return snapshot(worker);
+  }
+
+  function scheduleStartupRecovery(worker) {
+    if (!worker?.running) return;
+    if (worker.startupRecoveryTimer) clearTimeoutFn(worker.startupRecoveryTimer);
+    worker.startupRecoveryPending = true;
+    worker.startupRecoveryTimer = setTimeoutFn(() => startupRecoveryTick(worker.repositoryId), 0);
+    worker.startupRecoveryTimer?.unref?.();
   }
 
   function scheduleReconciliation(worker) {
@@ -80,7 +106,7 @@ export function createManagerReviewWorkerPool({
 
   function reconcileTick(repositoryId) {
     const worker = workers.get(String(repositoryId));
-    if (!worker?.running || worker.reconciling) return snapshot(worker);
+    if (!worker?.running || worker.reconciling || worker.startupRecoveryPending || worker.startupRecovering) return snapshot(worker);
     worker.reconciling = true;
     worker.lastReconciliationAt = now().toISOString();
     try {
@@ -118,6 +144,7 @@ export function createManagerReviewWorkerPool({
       startedAt: now().toISOString(),
       reviewTimer: null,
       reconciliationTimer: null,
+      startupRecoveryTimer: null,
       lastReviewTickAt: null,
       lastReviewResult: null,
       lastReviewError: null,
@@ -126,17 +153,15 @@ export function createManagerReviewWorkerPool({
       lastReconciliationError: null,
       nextReconciliationDelayMs: null,
       startupRecovery: null,
+      startupRecoveryPending: false,
+      startupRecovering: false,
       reviewTicking: false,
       reconciling: false,
     };
-    try {
-      worker.startupRecovery = { ok: true, result: recover(root) };
-    } catch (error) {
-      worker.startupRecovery = { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
     worker.reviewTimer = setIntervalFn(() => tick(repositoryId), REVIEW_TICK_MS);
     worker.reviewTimer?.unref?.();
     workers.set(repositoryId, worker);
+    scheduleStartupRecovery(worker);
     scheduleReconciliation(worker);
     return snapshot(worker);
   }
@@ -147,9 +172,12 @@ export function createManagerReviewWorkerPool({
     if (!worker) return { repositoryId: id || null, running: false, state: 'stopped', changed: false };
     if (worker.reviewTimer) clearIntervalFn(worker.reviewTimer);
     if (worker.reconciliationTimer) clearTimeoutFn(worker.reconciliationTimer);
+    if (worker.startupRecoveryTimer) clearTimeoutFn(worker.startupRecoveryTimer);
     worker.running = false;
     worker.reviewTimer = null;
     worker.reconciliationTimer = null;
+    worker.startupRecoveryTimer = null;
+    worker.startupRecoveryPending = false;
     workers.delete(id);
     return { ...snapshot(worker), changed: true };
   }
@@ -178,5 +206,5 @@ export function createManagerReviewWorkerPool({
     for (const id of [...workers.keys()]) stop(id);
   }
 
-  return { start, stop, restart, refresh, tick, reconcileTick, status, list, close };
+  return { start, stop, restart, refresh, tick, startupRecoveryTick, reconcileTick, status, list, close };
 }

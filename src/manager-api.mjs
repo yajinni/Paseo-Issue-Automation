@@ -214,6 +214,9 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     }
     const reviewResult = reviewWorkerAction(options.reviewWorkerManager, context, context.pathname);
     if (reviewResult !== null) {
+      if (context.pathname === '/api/review-worker/start' || context.pathname === '/api/review-worker/restart') {
+        return lightweightAcceptedResult(reviewResult);
+      }
       return refreshedResult(context, options, reviewResult);
     }
 
