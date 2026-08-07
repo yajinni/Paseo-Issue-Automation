@@ -21,3 +21,8 @@ test('failed checklist rows automatically mark and unmark their containing setup
   assert.match(REQUIRED_STATE_SCRIPT, /MutationObserver\(applyRequiredState\)/);
   assert.doesNotMatch(REQUIRED_STATE_SCRIPT, /attributes: true/);
 });
+
+test('informational failed rows can opt out so red state clears after required setup succeeds', () => {
+  assert.match(REQUIRED_STATE_SCRIPT, /hasAttribute\('data-ignore-required-checks'\)/);
+  assert.match(REQUIRED_STATE_SCRIPT, /!ignoreChecklistFailures && Boolean/);
+});
