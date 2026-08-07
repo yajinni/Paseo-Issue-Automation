@@ -29,14 +29,24 @@ function legacySetupHost(repository, options = {}) {
   }
 }
 
-function hostsFor(repository, options = {}) {
+function savedHostsFor(repository, options = {}) {
   const durable = loadManagerPaseoConnection(repository, options)?.host || null;
   const legacy = legacySetupHost(repository, options);
+  return [...new Set([durable, legacy].filter(Boolean))];
+}
+
+function hostsFor(repository, options = {}) {
+  const saved = savedHostsFor(repository, options);
   return [...new Set([
-    durable,
-    legacy,
-    ...paseoHostCandidates({ savedHost: durable || legacy, containerized: options.containerized === true }),
+    ...saved,
+    ...paseoHostCandidates({ savedHost: saved[0] || null, containerized: options.containerized === true }),
   ].filter(Boolean))];
+}
+
+function harnessHostsFor(repository, options = {}) {
+  const saved = savedHostsFor(repository, options);
+  if (saved.length) return saved;
+  return paseoHostCandidates({ containerized: options.containerized === true });
 }
 
 async function credentialForHost(store, host) {
@@ -87,55 +97,114 @@ function publicCatalog(catalog) {
 }
 
 function commandDiagnostic(args, result = {}) {
+  const stderr = String(result?.stderr || '').trim();
+  const stdout = String(result?.stdout || '').trim();
+  const message = stderr || (result?.ok === true ? '' : stdout);
   return redactSensitive({
     command: `paseo ${args.map(String).join(' ')}`,
     ok: result?.ok === true,
     exitCode: result?.exitCode ?? null,
     timedOut: result?.timedOut === true,
+    timeoutMs: result?.timeoutMs ?? null,
     resolvedCommand: result?.resolvedCommand || null,
     resolutionSource: result?.resolutionSource || null,
-    message: String(result?.stderr || (!result?.ok ? result?.stdout || '' : '')).trim().slice(0, 1200) || null,
+    message: message.slice(0, 1200) || null,
   });
+}
+
+function harnessDiagnostics(host, catalog, commands) {
+  const providerList = commands.find((item) => item.command === 'paseo provider ls --json') || null;
+  return {
+    host,
+    providerCount: catalog.providers.length,
+    catalogComplete: catalog.complete,
+    catalogErrors: catalog.errors,
+    providerList,
+    commands,
+  };
+}
+
+function emptyHarnessMessage(diagnostics) {
+  const parts = [`Paseo did not return any available coding harnesses from ${diagnostics.host}.`];
+  const providerList = diagnostics.providerList;
+  if (providerList) {
+    if (providerList.resolvedCommand) {
+      const source = providerList.resolutionSource ? `; source: ${providerList.resolutionSource}` : '';
+      parts.push(`CLI resolved to ${providerList.resolvedCommand}${source}.`);
+    }
+    if (!providerList.ok) {
+      const exit = providerList.exitCode == null ? '' : ` (exit ${providerList.exitCode})`;
+      const timeout = providerList.timedOut ? ' The command timed out.' : '';
+      const detail = providerList.message ? ` ${providerList.message}` : '';
+      parts.push(`paseo provider ls --json failed${exit}.${timeout}${detail}`.trim());
+    } else {
+      parts.push('paseo provider ls --json succeeded, but no enabled/available provider was usable.');
+    }
+  } else {
+    parts.push('Paseo provider discovery did not record a provider-list command.');
+  }
+  if (diagnostics.catalogErrors.length) parts.push(`Catalog detail: ${diagnostics.catalogErrors.join(' | ')}`);
+  return parts.join(' ');
+}
+
+function emptyHarnessError(diagnostics, attempts = [diagnostics]) {
+  const error = new Error(emptyHarnessMessage(diagnostics));
+  error.code = 'PASEO_HARNESS_DISCOVERY_EMPTY';
+  error.diagnostics = attempts.length === 1 ? diagnostics : { ...diagnostics, attempts };
+  return error;
 }
 
 export async function managerHarnessCatalog(context, options = {}) {
   const attempts = [];
   const loader = options.catalogLoader || ((root, discoveryOptions) => discoverPaseoCatalog(root, discoveryOptions));
-  for (const host of hostsFor(context.repository, options)) {
-    const paseo = await connectionForHost(context, host, options);
-    const commands = [];
-    const runner = (command, args, runnerOptions = {}) => {
-      if (command === 'paseo') {
-        const result = paseo.command(args, runnerOptions);
-        commands.push(commandDiagnostic(args, result));
-        return result;
-      }
-      return (options.run || defaultRun)(command, args, runnerOptions);
-    };
+  for (const host of harnessHostsFor(context.repository, options)) {
+    let commands = [];
     try {
+      const paseo = await connectionForHost(context, host, options);
+      const runner = (command, args, runnerOptions = {}) => {
+        if (command === 'paseo') {
+          const result = paseo.command(args, runnerOptions);
+          commands.push(commandDiagnostic(args, result));
+          return result;
+        }
+        return (options.run || defaultRun)(command, args, runnerOptions);
+      };
       const catalog = publicCatalog(await loader(context.root, {
         runner,
         commandTimeoutMs: options.commandTimeoutMs,
         totalTimeoutMs: options.totalTimeoutMs,
       }));
-      const diagnostic = { host, providerCount: catalog.providers.length, catalogErrors: catalog.errors, commands };
-      attempts.push(diagnostic);
+      const diagnostics = harnessDiagnostics(host, catalog, commands);
+      attempts.push(diagnostics);
       if (catalog.providers.length) {
         saveManagerPaseoConnection(context.repository, host, options);
-        return { host, catalog, diagnostics: diagnostic };
+        return { host, catalog, diagnostics };
       }
     } catch (error) {
-      attempts.push({ host, providerCount: 0, catalogErrors: [String(error?.message || error)], commands });
+      if (error?.code === 'PASEO_HARNESS_DISCOVERY_EMPTY') throw error;
+      const diagnostics = harnessDiagnostics(host, {
+        providers: [],
+        complete: false,
+        errors: [String(error?.message || error)],
+      }, commands);
+      attempts.push(diagnostics);
     }
   }
-  const detail = attempts.map((attempt) => {
-    const provider = attempt.commands.find((item) => item.command === 'paseo provider ls --json');
-    const command = provider?.resolvedCommand ? ` CLI ${provider.resolvedCommand}.` : '';
-    const failure = provider && !provider.ok ? ` provider ls failed${provider.exitCode == null ? '' : ` (exit ${provider.exitCode})`}: ${provider.message || 'no diagnostic'}.` : '';
-    const errors = attempt.catalogErrors?.length ? ` ${attempt.catalogErrors.join(' | ')}` : '';
-    return `${attempt.host}:${command}${failure}${errors}`.trim();
-  }).join(' ; ');
-  throw new Error(`Paseo did not return an available coding harness. Tried ${attempts.length || 0} connection candidate${attempts.length === 1 ? '' : 's'}.${detail ? ` ${detail}` : ''}`);
+
+  if (attempts.length === 1) throw emptyHarnessError(attempts[0]);
+  const representative = attempts.find((attempt) => attempt.providerList) || attempts[0] || {
+    host: 'unknown host',
+    providerCount: 0,
+    catalogComplete: false,
+    catalogErrors: ['No Paseo connection candidate could be checked.'],
+    providerList: null,
+    commands: [],
+  };
+  const error = emptyHarnessError(representative, attempts);
+  if (attempts.length > 1) {
+    error.message += ` Tried ${attempts.length} Paseo connection candidates.`;
+  }
+  throw error;
 }
 
 function publicProbe(probe, source) {
