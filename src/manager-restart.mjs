@@ -24,7 +24,7 @@ export function queueCodingIssueRestart(root, number, {
   const state = readRun(root, issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${issueNumber}.`);
 
-  if (state.phase === 'restart-queued' || state.phase === 'restarting') {
+  if (state.restartPending === true) {
     return {
       queued: true,
       alreadyQueued: true,
@@ -38,7 +38,9 @@ export function queueCodingIssueRestart(root, number, {
   const queuedAt = now();
   const queuedState = {
     ...state,
-    phase: 'restart-queued',
+    phase: 'queued',
+    restartPending: true,
+    restartRequestedAt: queuedAt,
     reason: 'Fresh restart queued. Cleanup and the new coding attempt will continue in the background.',
     updatedAt: queuedAt,
     activity: withActivity(state, 'restart-queued', 'Fresh restart requested from the manager.', queuedAt),
@@ -58,7 +60,8 @@ export function queueCodingIssueRestart(root, number, {
     const failedAt = now();
     writeRun(root, issueNumber, {
       ...state,
-      phase: 'restart-failed',
+      phase: 'failed',
+      restartPending: false,
       reason: `Restart could not be queued: ${error instanceof Error ? error.message : String(error)}`,
       updatedAt: failedAt,
       activity: withActivity(state, 'restart-queue-failed', error instanceof Error ? error.message : String(error), failedAt),
@@ -70,7 +73,7 @@ export function queueCodingIssueRestart(root, number, {
     queued: true,
     issueNumber,
     branchAction,
-    phase: 'restart-queued',
+    phase: 'queued',
     message: `Issue #${issueNumber} restart queued. A fresh attempt will start in the background.`,
   };
 }
