@@ -107,7 +107,13 @@ Repositories already managed by the old lifecycle use a preview-first, fail-clos
 
 Migration stops on ambiguous legacy state, stops coding/review workers, pauses claims, never rewrites existing PR heads/branches, never deletes user-owned label definitions, and routes managed issue-template updates through a reviewed setup PR.
 
+### Embedded installation migration
+
 Older **embedded** repositories that still declare the package dependency and package-managed `issue-coding-automation` service also use the manager's reviewed controller migration PR. That flow removes only the managed dependency/service changes and switches to external mode after merge and local synchronization.
+
+## External repair and removal
+
+After setup, repair and removal stay ownership-safe and repository-scoped. Use the manager's normal maintenance surface to **Repair managed components**, **Create removal PR**, or **Reconcile removal PR**. User-owned resources are not silently overwritten or deleted, and repository file removals continue through reviewed pull requests.
 
 ## Manager controls after setup
 
@@ -162,7 +168,7 @@ Install the next reviewed exact commit globally and restart the manager:
 npm install --global github:yajinni/Paseo-Issue-Automation#<new-approved-commit-sha>
 ```
 
-Ordinary controller updates do not change managed repository manifests or lockfiles in external mode.
+For external installations, ordinary controller updates do not modify managed repository manifests or lockfiles unless a release explicitly requires a reviewed managed-component change.
 
 ## Release validation
 
