@@ -4,7 +4,10 @@ export const MANAGER_CONFIG_INTEGRATION_STYLE = String.raw`
 .manager-config-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .manager-config-group{background:var(--paseo-card-alt);border:1px solid #2d394b;border-radius:12px;padding:14px}
 .manager-config-group.wide{grid-column:1/-1}.manager-config-group h3{margin:0 0 5px;font-size:15px}.manager-config-group>p{margin:0 0 12px;color:var(--paseo-muted);font-size:13px;line-height:1.4}
+.manager-config-group[hidden],.manager-config-fields [hidden]{display:none!important}
 .manager-config-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.manager-config-fields label{display:grid;gap:5px;color:var(--paseo-muted)}
+.manager-config-inline-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}.manager-config-inline-status{color:var(--paseo-muted);font-size:13px;line-height:1.4}.manager-config-inline-status.error{color:#ffaca5}
+.manager-profile-checks{display:grid;gap:8px;margin:12px 0}.manager-profile-check{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid #253042}.manager-profile-check:last-child{border-bottom:0}.manager-profile-check-dot{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;border:1px solid #526074;font-size:11px}.manager-profile-check.ok .manager-profile-check-dot{background:#24633d;border-color:#2f8d55}.manager-profile-check.bad .manager-profile-check-dot{background:#5f302d;border-color:#98514b}.manager-profile-check-copy small{display:block;color:var(--paseo-muted);margin-top:2px}.manager-chat-url-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;margin-top:12px}.manager-chat-url-row label{display:grid;gap:6px;color:var(--paseo-muted)}.manager-chat-saved{color:#65c987;font-weight:700}
 .manager-config-savebar{position:sticky;bottom:12px;z-index:25;margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #39485e;border-radius:11px;padding:10px 12px;background:#101720eF;backdrop-filter:blur(8px)}
 .manager-config-savebar.clean{opacity:.8}.manager-config-savebar.dirty{border-color:#66572f;background:#211d12f2}.manager-config-save-copy{font-size:13px;color:var(--paseo-muted)}.manager-config-savebar.dirty .manager-config-save-copy{color:#e2cf91}
 .manager-config-save-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -13,17 +16,19 @@ export const MANAGER_CONFIG_INTEGRATION_STYLE = String.raw`
 .manager-context-note{margin-top:12px;padding:10px 12px;border:1px solid #334156;border-radius:9px;background:#111a26;color:var(--paseo-muted);line-height:1.45}
 .manager-detail-disclosure{margin:0!important}.manager-detail-disclosure>summary{cursor:pointer;font-weight:650;color:#dce8fb}.manager-detail-disclosure-body{display:grid;gap:12px;margin-top:12px}.manager-detail-disclosure-body>.card{margin:0!important}
 .manager-maintenance-summary-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-@media(max-width:760px){.manager-config-groups,.manager-context-grid,.manager-config-fields,.manager-context-summary{grid-template-columns:1fr}.manager-config-group.wide,.manager-context-grid>.wide{grid-column:auto}.manager-config-savebar{position:static;display:block}.manager-config-save-actions{margin-top:10px}}
+@media(max-width:760px){.manager-config-groups,.manager-context-grid,.manager-config-fields,.manager-context-summary{grid-template-columns:1fr}.manager-config-group.wide,.manager-context-grid>.wide{grid-column:auto}.manager-config-savebar{position:static;display:block}.manager-config-save-actions{margin-top:10px}.manager-profile-check{grid-template-columns:22px minmax(0,1fr)}.manager-profile-check button{grid-column:2}.manager-chat-url-row{grid-template-columns:1fr}.manager-chat-saved{justify-self:start}}
 `;
 
 export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
 (function managerConfigIntegrationMaintenance() {
   const CONFIG_GROUPS = [
-    ['Provider/Coding Harness', 'Provider and model choices used for coding work.', ['coding-harness', 'coder-model', 'coder-thinking']],
+    ['Coder model', 'Coding model and thinking level used for issue implementation.', ['coder-model', 'coder-thinking']],
     ['Review model', 'Reviewer model and thinking level. Workflow behavior is configured separately.', ['reviewer-model', 'reviewer-thinking']],
-    ['Issue processing', 'Eligibility, concurrency, retry, and exclusion settings for repository issues.', ['issue-selection-mode', 'max-active', 'temporary-failure-retries', 'excluded-labels']],
+    ['Provider/Coding Harness', 'Choose from the coding harnesses currently reported by Paseo.', ['coding-harness']],
+    ['Issue processing', 'Eligibility, concurrency, retry, exclusion, and polling settings for repository issues.', ['issue-selection-mode', 'max-active', 'temporary-failure-retries', 'excluded-labels', 'poll-interval']],
     ['Review workflow', 'Review path, round limits, and optional exact-head auto-merge policy.', ['review-workflow', 'quick-review-rounds', 'full-review-rounds', 'auto-merge-approved']],
-    ['Runtime', 'Repository branch and polling cadence.', ['base-branch', 'poll-interval']],
+    ['ChatGPT Profile', 'Configure the isolated browser profile and review chat used by Web ChatGPT full review.', []],
+    ['GitHub repository', 'Repository branch configuration.', ['base-branch']],
   ];
   const REVIEW_WORKFLOW_COPY = {
     'quick-manual': 'Light model review → Manual review',
@@ -32,10 +37,21 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
   };
   let built = false;
   let baseline = null;
+  let harnessCatalog = null;
+  let harnessLoading = false;
+  let chatGptState = null;
+  let chatGptLoading = false;
 
   function cardByHeading(root, heading) {
     if (!root) return null;
     for (const card of root.querySelectorAll('section.card')) if (card.querySelector('h2')?.textContent.trim() === heading) return card;
+    return null;
+  }
+
+  function configGroupByHeading(heading) {
+    for (const group of document.querySelectorAll('.manager-config-group')) {
+      if (group.querySelector('h3')?.textContent.trim() === heading) return group;
+    }
     return null;
   }
 
@@ -59,6 +75,10 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     return dt ? { dt, dd: dt.nextElementSibling } : null;
   }
 
+  function activeConfigTab() {
+    return document.querySelector('.manager-config-tab[aria-selected="true"]')?.dataset.configTab || null;
+  }
+
   function syncReviewWorkflowPresentation(data = null) {
     const select = document.getElementById('review-workflow');
     if (!select) return;
@@ -79,6 +99,13 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     const fullLimit = factPair('automation-facts', 'Full review limit');
     if (fullLimit?.dt) fullLimit.dt.hidden = workflow === 'quick-manual';
     if (fullLimit?.dd) fullLimit.dd.hidden = workflow === 'quick-manual';
+    const profile = configGroupByHeading('ChatGPT Profile');
+    if (profile) {
+      const showProfile = workflow === 'quick-web-chatgpt';
+      profile.dataset.configConditionalHidden = showProfile ? 'false' : 'true';
+      profile.hidden = !showProfile || activeConfigTab() !== 'review';
+      if (showProfile && activeConfigTab() === 'review') loadChatGptProfile();
+    }
   }
 
   function snapshotConfigForm() {
@@ -86,7 +113,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     if (!form) return '';
     const values = [];
     for (const element of form.querySelectorAll('input,select')) {
-      if (!element.id) continue;
+      if (!element.id || element.dataset.managerTransient === 'true') continue;
       values.push([element.id, element.type === 'checkbox' ? element.checked : element.value]);
     }
     return JSON.stringify(values);
@@ -123,17 +150,174 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     discard.disabled = !dirty;
   }
 
+  function ensureHarnessSelect() {
+    const existing = document.getElementById('coding-harness');
+    if (!existing || existing.tagName === 'SELECT') return existing;
+    const select = document.createElement('select');
+    select.id = existing.id;
+    select.setAttribute('aria-label', 'Provider/Coding Harness');
+    const current = String(existing.value || '').trim();
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Choose a Paseo coding harness';
+    select.append(placeholder);
+    if (current) {
+      const option = document.createElement('option'); option.value = current; option.textContent = current; select.append(option); select.value = current;
+    }
+    existing.replaceWith(select);
+    return select;
+  }
+
+  function ensureHarnessCurrentOption(value) {
+    const select = document.getElementById('coding-harness');
+    const current = String(value || '').trim();
+    if (!select || select.tagName !== 'SELECT' || !current) return;
+    if (![...select.options].some((option) => option.value === current)) {
+      const option = document.createElement('option'); option.value = current; option.textContent = current + ' (currently configured)'; select.append(option);
+    }
+    select.value = current;
+  }
+
+  function renderHarnessCatalog() {
+    const select = document.getElementById('coding-harness');
+    const status = document.getElementById('manager-harness-status');
+    if (!select || !status || !harnessCatalog) return;
+    const current = String(select.value || currentStatus?.configuration?.codingHarness || '').trim();
+    select.textContent = '';
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Choose a Paseo coding harness'; select.append(placeholder);
+    for (const provider of harnessCatalog.catalog?.providers || []) {
+      const option = document.createElement('option');
+      option.value = provider.id;
+      option.textContent = provider.label || provider.id;
+      select.append(option);
+    }
+    if (current && ![...select.options].some((option) => option.value === current)) {
+      const option = document.createElement('option'); option.value = current; option.textContent = current + ' (currently configured; not reported by Paseo)'; select.append(option);
+    }
+    select.value = current;
+    const count = harnessCatalog.catalog?.providers?.length || 0;
+    status.className = 'manager-config-inline-status';
+    status.textContent = 'Found ' + count + ' coding harness' + (count === 1 ? '' : 'es') + ' from Paseo at ' + harnessCatalog.host + '.';
+    renderDirtyState();
+  }
+
+  async function loadHarnessCatalog(force = false) {
+    if (harnessLoading || harnessCatalog && !force) { renderHarnessCatalog(); return; }
+    const status = document.getElementById('manager-harness-status');
+    if (status) { status.className = 'manager-config-inline-status'; status.textContent = 'Checking available coding harnesses in Paseo…'; }
+    harnessLoading = true;
+    try {
+      harnessCatalog = await jsonRequest(selectedPath('configuration/harnesses'));
+      renderHarnessCatalog();
+    } catch (error) {
+      if (status) { status.className = 'manager-config-inline-status error'; status.textContent = error.message || String(error); }
+    } finally { harnessLoading = false; }
+  }
+
+  function addHarnessTools(group) {
+    const actions = document.createElement('div'); actions.className = 'manager-config-inline-actions';
+    const refresh = document.createElement('button'); refresh.type = 'button'; refresh.className = 'secondary'; refresh.id = 'manager-refresh-harnesses'; refresh.textContent = 'Refresh available harnesses';
+    const status = document.createElement('span'); status.id = 'manager-harness-status'; status.className = 'manager-config-inline-status'; status.textContent = 'Open this tab to check the coding harnesses Paseo currently provides.';
+    refresh.addEventListener('click', () => loadHarnessCatalog(true));
+    actions.append(refresh, status); group.append(actions);
+  }
+
+  function profileCheck(target, label, ready, buttonText, buttonId, disabled = false) {
+    const row = document.createElement('div'); row.className = 'manager-profile-check ' + (ready ? 'ok' : 'bad');
+    const dot = document.createElement('span'); dot.className = 'manager-profile-check-dot'; dot.textContent = ready ? '✓' : '!';
+    const copy = document.createElement('div'); copy.className = 'manager-profile-check-copy';
+    const strong = document.createElement('strong'); strong.textContent = label;
+    const detail = document.createElement('small'); detail.textContent = ready ? 'Installed and ready.' : 'Not installed.';
+    copy.append(strong, detail); row.append(dot, copy);
+    if (!ready && buttonText) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary'; button.id = buttonId; button.textContent = buttonText; button.disabled = disabled; row.append(button);
+    }
+    target.append(row);
+  }
+
+  function renderChatGptProfile() {
+    const target = document.getElementById('manager-chatgpt-profile');
+    if (!target) return;
+    target.textContent = '';
+    if (!chatGptState) {
+      const loading = document.createElement('div'); loading.className = 'manager-config-inline-status'; loading.textContent = chatGptLoading ? 'Checking ChatGPT Profile prerequisites…' : 'Open this tab to load ChatGPT Profile settings.'; target.append(loading); return;
+    }
+    const playwrightReady = chatGptState.libraryInstalled === true;
+    const chromiumReady = chatGptState.chromiumInstalled === true;
+    const browserReady = playwrightReady && chromiumReady;
+    const checks = document.createElement('div'); checks.className = 'manager-profile-checks';
+    profileCheck(checks, 'Playwright', playwrightReady, 'Install Playwright', 'manager-install-playwright');
+    profileCheck(checks, 'Chromium', chromiumReady, 'Install Chromium', 'manager-install-chromium', !playwrightReady);
+    target.append(checks);
+
+    const actions = document.createElement('div'); actions.className = 'manager-config-inline-actions';
+    const login = document.createElement('button'); login.type = 'button'; login.className = 'secondary'; login.id = 'manager-open-chatgpt-profile'; login.textContent = 'Log into ChatGPT Profile'; login.disabled = !browserReady;
+    actions.append(login); target.append(actions);
+
+    const note = document.createElement('div'); note.className = 'manager-context-note'; note.textContent = 'Use the isolated ChatGPT Profile for Web ChatGPT full review. Log in if needed, open or create the review chat, paste its stable URL below, and close Chromium when you are finished.'; target.append(note);
+
+    const row = document.createElement('div'); row.className = 'manager-chat-url-row';
+    const label = document.createElement('label'); label.textContent = 'PR review chat URL';
+    const input = document.createElement('input'); input.id = 'manager-review-chat-url'; input.type = 'text'; input.autocomplete = 'off'; input.placeholder = 'https://chatgpt.com/c/...'; input.value = chatGptState.conversationUrl || ''; input.dataset.managerTransient = 'true';
+    label.append(input);
+    const saved = document.createElement('span'); saved.id = 'manager-review-chat-saved'; saved.className = 'manager-chat-saved'; saved.textContent = 'Saved'; saved.hidden = !chatGptState.conversationUrl;
+    row.append(label, saved); target.append(row);
+
+    document.getElementById('manager-install-playwright')?.addEventListener('click', () => runChatGptAction('configuration/chatgpt-profile/playwright/install'));
+    document.getElementById('manager-install-chromium')?.addEventListener('click', () => runChatGptAction('configuration/chatgpt-profile/chromium/install'));
+    login.addEventListener('click', () => runChatGptAction('configuration/chatgpt-profile/open', false));
+    input.addEventListener('input', () => { saved.hidden = true; });
+    input.addEventListener('change', saveChatGptUrl);
+  }
+
+  async function loadChatGptProfile(force = false) {
+    if (chatGptLoading || chatGptState && !force) { renderChatGptProfile(); return; }
+    chatGptLoading = true; renderChatGptProfile();
+    try {
+      const body = await jsonRequest(selectedPath('configuration/chatgpt-profile'));
+      chatGptState = body.status || null;
+    } catch (error) {
+      chatGptState = { error: error.message || String(error), libraryInstalled: false, chromiumInstalled: false, conversationUrl: null };
+    } finally { chatGptLoading = false; renderChatGptProfile(); }
+  }
+
+  async function runChatGptAction(action, refresh = true) {
+    if (chatGptLoading) return;
+    chatGptLoading = true;
+    try {
+      const body = await jsonRequest(selectedPath(action), { method: 'POST', headers: {'content-type':'application/json'}, body: '{}' });
+      if (refresh) chatGptState = body.status || chatGptState;
+    } catch (error) {
+      const target = document.getElementById('manager-chatgpt-profile');
+      if (target) { const message = document.createElement('div'); message.className = 'manager-config-inline-status error'; message.textContent = error.message || String(error); target.prepend(message); }
+    } finally { chatGptLoading = false; if (refresh) renderChatGptProfile(); }
+  }
+
+  async function saveChatGptUrl() {
+    const input = document.getElementById('manager-review-chat-url');
+    if (!input || chatGptLoading) return;
+    const conversationUrl = String(input.value || '').trim();
+    if (!conversationUrl || conversationUrl === String(chatGptState?.conversationUrl || '')) { renderChatGptProfile(); return; }
+    chatGptLoading = true;
+    try {
+      const body = await jsonRequest(selectedPath('configuration/chatgpt-profile/chat'), { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ conversationUrl }) });
+      chatGptState = body.status || { ...chatGptState, conversationUrl: body.conversationUrl || conversationUrl };
+    } catch (error) {
+      const saved = document.getElementById('manager-review-chat-saved'); if (saved) saved.hidden = true;
+      showError(error);
+    } finally { chatGptLoading = false; renderChatGptProfile(); }
+  }
+
   function buildConfiguration() {
     const view = document.querySelector('[data-manager-view="configuration"]');
     const existing = cardByHeading(view, 'Configuration');
     const form = document.getElementById('config-form');
     if (!view || !existing || !form) return;
     existing.querySelector('h2').textContent = 'Repository configuration';
+    ensureHarnessSelect();
     const oldGrid = form.querySelector('.field-grid');
     const groups = document.createElement('div'); groups.className = 'manager-config-groups';
     for (const [title, description, ids] of CONFIG_GROUPS) {
       const group = document.createElement('section'); group.className = 'manager-config-group';
-      if (title === 'Review workflow' || title === 'Runtime') group.classList.add('wide');
+      if (['Provider/Coding Harness', 'Review workflow', 'ChatGPT Profile', 'GitHub repository'].includes(title)) group.classList.add('wide');
       const h3 = document.createElement('h3'); h3.textContent = title;
       const copy = document.createElement('p'); copy.textContent = description;
       const fields = document.createElement('div'); fields.className = 'manager-config-fields';
@@ -145,7 +329,14 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
         const help = document.getElementById('auto-merge-help');
         if (help) fields.append(help);
       }
-      group.append(h3, copy, fields); groups.append(group);
+      group.append(h3, copy);
+      if (ids.length || title === 'Review workflow') group.append(fields);
+      if (title === 'Provider/Coding Harness') addHarnessTools(group);
+      if (title === 'ChatGPT Profile') {
+        group.dataset.configConditionalHidden = 'true';
+        const profile = document.createElement('div'); profile.id = 'manager-chatgpt-profile'; group.append(profile);
+      }
+      groups.append(group);
     }
     oldGrid?.replaceWith(groups);
 
@@ -231,6 +422,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
 
   function render(data) {
     if (!data) return;
+    ensureHarnessCurrentOption(data.configuration?.codingHarness);
     syncReviewWorkflowPresentation(data);
     baseline = snapshotConfigForm();
     renderDirtyState();
@@ -246,6 +438,12 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     baseline = snapshotConfigForm(); renderDirtyState();
     try { if (typeof currentStatus !== 'undefined' && currentStatus) render(currentStatus); } catch {}
   }
+
+  document.addEventListener('paseo:configuration-tab', (event) => {
+    const step = event.detail?.step;
+    if (step === 'harness') loadHarnessCatalog();
+    if (step === 'review' && document.getElementById('review-workflow')?.value === 'quick-web-chatgpt') loadChatGptProfile();
+  });
 
   const previous = window.renderStatus;
   if (typeof previous === 'function') {
