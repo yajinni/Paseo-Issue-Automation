@@ -6,6 +6,8 @@ import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
 import { listRepositories } from './repository-registry.mjs';
 import { loadConfig } from './state.mjs';
+import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs';
+import { paseoSetupPageApiRequest } from './setup-wizard/paseo-page-api.mjs';
 import { setupPageIdFromPath, setupWizardHtml } from './setup-wizard/ui.mjs';
 
 function json(response, status, body) {
@@ -48,9 +50,12 @@ export async function startManagerServer({
   rootDir,
   workerManager = null,
   reviewWorkerManager = null,
+  paseoCredentialStore = null,
+  paseoSetupOptions = {},
 } = {}) {
   const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const reviewWorkers = reviewWorkerManager || createManagerReviewWorkerPool();
+  const credentials = paseoCredentialStore || createPaseoCredentialStore();
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
@@ -78,6 +83,21 @@ export async function startManagerServer({
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method)
         ? await readBody(request)
         : {};
+
+      const paseoSetup = await paseoSetupPageApiRequest({
+        method: request.method,
+        pathname: url.pathname,
+        body,
+      }, {
+        rootDir,
+        credentialStore: credentials,
+        ...paseoSetupOptions,
+      });
+      if (paseoSetup.handled) {
+        json(response, paseoSetup.status, paseoSetup.body);
+        return;
+      }
+
       const result = managerApiRequest({
         method: request.method,
         pathname: url.pathname,
@@ -105,5 +125,5 @@ export async function startManagerServer({
     reviewWorkers.close();
   });
   if (open) openBrowser(url);
-  return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers };
+  return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers, paseoCredentialStore: credentials };
 }
