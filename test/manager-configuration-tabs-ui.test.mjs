@@ -30,6 +30,11 @@ test('configuration tab content is explicitly hidden when it does not belong to 
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /paseo:configuration-tab/);
 });
 
+test('review workflow changes immediately re-evaluate conditional Review setup content', () => {
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /getElementById\('review-workflow'\).*addEventListener\('change'/s);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /queueMicrotask\(\(\) => showStep\(activeStep\)\)/);
+});
+
 test('configuration groups map to the setup tab that owns them', () => {
   for (const mapping of [
     "['Coder model', 'harness']",
