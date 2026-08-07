@@ -1,3 +1,5 @@
+import { enhanceSetupWizardWithNavigationPolish } from './navigation-polish-ui.mjs';
+
 export const SIMPLIFIED_SETUP_FLOW_SCRIPT = String.raw`
 (function simplifiedSetupFlow() {
   let syncing = false;
@@ -31,5 +33,6 @@ export const SIMPLIFIED_SETUP_FLOW_SCRIPT = String.raw`
 
 export function enhanceSetupWizardWithSimplifiedFlow(html) {
   const script = `<script data-setup-simplified-flow>${SIMPLIFIED_SETUP_FLOW_SCRIPT}</script>`;
-  return String(html).includes('</body>') ? String(html).replace('</body>', `${script}</body>`) : `${html}${script}`;
+  const output = String(html).includes('</body>') ? String(html).replace('</body>', `${script}</body>`) : `${html}${script}`;
+  return enhanceSetupWizardWithNavigationPolish(output);
 }
