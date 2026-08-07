@@ -8,11 +8,14 @@ export const FINAL_READINESS_SCRIPT = String.raw`
     if(!onPage()||!state||!content())return;
     const check=state.check||{};
     const pages=(state.pages||[]).map((page)=>'<div class="check-row '+(page.completed?'ok':'bad')+'"><span class="check-dot">'+(page.completed?'✓':'!')+'</span><div><strong><a href="'+esc(page.href)+'">'+esc(page.id)+'</a></strong><div class="check-detail">'+esc(page.summary||'No successful check recorded.')+'</div></div></div>').join('');
-    const probes=(state.checks||[]).map((item)=>'<div class="check-row '+(item.ok?'ok':'bad')+'"><span class="check-dot">'+(item.ok?'✓':'!')+'</span><div><strong>'+esc(item.id)+'</strong><div class="check-detail">'+esc(item.summary||item.state||'')+'</div></div></div>').join('');
+    const probes=(state.checks||[]).map((item)=>{
+      const link=item.url?'<div class="check-detail"><a href="'+esc(item.url)+'" target="_blank" rel="noreferrer">Open setup PR'+(item.number?' #'+esc(item.number):'')+'</a></div>':'';
+      return '<div class="check-row '+(item.ok?'ok':'bad')+'"><span class="check-dot">'+(item.ok?'✓':'!')+'</span><div><strong>'+esc(item.label||item.id)+'</strong><div class="check-detail">'+esc(item.summary||item.state||'')+'</div>'+link+'</div></div>';
+    }).join('');
     content().className='';
     content().innerHTML='<div class="paseo-grid">'
       +'<section class="setup-card"><h3>Approved setup summary</h3><p>Review each saved selection before enabling automation. Each section links back to its setup page.</p><div class="checklist">'+pages+'</div><div class="notice">Repository: <strong>'+esc(state.repository||'')+'</strong> · Base branch: <strong>'+esc(state.baseBranch||'')+'</strong></div></section>'
-      +'<section class="setup-card"><h3>Final safe checks</h3><p>Recheck verifies selected workflows without creating fake issues/reviews, changing application code, or sending a paid prompt.</p><div class="checklist">'+probes+'</div><div class="inline-actions"><button class="action" id="readiness-recheck" type="button">Recheck</button></div></section>'
+      +'<section class="setup-card"><h3>Final safe checks</h3><p>Recheck verifies the selected workflows. If managed repository setup files are missing or outdated, Paseo creates a setup pull request to fix them. It does not create fake issues/reviews or send a paid prompt.</p><div class="checklist">'+probes+'</div><div class="inline-actions"><button class="action" id="readiness-recheck" type="button">Recheck</button></div></section>'
       +'<section class="setup-card"><label class="choice" style="font-size:16px;font-weight:650"><input id="readiness-start" type="checkbox" '+(state.startAutomationDefault?'checked':'')+'> Start automation after setup</label><div class="inline-actions" style="margin-top:14px"><button class="action primary" id="readiness-finish" type="button" '+(check.ok?'':'disabled')+'>Finish setup</button></div></section></div>';
     document.getElementById('readiness-recheck')?.addEventListener('click',()=>refresh(true));
     document.getElementById('readiness-finish')?.addEventListener('click',finish);

@@ -43,7 +43,13 @@ function repositoryContext(session) {
   return {
     repository: String(repositoryPage.repository || session.repository?.nameWithOwner || '').trim(),
     baseBranch: String(repositoryPage.baseBranch || session.baseBranch || '').trim(),
-    checkoutPath: String(checkoutPage.checkoutPath || session.managedCheckoutChoice || '').trim(),
+    checkoutPath: String(
+      repositoryPage.checkoutPath
+      || checkoutPage.checkoutPath
+      || session.managedCheckout?.path
+      || session.managedCheckoutChoice
+      || '',
+    ).trim(),
   };
 }
 
@@ -192,6 +198,196 @@ export function requestSetupPullRequestAutoMerge(root, pullRequest, options = {}
     enabled: false,
     reason: result.stderr || result.stdout || 'GitHub auto-merge could not be enabled for the setup PR.',
     action: 'Review the setup PR in GitHub and enable or complete the merge without bypassing checks, reviews, protections, or rulesets.',
+  };
+}
+
+function setupPreview(context, options = {}) {
+  return (options.previewBuilder || buildIssueInstallationPreview)({
+    repository: context.repository,
+    checkoutPath: context.checkoutPath,
+  }, options);
+}
+
+function setupPrLabelCountNeedsRepair(preview) {
+  const summary = preview?.labelSummary || {};
+  return Number(summary.missing || 0) > 0
+    || Number(summary.pending || 0) > 0
+    || Boolean(preview?.previewErrors?.labels);
+}
+
+function repairSummary(action, pullRequest, autoMerge = null) {
+  const number = pullRequest?.number ? ` #${pullRequest.number}` : '';
+  if (action === 'waiting-pr') {
+    return `Setup issues detected. Setup PR${number} is open to fix them. Paseo will continue after it is merged.`;
+  }
+  if (action === 'waiting-sync') {
+    return `Setup PR${number} merged with the required fixes. Paseo is waiting to synchronize the selected base branch.`;
+  }
+  if (action === 'created-pr') {
+    const mergeCopy = autoMerge?.enabled
+      ? ' Auto-merge was requested through normal repository policy.'
+      : ' Merge the PR after the repository\'s required checks and reviews allow it.';
+    return `Setup issues detected. Paseo created setup PR${number} to fix them.${mergeCopy}`;
+  }
+  return 'Repository setup files and lifecycle labels are current.';
+}
+
+export function repairSetupRepository(options = {}) {
+  const session = activeSession(options);
+  const context = repositoryContext(session);
+  if (!context.repository) throw new Error('Choose a GitHub repository before repairing setup.');
+  if (!context.baseBranch) throw new Error('Choose the base branch before repairing setup.');
+  if (!context.checkoutPath) throw new Error('Prepare the Paseo project checkout before repairing setup.');
+
+  const runner = options.runner || defaultRun;
+  const jsonRunner = options.jsonRunner || defaultRunJson;
+  let pullRequest = null;
+  let reconciliationError = null;
+  try {
+    pullRequest = (options.reconciler || reconcileSetupPullRequest)(context.checkoutPath, {
+      ...options,
+      runner,
+      jsonRunner,
+    });
+  } catch (error) {
+    reconciliationError = String(error?.message || error);
+  }
+
+  const preview = setupPreview(context, options);
+  const files = normalizeFiles(preview?.setupPullRequestChanges);
+  const templateError = preview?.previewErrors?.template || null;
+  if (templateError) {
+    throw new Error(`Repository setup files could not be verified: ${templateError}`);
+  }
+
+  let labels = [];
+  if (setupPrLabelCountNeedsRepair(preview)) {
+    labels = (options.labelInstaller || installConfirmedLifecycleLabels)(
+      context.repository,
+      context.checkoutPath,
+      { ...options, runner, jsonRunner },
+    );
+  }
+  const createdLabels = labels.filter((item) => item.action === 'created');
+
+  if (!files.length) {
+    return {
+      ready: true,
+      issuesDetected: false,
+      action: createdLabels.length ? 'repaired-directly' : 'none',
+      summary: createdLabels.length
+        ? `Repository setup repaired. Created ${createdLabels.length} missing lifecycle label${createdLabels.length === 1 ? '' : 's'}; managed setup files are current.`
+        : repairSummary('none'),
+      files: [],
+      labels,
+      pullRequest,
+      reconciliationError,
+    };
+  }
+
+  if (reconciliationError) {
+    throw new Error(`Setup issues were detected, but Paseo could not check the previous setup pull request: ${reconciliationError}`);
+  }
+
+  if (pullRequest?.state === 'open') {
+    return {
+      ready: false,
+      issuesDetected: true,
+      action: 'waiting-pr',
+      summary: repairSummary('waiting-pr', pullRequest),
+      files,
+      labels,
+      pullRequest,
+      reconciliationError: null,
+    };
+  }
+
+  if (pullRequest?.state === 'merged' && !pullRequest.syncedAt) {
+    return {
+      ready: false,
+      issuesDetected: true,
+      action: 'waiting-sync',
+      summary: repairSummary('waiting-sync', pullRequest),
+      files,
+      labels,
+      pullRequest,
+      reconciliationError: null,
+    };
+  }
+
+  const config = loadConfig(context.checkoutPath);
+  if (config.baseBranch !== context.baseBranch) {
+    throw new Error(`The selected base branch ${context.baseBranch} does not match the managed checkout base branch ${config.baseBranch || 'not configured'}. Recheck repository setup before repairing files.`);
+  }
+
+  const unsupported = files.filter((file) => file !== TEMPLATE_PATH);
+  if (unsupported.length) {
+    throw new Error(`Paseo detected managed setup files without an automatic repair handler: ${unsupported.join(', ')}.`);
+  }
+
+  saveRuntime(context.checkoutPath, { ...loadRuntime(context.checkoutPath), claimsEnabled: false });
+  saveConfig(context.checkoutPath, { ...config, setupComplete: false });
+  saveControllerMode(context.checkoutPath, CONTROLLER_MODES.external);
+
+  let template = null;
+  if (files.includes(TEMPLATE_PATH)) {
+    template = (options.templateInstaller || installConfirmedIssueTemplate)(context.checkoutPath, options);
+  }
+
+  const submission = (options.pullRequestCreator || createSetupPullRequest)(context.checkoutPath, {
+    runner,
+    jsonRunner,
+    mode: CONTROLLER_MODES.external,
+    now: options.now,
+  });
+
+  if (!submission.created) {
+    const after = setupPreview(context, options);
+    const remaining = normalizeFiles(after?.setupPullRequestChanges);
+    if (!remaining.length) {
+      return {
+        ready: true,
+        issuesDetected: false,
+        action: 'repaired-directly',
+        summary: repairSummary('none'),
+        files: [],
+        labels,
+        template,
+        pullRequest: null,
+        reconciliationError: null,
+      };
+    }
+    throw new Error(submission.reason || `Paseo detected setup changes but could not create the setup pull request for: ${remaining.join(', ')}.`);
+  }
+
+  const autoMerge = (options.autoMergeRequester || requestSetupPullRequestAutoMerge)(
+    context.checkoutPath,
+    submission.pullRequest,
+    { ...options, runner },
+  );
+  const saved = saveSetupPullRequest(context.checkoutPath, {
+    ...loadSetupPullRequest(context.checkoutPath),
+    repair: {
+      repository: context.repository,
+      baseBranch: context.baseBranch,
+      files,
+      automatic: true,
+      createdAt: new Date().toISOString(),
+    },
+    autoMerge,
+  });
+
+  return {
+    ready: false,
+    issuesDetected: true,
+    action: 'created-pr',
+    summary: repairSummary('created-pr', saved, autoMerge),
+    files,
+    labels,
+    template,
+    pullRequest: saved,
+    autoMerge,
+    reconciliationError: null,
   };
 }
 

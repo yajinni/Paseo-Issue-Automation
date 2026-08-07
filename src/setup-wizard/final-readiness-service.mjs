@@ -7,8 +7,7 @@ import {
   recordSetupPageCheck,
   saveSetupPage,
 } from './store.mjs';
-import { buildIssueInstallationPreview } from './issues-page-service.mjs';
-import { reconcileConfirmedSetupPullRequest } from './setup-pr-service.mjs';
+import { repairSetupRepository } from './setup-pr-service.mjs';
 
 const REQUIRED_PAGES = Object.freeze(['paseo', 'harness', 'repository', 'issues', 'review']);
 
@@ -59,34 +58,6 @@ function blocker(code, message, recoveryAction, details = null) {
   return { code, message, recoveryAction, details };
 }
 
-function setupInstallationStatus(root, session, options = {}) {
-  const preview = (options.setupInstallationPreviewBuilder || buildIssueInstallationPreview)({
-    repository: repositoryName(session),
-    checkoutPath: root,
-  }, options);
-  const pendingFiles = Array.isArray(preview?.setupPullRequestChanges)
-    ? preview.setupPullRequestChanges.map((file) => String(file || '').trim()).filter(Boolean)
-    : [];
-  const template = preview?.template || {};
-  const templateError = preview?.previewErrors?.template || null;
-  const ok = !templateError && pendingFiles.length === 0;
-  let summary = 'Repository setup files are installed.';
-  if (!ok) {
-    if (templateError) summary = `Repository setup files could not be verified: ${templateError}`;
-    else if (template.status === 'missing') summary = `${template.path || pendingFiles[0] || 'The automation issue template'} is missing and needs to be installed through the setup pull request.`;
-    else if (template.status === 'update') summary = `${template.path || pendingFiles[0] || 'The automation issue template'} does not match the current Paseo template and needs to be updated through the setup pull request.`;
-    else summary = `Repository setup changes are still required${pendingFiles.length ? `: ${pendingFiles.join(', ')}` : ''}.`;
-  }
-  return {
-    ok,
-    summary,
-    pendingFiles,
-    templatePath: template.path || null,
-    templateStatus: template.status || null,
-    templateError,
-  };
-}
-
 export async function runFinalReadinessChecks(options = {}) {
   let session = activeSession(options);
   const blockers = [];
@@ -107,43 +78,53 @@ export async function runFinalReadinessChecks(options = {}) {
   if (!root) {
     blockers.push(blocker('readiness-checkout-missing', 'The Paseo project checkout is unavailable.', 'Return to GitHub repository setup and Recheck.'));
   } else {
-    let setupPr = null;
-    let reconciliationError = null;
     try {
-      setupPr = (options.setupPrReconciler || reconcileConfirmedSetupPullRequest)(root, options);
-    } catch (error) {
-      reconciliationError = String(error?.message || error);
-    }
-
-    try {
-      const installation = setupInstallationStatus(root, session, options);
+      const repairer = options.setupRepairer || repairSetupRepository;
+      const repair = await repairer({
+        ...options,
+        reconciler: options.setupPrReconciler || options.reconciler,
+        previewBuilder: options.setupInstallationPreviewBuilder || options.previewBuilder,
+      });
+      const pullRequest = repair?.pullRequest || null;
       checks.push({
         id: 'setup-pull-request',
-        ok: installation.ok,
-        state: installation.ok ? 'installed' : 'repository-changes-required',
-        summary: installation.summary,
-        pendingFiles: installation.pendingFiles,
-        templatePath: installation.templatePath,
-        templateStatus: installation.templateStatus,
-        historicalPullRequestState: setupPr?.state || null,
-        reconciliationError,
+        label: 'setup pull request',
+        ok: repair?.ready === true,
+        state: repair?.action || (repair?.ready ? 'current' : 'pending'),
+        summary: repair?.summary || null,
+        pendingFiles: Array.isArray(repair?.files) ? repair.files : [],
+        url: pullRequest?.url || null,
+        number: pullRequest?.number || null,
+        pullRequestState: pullRequest?.state || null,
+        autoMerge: repair?.autoMerge || pullRequest?.autoMerge || null,
+        reconciliationError: repair?.reconciliationError || null,
       });
-      if (!installation.ok) blockers.push(blocker(
-        'readiness-repository-setup-incomplete',
-        installation.summary,
-        'Install or update the required repository setup files through the reviewed setup pull request, then Recheck.',
+      if (repair?.ready !== true) blockers.push(blocker(
+        'readiness-repository-setup-pending',
+        repair?.summary || 'Repository setup fixes are still pending.',
+        pullRequest?.url
+          ? 'Open the setup pull request if needed, let normal repository checks/reviews complete, then Recheck.'
+          : 'Resolve the reported repository setup problem, then Recheck.',
         {
-          pendingFiles: installation.pendingFiles,
-          historicalPullRequestState: setupPr?.state || null,
-          reconciliationError,
+          pendingFiles: Array.isArray(repair?.files) ? repair.files : [],
+          pullRequestNumber: pullRequest?.number || null,
+          pullRequestUrl: pullRequest?.url || null,
+          action: repair?.action || null,
         },
       ));
     } catch (error) {
+      const message = String(error?.message || error);
+      checks.push({
+        id: 'setup-pull-request',
+        label: 'setup pull request',
+        ok: false,
+        state: 'repair-failed',
+        summary: message,
+      });
       blockers.push(blocker(
-        'readiness-repository-setup-check-failed',
-        String(error?.message || error),
-        'Resolve the repository setup-file problem, then Recheck.',
-        { historicalPullRequestState: setupPr?.state || null, reconciliationError },
+        'readiness-repository-setup-repair-failed',
+        message,
+        'Resolve the reported repository or GitHub problem, then Recheck. Paseo will retry the managed setup repair.',
       ));
     }
 
