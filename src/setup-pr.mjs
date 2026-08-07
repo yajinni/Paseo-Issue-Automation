@@ -120,6 +120,7 @@ export function setupChangeStatus(root, { runner = run, mode = null } = {}) {
 }
 
 function branchExists(root, branch, runner = run) {
+  if (!branch) return false;
   const local = runner('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], {
     cwd: root,
     allowFailure: true,
@@ -138,6 +139,10 @@ function timestampSuffix(now = new Date()) {
 function chooseBranch(root, runner, now) {
   if (!branchExists(root, SETUP_PULL_REQUEST_BRANCH, runner)) return SETUP_PULL_REQUEST_BRANCH;
   return `${SETUP_PULL_REQUEST_BRANCH}-${timestampSuffix(now)}`;
+}
+
+export function nextSetupPullRequestBranch(root, { runner = run, now = new Date() } = {}) {
+  return chooseBranch(root, runner, now);
 }
 
 function ensureGitIdentity(root, runner = run) {
