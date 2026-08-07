@@ -17,13 +17,19 @@ function parseJson(text) {
   catch { return null; }
 }
 
-function commandResult(result) {
+function safeMessage(result, fallback = '') {
+  const text = String(result?.stderr || result?.stdout || result?.error?.message || fallback).trim();
+  return text
+    .replace(/(authorization\s*:\s*)([^\r\n]+)/gi, '$1[REDACTED]')
+    .replace(/((?:gh|github)[_-]?token\s*[=:]\s*)([^\s]+)/gi, '$1[REDACTED]');
+}
+
+function commandResult(result, fallback) {
   return {
     ok: result?.ok === true,
     exitCode: result?.exitCode ?? null,
-    stdout: String(result?.stdout || '').trim(),
-    stderr: String(result?.stderr || '').trim(),
     timedOut: result?.timedOut === true,
+    message: safeMessage(result, fallback) || null,
   };
 }
 
@@ -112,44 +118,97 @@ export function listGitHubAccounts({ runner = defaultRun, env = process.env } = 
       accounts: [],
       activeAccount: null,
       hosts: [],
-      message: String(result?.stderr || result?.stdout || 'GitHub authentication status is unavailable.').trim(),
+      message: safeMessage(result, 'GitHub authentication status is unavailable.'),
     };
   }
-  return { ok: result.ok === true, ...parseGitHubAuthStatus(data), message: null };
+  return { ok: true, ...parseGitHubAuthStatus(data), message: null };
 }
 
 function runAuthAction(args, { runner = defaultRun, env = process.env, inherit = false } = {}) {
   const result = runner('gh', args, { allowFailure: true, env, inherit });
-  return commandResult(result);
+  return commandResult(result, 'GitHub authentication action failed.');
+}
+
+function verifiedAccount(auth, host, user = null) {
+  const expectedHost = String(host || 'github.com');
+  const expectedUser = user == null ? null : String(user).trim();
+  return auth.accounts.find((account) => account.active
+    && account.host === expectedHost
+    && (!expectedUser || account.login === expectedUser)) || null;
 }
 
 export function loginGitHubAccount({ host = 'github.com', runner = defaultRun, env = process.env } = {}) {
-  return runAuthAction(['auth', 'login', '--web', '--hostname', String(host)], { runner, env, inherit: true });
+  const action = runAuthAction(['auth', 'login', '--web', '--hostname', String(host)], { runner, env, inherit: true });
+  if (!action.ok) return { ...action, verified: false, account: null };
+  const auth = listGitHubAccounts({ runner, env });
+  const account = verifiedAccount(auth, host);
+  return {
+    ...action,
+    ok: action.ok && Boolean(account),
+    verified: Boolean(account),
+    account,
+    message: account ? `Authenticated as ${account.login} on ${account.host}.` : 'GitHub login completed, but the active account could not be verified.',
+  };
+}
+
+export function addGitHubAccount(options = {}) {
+  return loginGitHubAccount(options);
 }
 
 export function switchGitHubAccount({ host = 'github.com', user, runner = defaultRun, env = process.env } = {}) {
   const login = String(user || '').trim();
   if (!login) throw new Error('GitHub account login is required.');
-  return runAuthAction(['auth', 'switch', '--hostname', String(host), '--user', login], { runner, env });
+  const action = runAuthAction(['auth', 'switch', '--hostname', String(host), '--user', login], { runner, env });
+  if (!action.ok) return { ...action, verified: false, account: null };
+  const auth = listGitHubAccounts({ runner, env });
+  const account = verifiedAccount(auth, host, login);
+  return {
+    ...action,
+    ok: action.ok && Boolean(account),
+    verified: Boolean(account),
+    account,
+    message: account ? `Active GitHub account is now ${account.login} on ${account.host}.` : 'GitHub CLI reported a successful switch, but the active account did not match the requested account.',
+  };
 }
 
 export function reauthenticateGitHubAccount({ host = 'github.com', runner = defaultRun, env = process.env } = {}) {
-  return runAuthAction(['auth', 'refresh', '--hostname', String(host)], { runner, env, inherit: true });
+  const action = runAuthAction(['auth', 'refresh', '--hostname', String(host)], { runner, env, inherit: true });
+  if (!action.ok) return { ...action, verified: false, account: null };
+  const auth = listGitHubAccounts({ runner, env });
+  const account = verifiedAccount(auth, host);
+  return {
+    ...action,
+    ok: action.ok && Boolean(account),
+    verified: Boolean(account),
+    account,
+    message: account ? `Authentication refreshed for ${account.login} on ${account.host}.` : 'GitHub authentication refresh completed, but no active account could be verified.',
+  };
 }
 
 export function logoutGitHubAccount({ host = 'github.com', user, runner = defaultRun, env = process.env } = {}) {
   const login = String(user || '').trim();
   if (!login) throw new Error('GitHub account login is required.');
-  return runAuthAction(['auth', 'logout', '--hostname', String(host), '--user', login], { runner, env });
+  const action = runAuthAction(['auth', 'logout', '--hostname', String(host), '--user', login], { runner, env });
+  if (!action.ok) return { ...action, verified: false };
+  const auth = listGitHubAccounts({ runner, env });
+  const stillPresent = auth.accounts.some((account) => account.host === String(host) && account.login === login);
+  return {
+    ...action,
+    ok: action.ok && !stillPresent,
+    verified: !stillPresent,
+    message: stillPresent ? 'GitHub CLI reported logout success, but the account is still present.' : `Logged out ${login} on ${host}.`,
+  };
 }
 
 export function setupGitCredentialHelper({ host = 'github.com', runner = defaultRun, env = process.env } = {}) {
-  const configured = runner('gh', ['auth', 'setup-git', '--hostname', String(host)], { allowFailure: true, env });
+  const hostname = String(host);
+  const configured = runner('gh', ['auth', 'setup-git', '--hostname', hostname], { allowFailure: true, env });
   if (!configured?.ok) {
-    return { ok: false, configured: false, verified: false, message: String(configured?.stderr || configured?.stdout || 'Git credential setup failed.').trim() };
+    return { ok: false, configured: false, verified: false, message: safeMessage(configured, 'Git credential setup failed.') };
   }
-  const verified = runner('git', ['config', '--global', '--get-regexp', '^credential\\..*\\.helper$'], { allowFailure: true, env });
-  const output = `${verified?.stdout || ''}\n${verified?.stderr || ''}`;
+  const key = `credential.https://${hostname}.helper`;
+  const verified = runner('git', ['config', '--global', '--get-all', key], { allowFailure: true, env });
+  const output = String(verified?.stdout || '');
   const usesGitHubCli = verified?.ok === true && /gh\s+auth\s+git-credential|gh auth git-credential/i.test(output);
   return {
     ok: usesGitHubCli,
@@ -157,6 +216,27 @@ export function setupGitCredentialHelper({ host = 'github.com', runner = default
     verified: usesGitHubCli,
     message: usesGitHubCli ? 'Git credential helper is configured for GitHub CLI.' : 'GitHub CLI ran setup-git, but the credential helper could not be verified.',
   };
+}
+
+function repositoryIdentity(repository) {
+  if (!repository) return null;
+  if (typeof repository === 'string') return repository.trim() || null;
+  return String(repository.nameWithOwner || repository.fullName || repository.repository || '').trim() || null;
+}
+
+export function reconcileRepositorySelection(selectedRepository, accessibleRepositories) {
+  const selectedId = repositoryIdentity(selectedRepository);
+  if (!selectedId) return { selection: selectedRepository || null, invalidated: false, recheckRequired: false };
+  if (!Array.isArray(accessibleRepositories)) {
+    return { selection: selectedRepository, invalidated: false, recheckRequired: true };
+  }
+  const accessible = accessibleRepositories.some((repository) => {
+    const id = repositoryIdentity(repository);
+    return id === selectedId && repository?.selectable !== false;
+  });
+  return accessible
+    ? { selection: selectedRepository, invalidated: false, recheckRequired: false }
+    : { selection: null, invalidated: true, recheckRequired: false };
 }
 
 export function githubAccountServiceStatus(options = {}) {
