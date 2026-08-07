@@ -106,11 +106,27 @@ export function managerRepositoryStatus(repository, {
       runCount: runs.length,
       statusCounts: statusCounts(runs),
     },
+    configuration: {
+      codingHarness: config.codingHarness || null,
+      issueSelection: {
+        mode: config.issueSelection?.mode || null,
+        excludedLabels: config.issueSelection?.excludedLabels || [],
+        temporaryFailureRetries: config.issueSelection?.temporaryFailureRetries,
+      },
+      review: {
+        workflow: config.review?.workflow || null,
+        quickMaxRounds: config.review?.quickMaxRounds,
+        fullMaxRounds: config.review?.fullMaxRounds,
+        autoMergeApproved: config.review?.autoMergeApproved === true,
+      },
+    },
     worker,
     reviewWorker,
     models: {
       coder: config.models?.coder || null,
+      coderThinking: config.models?.coderThinking || null,
       reviewer: config.models?.reviewer || null,
+      reviewerThinking: config.models?.reviewerThinking || null,
     },
     capabilities: {
       automationActions: true,
