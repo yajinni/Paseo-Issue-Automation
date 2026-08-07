@@ -3,7 +3,7 @@ import { recoverFailedAttempt } from './attempt-recovery.mjs';
 import { dispatchSpecificIssue, restartIssue } from './attempts.mjs';
 import { acquireLease, releaseLease, renewLease } from './durable-lease.mjs';
 import { activeCodingCount } from './fix-jobs.mjs';
-import { loadConfig, loadRun, statePaths } from './state.mjs';
+import { appendIssueLifecycle, loadConfig, loadRun, statePaths } from './state.mjs';
 
 const CODING_COMMAND_TTL_MS = 30 * 60_000;
 
@@ -56,12 +56,56 @@ export function restartCodingIssue(root, number, options = {}) {
 
 export function recoverOrRestartCodingIssue(root, number, options = {}) {
   return withCodingSchedulerLease(root, () => {
-    const state = loadRun(root, number);
+    const issueNumber = Number(number);
+    const state = loadRun(root, issueNumber);
     requireAvailableCodingSlot(root, { replacingRunningIssue: state?.status === 'agent-running' });
     const branchAction = options.branchAction || 'keep';
-    const recovery = recoverFailedAttempt(root, number, { branchAction });
-    if (recovery.recovered) return recovery;
-    const fresh = restartIssue(root, number, options);
+    appendIssueLifecycle(root, issueNumber, {
+      attempt: state?.attempt || null,
+      type: 'recover-first-requested',
+      status: 'started',
+      source: 'operator',
+      message: 'Recover-first restart requested.',
+      evidence: {
+        branchAction,
+        previousStatus: state?.status || null,
+        previousPhase: state?.phase || null,
+        branch: state?.branch || null,
+        workspaceId: state?.workspaceId || null,
+        coderAgentId: state?.coderAgentId || state?.agentId || null,
+      },
+    });
+    const recovery = recoverFailedAttempt(root, issueNumber, { branchAction });
+    if (recovery.recovered) {
+      appendIssueLifecycle(root, issueNumber, {
+        attempt: recovery.attempt || state?.attempt || null,
+        type: 'recover-first-reused-attempt',
+        status: 'success',
+        source: 'controller',
+        message: 'Recovered the existing failed attempt instead of creating a fresh attempt.',
+        evidence: {
+          branch: recovery.branch || null,
+          workspaceId: recovery.workspaceId || null,
+          coderAgentId: recovery.coderAgentId || null,
+          controllerPid: recovery.controllerPid || null,
+        },
+      });
+      return recovery;
+    }
+    appendIssueLifecycle(root, issueNumber, {
+      attempt: state?.attempt || null,
+      type: 'recover-first-fallback',
+      status: 'skipped',
+      source: 'controller',
+      message: recovery.reason || 'Existing attempt could not be safely reused; starting fresh.',
+      evidence: {
+        branchAction,
+        branch: state?.branch || null,
+        workspaceId: state?.workspaceId || null,
+        coderAgentId: state?.coderAgentId || state?.agentId || null,
+      },
+    });
+    const fresh = restartIssue(root, issueNumber, options);
     return {
       ...fresh,
       recovered: false,
