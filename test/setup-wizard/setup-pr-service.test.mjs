@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { saveSetupPullRequest } from '../../src/setup-pr.mjs';
 import {
   confirmedSetupPullRequestReady,
   getSetupPullRequestConfirmation,
@@ -162,17 +163,16 @@ test('automatic setup repair creates a new fix PR for missing or outdated manage
     templateInstaller: (root) => { installedTemplateAt = root; return { path: TEMPLATE_PATH, updated: true }; },
     pullRequestCreator: (root) => {
       createdAt = root;
-      return {
-        created: true,
-        pullRequest: {
-          number: 18,
-          url: 'https://github.test/pr/18',
-          state: 'open',
-          branch: 'ai/install-paseo-automation-20260807t154500z',
-          baseBranch: 'release',
-          files: [TEMPLATE_PATH],
-        },
+      const pullRequest = {
+        number: 18,
+        url: 'https://github.test/pr/18',
+        state: 'open',
+        branch: 'ai/install-paseo-automation-20260807t154500z',
+        baseBranch: 'release',
+        files: [TEMPLATE_PATH],
       };
+      saveSetupPullRequest(root, pullRequest);
+      return { created: true, pullRequest };
     },
     autoMergeRequester: (root, pullRequest) => {
       autoMergeRequested = { root, number: pullRequest.number };
