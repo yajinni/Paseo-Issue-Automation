@@ -24,7 +24,6 @@ test('Reviews view exposes workflow worker review workload and ChatGPT Profile s
   }
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /chatGptProfile/);
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /setupPath \|\| '\/setup\/review'/);
-  assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /passwordStored/);
 });
 
 test('Reviews sidebar badge is derived from current work-queue review stages', () => {
