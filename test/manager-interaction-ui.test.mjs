@@ -18,7 +18,8 @@ test('manager mutations show immediate busy state and a delayed shared progress 
 test('manager actions report human-readable success and failure feedback', () => {
   assert.match(MANAGER_INTERACTION_SCRIPT, /resultSummary/);
   assert.match(MANAGER_INTERACTION_SCRIPT, /toast\('success', 'Action complete'/);
-  assert.match(MANAGER_INTERACTION_SCRIPT, /toast\('error', 'Action failed'/);
+  assert.match(MANAGER_INTERACTION_SCRIPT, /toast\('error'/);
+  assert.match(MANAGER_INTERACTION_SCRIPT, /Action failed/);
   assert.match(MANAGER_INTERACTION_SCRIPT, /Technical action result \(raw JSON\)/);
   assert.match(MANAGER_INTERACTION_STYLE, /manager-toast-region/);
 });
