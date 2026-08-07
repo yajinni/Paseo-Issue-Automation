@@ -2,13 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { enhanceSetupWizardWithReviewPage, REVIEW_PAGE_SCRIPT } from '../../src/setup-wizard/review-page-ui.mjs';
 
-test('review setup UI offers all explicit workflows and independent round controls', () => {
-  assert.match(REVIEW_PAGE_SCRIPT, /quick-manual/);
-  assert.match(REVIEW_PAGE_SCRIPT, /quick-web-chatgpt/);
-  assert.match(REVIEW_PAGE_SCRIPT, /full-immediate/);
-  assert.match(REVIEW_PAGE_SCRIPT, /review-quick-rounds/);
-  assert.match(REVIEW_PAGE_SCRIPT, /review-full-rounds/);
+test('review setup UI uses the user-facing workflow names while preserving stable workflow ids', () => {
+  assert.match(REVIEW_PAGE_SCRIPT, /value="quick-manual"/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Light model review → Manual review/);
+  assert.match(REVIEW_PAGE_SCRIPT, /value="quick-web-chatgpt"/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Light model review → Web ChatGPT full review/);
+  assert.match(REVIEW_PAGE_SCRIPT, /value="full-immediate"/);
+  assert.match(REVIEW_PAGE_SCRIPT, /I selected a heavy review model to do the job\./);
+  assert.match(REVIEW_PAGE_SCRIPT, /Maximum light-model review and correction rounds/);
   assert.match(REVIEW_PAGE_SCRIPT, /max="20"/);
+});
+
+test('manual review hides the irrelevant full-review round control and preserves its saved value', () => {
+  assert.match(REVIEW_PAGE_SCRIPT, /const manualReview = s\.workflow === 'quick-manual'/);
+  assert.match(REVIEW_PAGE_SCRIPT, /const fullRoundsControl = manualReview \? ''/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Maximum full-review and correction rounds/);
+  assert.match(REVIEW_PAGE_SCRIPT, /state\?\.selection\?\.fullMaxRounds \|\| 3/);
 });
 
 test('review workflow, round, and auto-merge changes save immediately', () => {
@@ -25,7 +34,13 @@ test('eligible workflows offer opt-in coding PR auto-merge without policy bypass
   assert.match(REVIEW_PAGE_SCRIPT, /Off by default/);
   assert.match(REVIEW_PAGE_SCRIPT, /exact current head has full approval/);
   assert.match(REVIEW_PAGE_SCRIPT, /never bypasses checks, reviews, protections, or rulesets/);
-  assert.match(REVIEW_PAGE_SCRIPT, /unavailable for Quick → Manual review/);
+  assert.match(REVIEW_PAGE_SCRIPT, /unavailable for Light model review → Manual review/);
+});
+
+test('Prompt previews are not shown in Review setup', () => {
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Prompt previews/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Quick prompt:/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Full prompt:/);
 });
 
 test('Web ChatGPT conditional section uses ChatGPT Profile and highlights missing required readiness', () => {
