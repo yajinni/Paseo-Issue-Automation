@@ -7,6 +7,7 @@ import { createManagerWorkerPool } from './manager-workers.mjs';
 import { listRepositories } from './repository-registry.mjs';
 import { loadConfig } from './state.mjs';
 import { harnessSetupPageApiRequest } from './setup-wizard/harness-page-api.mjs';
+import { enhanceSetupWizardWithHarnessPage } from './setup-wizard/harness-page-ui.mjs';
 import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs';
 import { paseoSetupPageApiRequest } from './setup-wizard/paseo-page-api.mjs';
 import { setupPageIdFromPath, setupWizardHtml } from './setup-wizard/ui.mjs';
@@ -79,7 +80,7 @@ export async function startManagerServer({
           return;
         }
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        response.end(setupWizardHtml({ requestedPage }));
+        response.end(enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage })));
         return;
       }
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method)
