@@ -8,6 +8,7 @@ import {
 } from './attempts.mjs';
 import { dispatchSpecificCodingIssue, restartCodingIssue } from './coding-dispatch.mjs';
 import { dispatchAvailableIssues } from './dispatch-batch.mjs';
+import { mergeRepositoryConfig } from './setup-wizard/schema.mjs';
 import { loadConfig, saveConfig } from './state.mjs';
 
 const defaultActions = {
@@ -41,11 +42,7 @@ export function managerRepositoryAction(root, pathname, body = {}, actions = def
   if (pathname === '/api/reconcile') return actions.reconcileDependencies(root);
   if (pathname === '/api/config') {
     const current = actions.loadConfig(root);
-    return actions.saveConfig(root, {
-      ...current,
-      ...body,
-      models: { ...current.models, ...(body.models || {}) },
-    });
+    return actions.saveConfig(root, mergeRepositoryConfig(current, body));
   }
   if (pathname === '/api/start-issue') {
     return actions.dispatchSpecificCodingIssue(root, issueNumber(body), {
