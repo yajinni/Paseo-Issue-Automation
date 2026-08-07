@@ -29,6 +29,11 @@ test('checkout and workspace readiness remain highlighted until their actual che
   assert.match(WORKSPACE_PAGE_SCRIPT, /required-missing/);
 });
 
+test('unsafe alternative clones are informational after a safe checkout is ready', () => {
+  assert.match(WORKSPACE_PAGE_SCRIPT, /data-ignore-required-checks/);
+  assert.match(WORKSPACE_PAGE_SCRIPT, /candidate\.valid/);
+});
+
 test('workspace page module activates only for checkout/workspace routes and owns optional recheck there', () => {
   assert.match(WORKSPACE_PAGE_SCRIPT, /\['checkout', 'workspace'\]/);
   assert.match(WORKSPACE_PAGE_SCRIPT, /if \(!onPage\(\)\) return/);
