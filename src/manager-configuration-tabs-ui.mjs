@@ -24,11 +24,13 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     ['readiness', 'Final readiness', '/setup/readiness', 'Review health, managed installation state, repair, removal, and recovery controls.'],
   ];
   const GROUP_STEP = new Map([
-    ['Provider/Coding Harness', 'harness'],
+    ['Coder model', 'harness'],
     ['Review model', 'harness'],
-    ['Runtime', 'repository'],
+    ['Provider/Coding Harness', 'harness'],
+    ['GitHub repository', 'repository'],
     ['Issue processing', 'issues'],
     ['Review workflow', 'review'],
+    ['ChatGPT Profile', 'review'],
   ]);
   let built = false;
   let activeStep = localStorage.getItem('paseo-manager-config-tab') || 'paseo';
@@ -103,8 +105,12 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     if (configCard) {
       setElementHidden(configCard, !editable);
       setConfigCardTitle(configCard, step);
-      for (const group of groups) setElementHidden(group, group.dataset.configStepGroup !== step);
+      for (const group of groups) {
+        const conditionalHidden = group.dataset.configConditionalHidden === 'true';
+        setElementHidden(group, group.dataset.configStepGroup !== step || conditionalHidden);
+      }
     }
+    document.dispatchEvent(new CustomEvent('paseo:configuration-tab', { detail: { step } }));
     if (focus) document.querySelector('.manager-config-tab[aria-selected="true"]')?.focus();
   }
 
@@ -156,9 +162,12 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     }
     configuration.prepend(tabs);
 
+    let insertionPoint = tabs;
     for (const [id] of STEPS) {
       const linkCard = setupLinkCard(id);
-      if (linkCard) tabs.after(linkCard);
+      if (!linkCard) continue;
+      insertionPoint.after(linkCard);
+      insertionPoint = linkCard;
     }
 
     moveViewCards(integration, configuration, 'repository');
