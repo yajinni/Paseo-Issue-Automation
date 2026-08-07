@@ -4,6 +4,7 @@ import { managerApiRequest } from './manager-api.mjs';
 import { managerHtml } from './manager-maintenance-ui.mjs';
 import { enhanceManagerWithNavigation } from './manager-navigation-ui.mjs';
 import { enhanceManagerWithUiFoundation, enhanceSetupWithSharedUiTheme } from './manager-ui-foundation.mjs';
+import { enhanceManagerWithWorkQueue } from './manager-work-queue-ui.mjs';
 import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
 import { listRepositories } from './repository-registry.mjs';
@@ -80,7 +81,9 @@ ${manualForm}
   if (!html.includes('data-manager-setup-link')) {
     html = html.includes('</body>') ? html.replace('</body>', `${setupLink}</body>`) : `${html}${setupLink}`;
   }
-  return enhanceManagerWithNavigation(enhanceManagerWithUiFoundation(html));
+  const themed = enhanceManagerWithUiFoundation(html);
+  const navigated = enhanceManagerWithNavigation(themed);
+  return enhanceManagerWithWorkQueue(navigated);
 }
 
 export async function startManagerServer({
