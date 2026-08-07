@@ -2,6 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
 import { enhanceManagerWithAutomationReviews } from './manager-automation-reviews-ui.mjs';
+import { enhanceManagerWithConfigIntegrationMaintenance } from './manager-config-integration-maintenance-ui.mjs';
 import { managerHtml } from './manager-maintenance-ui.mjs';
 import { enhanceManagerWithNavigation } from './manager-navigation-ui.mjs';
 import { enhanceManagerWithUiFoundation, enhanceSetupWithSharedUiTheme } from './manager-ui-foundation.mjs';
@@ -85,7 +86,8 @@ ${manualForm}
   const themed = enhanceManagerWithUiFoundation(html);
   const navigated = enhanceManagerWithNavigation(themed);
   const queued = enhanceManagerWithWorkQueue(navigated);
-  return enhanceManagerWithAutomationReviews(queued);
+  const operations = enhanceManagerWithAutomationReviews(queued);
+  return enhanceManagerWithConfigIntegrationMaintenance(operations);
 }
 
 export async function startManagerServer({
