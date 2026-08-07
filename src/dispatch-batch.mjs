@@ -2,6 +2,7 @@ import path from 'node:path';
 import { dispatchNextIssue, resumePendingAgentLaunches } from './attempts.mjs';
 import { activeCodingCount, dispatchNextFixJob } from './fix-jobs.mjs';
 import { acquireLease, releaseLease, renewLease } from './durable-lease.mjs';
+import { resumeTemporaryFailureRetries } from './issue-retry.mjs';
 import { loadConfig, statePaths } from './state.mjs';
 
 const CODING_SCHEDULER_TTL_MS = 30 * 60_000;
@@ -34,6 +35,7 @@ export function dispatchAvailableIssues(root, {
   dispatchFix = dispatchNextFixJob,
   activeCount = activeCodingCount,
   resumeLaunches = resumePendingAgentLaunches,
+  resumeTemporaryFailures = resumeTemporaryFailureRetries,
   maxClaims = null,
 } = {}) {
   const maximum = Math.max(1, Number(configLoader(root).maxActive) || 1);
@@ -51,6 +53,20 @@ export function dispatchAvailableIssues(root, {
     metadata,
   });
   try {
+    renew({ phase: 'resuming-temporary-failures', claimed: 0 });
+    const temporaryRetries = resumeTemporaryFailures(root);
+    if (temporaryRetries?.claimed) {
+      const retryAttempts = normalizedAttempt(temporaryRetries, 'temporary-failure-retry');
+      return {
+        claimed: true,
+        issueNumber: retryAttempts[0]?.issueNumber,
+        branch: retryAttempts[0]?.branch,
+        attempts: retryAttempts,
+        dispatches: [{ type: 'temporary-failure-retry', ...temporaryRetries }],
+        reason: 'Resumed temporary failures on this scheduler turn before starting new work.',
+      };
+    }
+
     const resumed = resumeLaunches(root);
     const attempts = normalizedAttempt(resumed, 'launch-retry');
     const results = resumed?.results?.length || resumed?.attempts?.length
