@@ -4,11 +4,11 @@ import path from 'node:path';
 import { buildCoderPrompt } from './controller-prompts.mjs';
 import {
   dependencyNumbers,
-  detectDependencyCycles,
   evaluateIssueDependencies,
   fetchIssue,
-  refreshBase,
 } from './dependencies.mjs';
+import { evaluateIssueQueue, listIssueCandidates } from './issue-eligibility.mjs';
+import { LEGACY_LABELS, PASEO_LABELS } from './label-catalog.mjs';
 import { validateIssueBody, slugify } from './automation.mjs';
 import { LABELS, listRuns, loadConfig, loadRun, loadRuntime, saveRun, saveRuntime } from './state.mjs';
 import { findFirstKey, run, runJson } from './process.mjs';
@@ -96,95 +96,47 @@ function nextBranch(root, issue, start) {
   return { attempt, branch: branchName(issue, attempt) };
 }
 
-function updateDependencyRun(root, issue, dependency, status) {
-  const previous = loadRun(root, issue.number) || {};
-  const at = now();
-  return saveRun(root, issue.number, {
-    ...previous,
-    issueNumber: Number(issue.number),
-    issueTitle: issue.title,
-    issueUrl: issue.url,
-    status,
-    phase: dependency.ok ? 'ready' : 'waiting-for-dependencies',
-    blockType: dependency.ok ? null : 'dependency',
-    dependencies: dependency.dependencies,
-    dependencySource: dependency.source,
-    reason: dependency.ok ? null : dependency.unresolved.join(' '),
-    updatedAt: at,
-    activity: [
-      ...(previous.activity || []),
-      {
-        type: dependency.ok ? 'dependencies-satisfied' : 'dependency-wait',
-        at,
-        details: dependency.ok
-          ? `Dependencies satisfied: ${dependency.dependencies.join(', ') || 'none'}.`
-          : dependency.unresolved.join(' '),
-      },
-    ],
+function queueSnapshot(root, config, options = {}) {
+  return evaluateIssueQueue(root, config, {
+    ...options,
+    listCandidates: options.listCandidates || listIssueCandidates,
   });
-}
-
-function graphForIssues(issues) {
-  return Object.fromEntries(issues.map((issue) => [issue.number, dependencyNumbers(issue).numbers]));
 }
 
 export function reconcileDependencies(root) {
   const config = loadConfig(root);
-  const ready = listByLabel(root, LABELS.ready);
-  const blocked = listByLabel(root, LABELS.blocked)
-    .filter((issue) => loadRun(root, issue.number)?.blockType === 'dependency');
-  const candidates = [...new Map([...ready, ...blocked].map((issue) => [Number(issue.number), issue])).values()];
-  if (!candidates.length) return { checked: 0, blocked: [], unblocked: [], cycles: [] };
-
-  const graph = graphForIssues(candidates);
-  const cycles = detectDependencyCycles(graph);
-  const cyclic = new Set(cycles.flat());
-  const refreshed = refreshBase(root, config.baseBranch);
-  const remoteRef = refreshed.ok ? refreshed.remoteRef : null;
-  const result = { checked: candidates.length, blocked: [], unblocked: [], cycles };
-
-  for (const issue of candidates) {
-    let dependency;
-    if (cyclic.has(Number(issue.number))) {
-      const cycle = cycles.find((item) => item.includes(Number(issue.number)));
-      dependency = {
-        ok: false,
-        source: dependencyNumbers(issue).source,
-        dependencies: dependencyNumbers(issue).numbers,
-        unresolved: [`Dependency cycle detected: ${cycle.join(' -> ')}.`],
-      };
-    } else if (!refreshed.ok && dependencyNumbers(issue).numbers.length) {
-      dependency = {
-        ok: false,
-        source: dependencyNumbers(issue).source,
-        dependencies: dependencyNumbers(issue).numbers,
-        unresolved: [`Could not refresh ${config.baseBranch}: ${refreshed.detail || 'unknown error'}`],
-      };
-    } else {
-      dependency = evaluateIssueDependencies(root, issue, config, remoteRef ? { remoteRef } : {});
-    }
-
-    const labels = labelNames(issue);
-    if (!dependency.ok && labels.has(LABELS.ready)) {
-      editLabels(root, issue.number, [LABELS.blocked], [LABELS.ready]);
-      updateDependencyRun(root, issue, dependency, LABELS.blocked);
-      result.blocked.push({ issueNumber: issue.number, reasons: dependency.unresolved });
-    } else if (dependency.ok && labels.has(LABELS.blocked)) {
-      editLabels(root, issue.number, [LABELS.ready], [LABELS.blocked]);
-      updateDependencyRun(root, issue, dependency, LABELS.ready);
-      result.unblocked.push({ issueNumber: issue.number });
-    }
-  }
-  return result;
+  const queue = queueSnapshot(root, config);
+  return {
+    checked: queue.eligible.length + queue.waiting.length + queue.rejected.length,
+    blocked: queue.waiting.map((item) => ({ issueNumber: item.issueNumber, reasons: item.reasons })),
+    unblocked: queue.eligible
+      .filter(({ issue }) => loadRun(root, issue.number)?.phase === 'ready')
+      .map(({ issue }) => ({ issueNumber: issue.number })),
+    cycles: [],
+    rejected: queue.rejected,
+  };
 }
 
 function validateLaunch(root, issue, config) {
   if (String(issue.state).toUpperCase() !== 'OPEN') throw new Error(`Issue #${issue.number} is not open.`);
-  if (!labelNames(issue).has(LABELS.ready)) throw new Error(`Issue #${issue.number} is not labeled ${LABELS.ready}.`);
+  const labels = labelNames(issue);
+  const excluded = new Set(config.issueSelection?.excludedLabels || []);
+  const excludedLabel = [...labels].find((label) => excluded.has(label));
+  if (excludedLabel) throw new Error(`Issue #${issue.number} has excluded label ${excludedLabel}.`);
+  if ((config.issueSelection?.mode || 'recommended-labels') === 'recommended-labels'
+    && !labels.has(PASEO_LABELS.ready)
+    && !labels.has(LEGACY_LABELS.ready)) {
+    throw new Error(`Issue #${issue.number} is not labeled ${PASEO_LABELS.ready}.`);
+  }
   const body = validateIssueBody(issue.body);
   if (!body.ok) throw new Error(body.reason);
   const dependency = evaluateIssueDependencies(root, issue, config);
   if (!dependency.ok) throw new Error(dependency.unresolved.join(' '));
+  const previous = loadRun(root, issue.number);
+  if (previous && !previous.completedAt && !['waiting-for-dependencies', 'invalid-issue', 'ready'].includes(String(previous.phase || ''))
+      && (previous.branch || previous.workspaceId || previous.agentId || previous.coderAgentId || previous.controllerPid || previous.startedAt)) {
+    throw new Error(`Issue #${issue.number} already has an active automation attempt.`);
+  }
   if (listByLabel(root, LABELS.running).length >= config.maxActive) throw new Error('Maximum active issue count reached.');
   return dependency;
 }
@@ -205,8 +157,8 @@ function startControllerWorker(root, issueNumber) {
 }
 
 function previousAttemptHistory(previous) {
-  return previous ? [...(previous.history || []), {
-    attempt: previous.attempt || 1,
+  return previous?.attempt ? [...(previous.history || []), {
+    attempt: previous.attempt,
     branch: previous.branch || null,
     status: previous.status || null,
     startedAt: previous.startedAt || null,
@@ -435,13 +387,14 @@ function launch(root, issue, branchAction) {
   const previous = loadRun(root, issue.number);
   if (previous?.status === LABELS.running) throw new Error(`Issue #${issue.number} already has a running attempt.`);
 
+  const priorAttempt = previous?.attempt ? previous : null;
   const base = branchName(issue, 1);
-  const nextAttempt = previous ? Number(previous.attempt || 1) + 1 : 1;
+  const nextAttempt = priorAttempt ? Number(priorAttempt.attempt || 1) + 1 : 1;
   let selection;
-  if (!previous && !branchExists(root, base)) selection = { branch: base, attempt: 1 };
+  if (!priorAttempt && !branchExists(root, base)) selection = { branch: base, attempt: 1 };
   else if (branchAction === 'keep') selection = nextBranch(root, issue, nextAttempt);
   else if (branchAction === 'delete') {
-    deleteRecordedBranch(root, previous);
+    deleteRecordedBranch(root, priorAttempt);
     selection = nextBranch(root, issue, nextAttempt);
   } else throw new Error(`Branch ${base} already exists. Choose keep or delete.`);
 
@@ -451,7 +404,7 @@ function launch(root, issue, branchAction) {
   const started = now();
   const agentTitle = `Issue #${issue.number} Coder (attempt ${selection.attempt})`;
   const workspaceTitle = selection.branch;
-  editLabels(root, issue.number, [LABELS.running], [LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
+  editLabels(root, issue.number, [LABELS.running], [LABELS.ready, PASEO_LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
   saveRun(root, issue.number, {
     issueNumber: issue.number,
     issueTitle: issue.title,
@@ -474,8 +427,11 @@ function launch(root, issue, branchAction) {
     maxAgentStartAttempts: AGENT_START_MAX_ATTEMPTS,
     launchReconciliationAttempts: 0,
     maxLaunchReconciliationAttempts: LAUNCH_RECONCILIATION_MAX_ATTEMPTS,
-    activity: [{ type: 'attempt-launching', at: started, details: `Attempt ${selection.attempt} reserved on ${selection.branch}.` }],
-    history: previousAttemptHistory(previous),
+    activity: [
+      ...(previous?.activity || []),
+      { type: 'attempt-launching', at: started, details: `Attempt ${selection.attempt} reserved on ${selection.branch}.` },
+    ],
+    history: previousAttemptHistory(priorAttempt),
   });
   unskipIssue(root, issue.number);
 
@@ -550,8 +506,8 @@ export function resumePendingAgentLaunches(root) {
     reason: results.map((result) => result?.reason).filter(Boolean).join(' '),
   };
 }
+
 export function dispatchSpecificIssue(root, number, { branchAction = 'keep' } = {}) {
-  reconcileDependencies(root);
   return launch(root, viewIssue(root, number), branchAction);
 }
 
@@ -560,32 +516,39 @@ export function dispatchNextIssue(root) {
   const runtime = loadRuntime(root);
   if (!config.setupComplete) return { claimed: false, reason: 'Setup is not complete.' };
   if (!runtime.claimsEnabled) return { claimed: false, reason: 'Claims are paused.' };
-  const reconciliation = reconcileDependencies(root);
   if (listByLabel(root, LABELS.running).length >= config.maxActive) {
-    return { claimed: false, reason: 'Maximum active issue count reached.', reconciliation };
+    return { claimed: false, reason: 'Maximum active issue count reached.' };
   }
+
   const skipped = new Set(runtime.skippedIssueNumbers || []);
-  const issues = listByLabel(root, LABELS.ready)
-    .filter((issue) => !skipped.has(Number(issue.number)))
-    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.number - b.number);
-  for (const issue of issues) {
-    if (branchExists(root, branchName(issue, 1))) continue;
-    try { return { ...launch(root, issue, 'keep'), reconciliation }; }
-    catch (error) {
-      if (/Missing meaningful|Blocked by open|could not be retrieved|Dependency #|cycle detected|not present in|no merged pull request/i.test(error.message)) {
-        editLabels(root, issue.number, [LABELS.blocked], [LABELS.ready]);
-        updateDependencyRun(root, issue, {
-          ok: false,
-          source: dependencyNumbers(issue).source,
-          dependencies: dependencyNumbers(issue).numbers,
-          unresolved: [error.message],
-        }, LABELS.blocked);
-        continue;
-      }
+  const queue = queueSnapshot(root, config);
+  for (const { issue } of queue.eligible) {
+    if (skipped.has(Number(issue.number))) continue;
+    if (branchExists(root, branchName(issue, 1)) && !loadRun(root, issue.number)?.attempt) continue;
+    try {
+      return {
+        ...launch(root, issue, 'keep'),
+        reconciliation: {
+          checked: queue.eligible.length + queue.waiting.length + queue.rejected.length,
+          blocked: queue.waiting,
+          rejected: queue.rejected,
+        },
+      };
+    } catch (error) {
+      if (/already has an active automation attempt/i.test(error.message)) continue;
+      if (/Blocked by open|could not be retrieved|Dependency #|cycle detected|not present in|no merged pull request|Native GitHub blocked-by/i.test(error.message)) continue;
       throw error;
     }
   }
-  return { claimed: false, reason: 'No eligible ready issue found.', reconciliation };
+  return {
+    claimed: false,
+    reason: 'No eligible issue found.',
+    reconciliation: {
+      checked: queue.eligible.length + queue.waiting.length + queue.rejected.length,
+      blocked: queue.waiting,
+      rejected: queue.rejected,
+    },
+  };
 }
 
 export function updateManagedDispatch(root, result) {
@@ -680,12 +643,16 @@ function summarize(state) {
 }
 
 export function operationalStatus(root) {
+  const config = loadConfig(root);
   const runtime = loadRuntime(root);
   const skipped = new Set(runtime.skippedIssueNumbers || []);
   const byLabel = Object.fromEntries(Object.entries(LABELS).map(([name, label]) => [name, listByLabel(root, label)]));
+  let queue;
+  try { queue = queueSnapshot(root, config); }
+  catch { queue = { eligible: [], waiting: [], rejected: [] }; }
   return {
     counts: Object.fromEntries(Object.entries(byLabel).map(([name, issues]) => [name, issues.length])),
-    readyIssues: byLabel.ready.map((issue) => ({
+    readyIssues: queue.eligible.map(({ issue }) => ({
       number: Number(issue.number),
       title: issue.title,
       url: issue.url,
@@ -695,6 +662,8 @@ export function operationalStatus(root) {
       skipped: skipped.has(Number(issue.number)),
       branchExists: branchExists(root, branchName(issue, 1)),
     })),
+    waitingIssues: queue.waiting,
+    rejectedIssues: queue.rejected,
     attempts: listRuns(root).map(summarize),
   };
 }
