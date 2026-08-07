@@ -60,7 +60,13 @@ export const REPOSITORY_PASEO_SCRIPT = String.raw`
   }
 
   const root = content();
-  if (root) new MutationObserver(scheduleRefresh).observe(root, { childList: true, subtree: true });
+  if (root) new MutationObserver((mutations) => {
+    const onlyOwnCardChanged = mutations.length > 0 && mutations.every((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
+      return target?.closest?.('#github-paseo-project-card');
+    });
+    if (!onlyOwnCardChanged) scheduleRefresh();
+  }).observe(root, { childList: true, subtree: true });
   addEventListener('popstate', scheduleRefresh);
   scheduleRefresh();
 })();
