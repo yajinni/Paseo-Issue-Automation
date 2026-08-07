@@ -10,11 +10,25 @@ function fakeActions(calls) {
     reconcileDependencies: (root) => { calls.push(['reconcile', root]); return { changed: 0 }; },
     loadConfig: (root) => ({
       root,
+      version: 3,
       baseBranch: 'main',
       maxActive: 1,
       pollIntervalSeconds: 120,
       maxReviewRounds: 4,
+      codingHarness: 'provider-a',
+      issueSelection: {
+        mode: 'all-open',
+        excludedLabels: ['manual'],
+        temporaryFailureRetries: 5,
+      },
+      review: {
+        workflow: 'quick-manual',
+        quickMaxRounds: 3,
+        fullMaxRounds: 4,
+        autoMergeApproved: false,
+      },
       models: { coder: 'old/coder', reviewer: 'old/reviewer' },
+      workspace: { id: 'workspace-a', title: 'Issue Coding Automation' },
     }),
     saveConfig: (root, config) => { calls.push(['config', root, config]); return config; },
     dispatchSpecificCodingIssue: (root, issue, options) => { calls.push(['start', root, issue, options]); return { issue }; },
@@ -40,16 +54,25 @@ test('manager actions map pause, resume, dispatch, and reconciliation to one roo
   assert.ok(calls.some((entry) => entry[0] === 'reconcile' && entry[1] === '/repo-a'));
 });
 
-test('manager configuration merges model selections without dropping existing values', () => {
+test('manager configuration merges nested selections without dropping existing values', () => {
   const calls = [];
   const actions = fakeActions(calls);
   const result = managerRepositoryAction('/repo-b', '/api/config', {
     maxActive: 3,
+    review: { autoMergeApproved: true },
     models: { coder: 'new/coder' },
   }, actions);
   assert.equal(result.maxActive, 3);
   assert.equal(result.models.coder, 'new/coder');
   assert.equal(result.models.reviewer, 'old/reviewer');
+  assert.equal(result.codingHarness, 'provider-a');
+  assert.equal(result.issueSelection.mode, 'all-open');
+  assert.deepEqual(result.issueSelection.excludedLabels, ['manual']);
+  assert.equal(result.issueSelection.temporaryFailureRetries, 5);
+  assert.equal(result.review.workflow, 'quick-manual');
+  assert.equal(result.review.fullMaxRounds, 4);
+  assert.equal(result.review.autoMergeApproved, true);
+  assert.equal(result.workspace.id, 'workspace-a');
   const saved = calls.find((entry) => entry[0] === 'config');
   assert.equal(saved[1], '/repo-b');
 });
