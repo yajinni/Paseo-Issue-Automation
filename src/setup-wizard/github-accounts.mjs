@@ -102,9 +102,15 @@ export function parseGitHubAuthStatus(value) {
     if (left.host !== right.host) return left.host.localeCompare(right.host);
     return left.login.localeCompare(right.login);
   });
+  const activeAccounts = Object.fromEntries(
+    [...new Set(accounts.map((account) => account.host))]
+      .sort()
+      .map((host) => [host, accounts.find((account) => account.host === host && account.active) || null]),
+  );
   return {
     accounts,
-    activeAccount: accounts.find((account) => account.active) || null,
+    activeAccounts,
+    activeAccount: activeAccounts['github.com'] || accounts.find((account) => account.active) || null,
     hosts: [...new Set(accounts.map((account) => account.host))].sort(),
   };
 }
@@ -116,6 +122,7 @@ export function listGitHubAccounts({ runner = defaultRun, env = process.env } = 
     return {
       ok: false,
       accounts: [],
+      activeAccounts: {},
       activeAccount: null,
       hosts: [],
       message: safeMessage(result, 'GitHub authentication status is unavailable.'),
@@ -241,6 +248,6 @@ export function reconcileRepositorySelection(selectedRepository, accessibleRepos
 
 export function githubAccountServiceStatus(options = {}) {
   const cli = githubCliStatus(options);
-  if (!cli.installed) return { cli, auth: { ok: false, accounts: [], activeAccount: null, hosts: [], message: 'GitHub CLI is not installed.' } };
+  if (!cli.installed) return { cli, auth: { ok: false, accounts: [], activeAccounts: {}, activeAccount: null, hosts: [], message: 'GitHub CLI is not installed.' } };
   return { cli, auth: listGitHubAccounts(options) };
 }
