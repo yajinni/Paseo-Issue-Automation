@@ -11,6 +11,15 @@ test('review setup UI offers all explicit workflows and independent round contro
   assert.match(REVIEW_PAGE_SCRIPT, /max="20"/);
 });
 
+test('review workflow, round, and auto-merge changes save immediately', () => {
+  assert.match(REVIEW_PAGE_SCRIPT, /input\[name="review-workflow"\][^]*addEventListener\('change', saveSettings\)/);
+  assert.match(REVIEW_PAGE_SCRIPT, /review-quick-rounds[^]*addEventListener\('change', saveSettings\)/);
+  assert.match(REVIEW_PAGE_SCRIPT, /review-full-rounds[^]*addEventListener\('change', saveSettings\)/);
+  assert.match(REVIEW_PAGE_SCRIPT, /review-auto-merge[^]*addEventListener\('change', saveSettings\)/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Review settings save automatically when changed/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /id="review-save"/);
+});
+
 test('eligible workflows offer opt-in coding PR auto-merge without policy bypass', () => {
   assert.match(REVIEW_PAGE_SCRIPT, /review-auto-merge/);
   assert.match(REVIEW_PAGE_SCRIPT, /Off by default/);
@@ -19,10 +28,12 @@ test('eligible workflows offer opt-in coding PR auto-merge without policy bypass
   assert.match(REVIEW_PAGE_SCRIPT, /unavailable for Quick → Manual review/);
 });
 
-test('Web ChatGPT conditional section uses ChatGPT Profile as the normal user-facing name', () => {
+test('Web ChatGPT conditional section uses ChatGPT Profile and highlights missing required readiness', () => {
   assert.match(REVIEW_PAGE_SCRIPT, /<h3>ChatGPT Profile<\/h3>/);
   assert.match(REVIEW_PAGE_SCRIPT, /Open ChatGPT Profile/);
   assert.match(REVIEW_PAGE_SCRIPT, /never asks for or stores your ChatGPT password/);
+  assert.match(REVIEW_PAGE_SCRIPT, /cardClass\(missing\)/);
+  assert.match(REVIEW_PAGE_SCRIPT, /required-missing/);
   assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /dedicated Chromium profile/);
   assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /dedicated ChatGPT browser/);
 });
