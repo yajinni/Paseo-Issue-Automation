@@ -1,5 +1,25 @@
 import { managerHtml as installationManagerHtml } from './manager-install-ui.mjs';
 
+const OVERVIEW_PANEL = `  <section class="manager-overview" aria-label="Selected repository overview">
+    <div class="overview-heading">
+      <div>
+        <div class="overview-eyebrow">Selected repository</div>
+        <strong id="overview-status-title">Loading operational status…</strong>
+        <div class="muted" id="overview-status-message">Checking setup, workers, claims, and recovery state.</div>
+      </div>
+      <div class="overview-primary-action" id="overview-primary-action"></div>
+    </div>
+    <div class="overview-metrics">
+      <div class="overview-metric" id="overview-issue-processing"><span>Issue processing</span><strong>Unknown</strong></div>
+      <div class="overview-metric" id="overview-claims"><span>Claims</span><strong>Unknown</strong></div>
+      <div class="overview-metric" id="overview-coding-worker"><span>Coding worker</span><strong>Unknown</strong></div>
+      <div class="overview-metric" id="overview-review-worker"><span>PR reviews</span><strong>Unknown</strong></div>
+      <div class="overview-metric" id="overview-active-work"><span>Active work</span><strong>0</strong></div>
+      <div class="overview-metric" id="overview-attention"><span>Needs attention</span><strong>0</strong></div>
+    </div>
+  </section>
+`;
+
 const HEALTH_PANEL = `  <section class="card wide" id="repository-health-panel" style="margin-top:14px">
     <h2>Repository health</h2>
     <dl class="facts" id="operational-facts"><dt>Issue processing</dt><dd>Loading…</dd></dl>
@@ -49,6 +69,43 @@ function blockerActionElement(action) {
     } catch (error) { showError(error); }
   });
   return button;
+}
+
+function setOverviewMetric(id, value, state = 'neutral') {
+  const metric = document.getElementById(id);
+  metric.className = 'overview-metric overview-' + state;
+  metric.querySelector('strong').textContent = value;
+}
+
+function renderManagerOverview(data) {
+  const operational = data.operational || {};
+  const blockers = Array.isArray(data.blockers) ? data.blockers : [];
+  const primary = operational.primaryBlocker || blockers[0] || null;
+  const attentionCount = blockers.filter((item) => item.severity === 'error' || item.severity === 'warning').length;
+  const issueReady = operational.issueProcessing === 'ready';
+  const reviewReady = operational.prReviews === 'ready';
+  const claimsEnabled = data.automation?.claimsEnabled === true;
+  const codingWorkerRunning = data.worker?.running === true;
+  const reviewWorkerRunning = data.reviewWorker?.running === true;
+
+  const title = document.getElementById('overview-status-title');
+  const message = document.getElementById('overview-status-message');
+  title.textContent = issueReady
+    ? attentionCount ? 'Automation is ready with items to review' : 'Automation is ready'
+    : 'Automation needs attention';
+  message.textContent = primary?.message || 'No repository-specific blockers are currently reported.';
+
+  setOverviewMetric('overview-issue-processing', issueReady ? 'Ready' : 'Blocked', issueReady ? 'ready' : 'blocked');
+  setOverviewMetric('overview-claims', claimsEnabled ? 'Enabled' : 'Paused', claimsEnabled ? 'ready' : 'attention');
+  setOverviewMetric('overview-coding-worker', codingWorkerRunning ? 'Running' : 'Stopped', codingWorkerRunning ? 'ready' : 'attention');
+  setOverviewMetric('overview-review-worker', reviewReady && reviewWorkerRunning ? 'Ready' : reviewWorkerRunning ? 'Attention' : 'Stopped', reviewReady && reviewWorkerRunning ? 'ready' : 'attention');
+  setOverviewMetric('overview-active-work', String(data.automation?.activeRunCount || 0), Number(data.automation?.activeRunCount || 0) > 0 ? 'active' : 'neutral');
+  setOverviewMetric('overview-attention', String(attentionCount), attentionCount ? 'attention' : 'ready');
+
+  const actionTarget = document.getElementById('overview-primary-action');
+  actionTarget.textContent = '';
+  const action = blockerActionElement(primary?.action);
+  if (action) actionTarget.append(action);
 }
 
 function renderRepositoryHealth(data) {
@@ -119,6 +176,7 @@ function renderExternalMaintenance(data) {
 }
 
 function renderMaintenanceAndHealth(data) {
+  renderManagerOverview(data);
   renderRepositoryHealth(data);
   renderExternalMaintenance(data);
 }
@@ -145,7 +203,11 @@ export function managerHtml() {
   return installationManagerHtml()
     .replace(
       '</style>',
-      `.blocker-list{display:grid;gap:10px;margin-top:12px}.blocker{border:1px solid #30445f;border-radius:9px;padding:11px;background:#0d1724}.blocker-error{border-color:#894351;background:#301820}.blocker-warning{border-color:#80672c;background:#2b2515}.blocker-ready{border-color:#356b4a;background:#12261a}.blocker a{color:#8ab8ff}\n</style>`,
+      `.manager-overview{background:#111924;border:1px solid #30445f;border-radius:12px;padding:16px;margin-bottom:14px}.overview-heading{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.overview-eyebrow{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:#8da3be;margin-bottom:4px}.overview-heading strong{font-size:1.08rem}.overview-primary-action a{display:inline-flex;border-radius:8px;padding:9px 13px;background:#243247;color:#fff;text-decoration:none}.overview-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:14px}.overview-metric{border:1px solid #2b3b50;border-radius:9px;padding:10px;background:#0d1724}.overview-metric span{display:block;color:#9dacbf;font-size:.78rem;margin-bottom:4px}.overview-metric strong{display:block;font-size:.95rem}.overview-ready{border-color:#356b4a;background:#12261a}.overview-blocked{border-color:#894351;background:#301820}.overview-attention{border-color:#80672c;background:#2b2515}.overview-active{border-color:#365f8b;background:#122238}.blocker-list{display:grid;gap:10px;margin-top:12px}.blocker{border:1px solid #30445f;border-radius:9px;padding:11px;background:#0d1724}.blocker-error{border-color:#894351;background:#301820}.blocker-warning{border-color:#80672c;background:#2b2515}.blocker-ready{border-color:#356b4a;background:#12261a}.blocker a{color:#8ab8ff}@media(max-width:900px){.overview-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:560px){.overview-heading{display:block}.overview-primary-action{margin-top:10px}.overview-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}\n</style>`,
+    )
+    .replace(
+      `  <div class="grid">`,
+      `${OVERVIEW_PANEL}  <div class="grid">`,
     )
     .replace(
       `  <form class="register" id="register-form">`,
