@@ -9,11 +9,11 @@ export const ISSUES_PAGE_SCRIPT = String.raw`
   function labelRows() {
     const labels = state?.preview?.labels || state?.lifecycleLabels || [];
     if (!labels.length) return '<div class="notice">Paseo will ensure the managed lifecycle labels exist after final confirmation.</div>';
-    return '<div class="checklist">' + labels.map((label) => {
+    return '<div class="issues-label-list">' + labels.map((label) => {
       const detail = label.status === 'reused'
         ? 'Already exists · will be reused.'
         : 'Will be ensured after final confirmation.';
-      return '<div class="check-row"><span class="check-dot">·</span><div><strong>' + escape(label.name) + '</strong><div class="check-detail">' + escape(detail) + '</div></div></div>';
+      return '<div class="issues-label-row"><strong>' + escape(label.name) + '</strong><div class="check-detail">' + escape(detail) + '</div></div>';
     }).join('') + '</div>';
   }
   function templatePreview(template) {
@@ -82,6 +82,7 @@ export const ISSUES_PAGE_SCRIPT = String.raw`
 
 const ISSUES_PAGE_STYLE = String.raw`
 <style data-setup-issues-page-style>
+.issues-label-list{display:grid}.issues-label-row{padding:9px 0 9px 32px;border-bottom:1px solid #253042}.issues-label-row:last-child{border-bottom:0}.issues-label-row strong{display:block}
 .issues-template-preview{margin:12px 0 0;max-height:460px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #2d394b;border-radius:10px;background:#0f1620;padding:14px;color:#c9d5e5;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
 </style>`;
 
