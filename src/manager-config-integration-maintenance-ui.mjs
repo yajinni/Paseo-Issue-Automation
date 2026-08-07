@@ -22,9 +22,14 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     ['Provider/Coding Harness', 'Provider and model choices used for coding work.', ['coding-harness', 'coder-model', 'coder-thinking']],
     ['Review model', 'Reviewer model and thinking level. Workflow behavior is configured separately.', ['reviewer-model', 'reviewer-thinking']],
     ['Issue processing', 'Eligibility, concurrency, retry, and exclusion settings for repository issues.', ['issue-selection-mode', 'max-active', 'temporary-failure-retries', 'excluded-labels']],
-    ['Review workflow', 'Quick/full review path, round limits, and optional exact-head auto-merge policy.', ['review-workflow', 'quick-review-rounds', 'full-review-rounds', 'auto-merge-approved']],
+    ['Review workflow', 'Review path, round limits, and optional exact-head auto-merge policy.', ['review-workflow', 'quick-review-rounds', 'full-review-rounds', 'auto-merge-approved']],
     ['Runtime', 'Repository branch and polling cadence.', ['base-branch', 'poll-interval']],
   ];
+  const REVIEW_WORKFLOW_COPY = {
+    'quick-manual': 'Light model review → Manual review',
+    'quick-web-chatgpt': 'Light model review → Web ChatGPT full review',
+    'full-immediate': 'I selected a heavy review model to do the job.',
+  };
   let built = false;
   let baseline = null;
 
@@ -38,6 +43,42 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     const input = document.getElementById(id);
     if (!input) return null;
     return input.closest('label') || input;
+  }
+
+  function replaceLabelText(id, text) {
+    const label = fieldContainerFor(id);
+    if (!label || label.tagName !== 'LABEL') return;
+    const textNode = [...label.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
+    if (textNode) textNode.textContent = text;
+  }
+
+  function factPair(targetId, label) {
+    const root = document.getElementById(targetId);
+    if (!root) return null;
+    const dt = [...root.querySelectorAll('dt')].find((item) => item.textContent.trim() === label);
+    return dt ? { dt, dd: dt.nextElementSibling } : null;
+  }
+
+  function syncReviewWorkflowPresentation(data = null) {
+    const select = document.getElementById('review-workflow');
+    if (!select) return;
+    for (const option of select.options) {
+      if (REVIEW_WORKFLOW_COPY[option.value]) option.textContent = REVIEW_WORKFLOW_COPY[option.value];
+    }
+    replaceLabelText('quick-review-rounds', 'Light model review rounds');
+    replaceLabelText('full-review-rounds', 'Full review rounds');
+    const workflow = select.value || data?.configuration?.review?.workflow || 'quick-manual';
+    const fullField = fieldContainerFor('full-review-rounds');
+    if (fullField) fullField.hidden = workflow === 'quick-manual';
+    const help = document.getElementById('auto-merge-help');
+    if (help && workflow === 'quick-manual') help.textContent = 'Automatic merge is unavailable for Light model review → Manual review. A person must merge the PR after manual review.';
+    const setupWorkflow = factPair('setup-facts', 'Review workflow');
+    if (setupWorkflow?.dd) setupWorkflow.dd.textContent = REVIEW_WORKFLOW_COPY[workflow] || workflow;
+    const lightLimit = factPair('automation-facts', 'Quick review limit') || factPair('automation-facts', 'Light model review limit');
+    if (lightLimit?.dt) lightLimit.dt.textContent = 'Light model review limit';
+    const fullLimit = factPair('automation-facts', 'Full review limit');
+    if (fullLimit?.dt) fullLimit.dt.hidden = workflow === 'quick-manual';
+    if (fullLimit?.dd) fullLimit.dd.hidden = workflow === 'quick-manual';
   }
 
   function snapshotConfigForm() {
@@ -62,7 +103,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     integer('poll-interval', 60, 3600, 'Poll interval');
     integer('max-active', 1, 20, 'Maximum active issues');
     integer('temporary-failure-retries', 0, 20, 'Transient failure retries');
-    integer('quick-review-rounds', 1, 20, 'Quick review rounds');
+    integer('quick-review-rounds', 1, 20, 'Light model review rounds');
     integer('full-review-rounds', 1, 20, 'Full review rounds');
     return errors;
   }
@@ -118,7 +159,9 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     savebar.append(saveCopy, actions); existingActions?.replaceWith(savebar);
     form.addEventListener('input', renderDirtyState);
     form.addEventListener('change', renderDirtyState);
+    document.getElementById('review-workflow')?.addEventListener('change', () => syncReviewWorkflowPresentation());
     discard.addEventListener('click', () => { try { if (typeof currentStatus !== 'undefined' && currentStatus) window.renderStatus(currentStatus); } catch {} });
+    syncReviewWorkflowPresentation();
   }
 
   function summaryRow(target, label, value) {
@@ -188,6 +231,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
 
   function render(data) {
     if (!data) return;
+    syncReviewWorkflowPresentation(data);
     baseline = snapshotConfigForm();
     renderDirtyState();
     renderIntegration(data);
