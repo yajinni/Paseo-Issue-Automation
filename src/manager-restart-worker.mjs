@@ -1,4 +1,4 @@
-import { restartCodingIssue } from './coding-dispatch.mjs';
+import { recoverOrRestartCodingIssue } from './coding-dispatch.mjs';
 import { loadRun, saveRun } from './state.mjs';
 
 const now = () => new Date().toISOString();
@@ -21,11 +21,20 @@ if (!root || !Number.isInteger(issueNumber) || issueNumber <= 0 || !['keep', 'de
       ...state,
       phase: 'starting-agent',
       restartPending: true,
-      reason: 'Restarting as a fresh coding attempt.',
+      reason: branchAction === 'keep'
+        ? 'Checking whether the failed attempt can be recovered before creating a fresh attempt.'
+        : 'A fresh coding attempt was explicitly requested with branch deletion.',
       updatedAt: startedAt,
-      activity: appendActivity(state, 'restart-started', 'Background restart worker started.', startedAt),
+      activity: appendActivity(
+        state,
+        'restart-started',
+        branchAction === 'keep'
+          ? 'Background restart worker started in recover-first mode.'
+          : 'Background restart worker started in explicit fresh mode.',
+        startedAt,
+      ),
     });
-    restartCodingIssue(root, issueNumber, { branchAction });
+    recoverOrRestartCodingIssue(root, issueNumber, { branchAction });
     const restarted = loadRun(root, issueNumber);
     if (restarted) saveRun(root, issueNumber, { ...restarted, restartPending: false, restartRequestedAt: null });
   } catch (error) {
