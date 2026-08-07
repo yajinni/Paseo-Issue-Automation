@@ -6,27 +6,44 @@ import {
 } from '../../src/setup-wizard/harness-page-ui.mjs';
 import { setupWizardHtml } from '../../src/setup-wizard/ui.mjs';
 
-test('harness page UI exposes provider, independent model, thinking, refresh, and acknowledgement controls', () => {
+test('harness page UI exposes section refresh controls, required highlighting, and automatic saves', () => {
   const html = enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage: 'harness' }));
 
   assert.match(html, /data-setup-harness-page/);
   assert.match(html, /\/api\/setup\/harness\/status/);
   assert.match(html, /\/api\/setup\/harness\/save/);
   assert.match(html, /\/api\/setup\/harness\/recheck/);
-  assert.match(html, /Coding harness/);
+  assert.match(html, /Provider \/ Coding Harness/);
   assert.match(html, /Coding model/);
   assert.match(html, /Review model/);
   assert.match(html, /Thinking level/);
   assert.match(html, /No Paseo model required/);
   assert.match(html, /does not expose selectable models/);
-  assert.match(html, /Quick review/);
-  assert.match(html, /full review/i);
-  assert.match(html, /Refresh catalog/);
+  assert.match(html, /Refresh coding harnesses/);
+  assert.match(html, /Refresh coding models/);
+  assert.match(html, /Refresh review models/);
+  assert.match(html, /required-missing/);
+  assert.match(html, /harness-coding-model[^]*save\(readForm\(\)\)/);
+  assert.match(html, /harness-review-model[^]*save\(readForm\(\)\)/);
+  assert.match(html, /harness-coding-thinking[^]*save\(readForm\(\)\)/);
+  assert.match(html, /harness-review-thinking[^]*save\(readForm\(\)\)/);
 });
 
-test('harness UI intercepts page Recheck but leaves other pages to the shell', () => {
-  assert.match(HARNESS_PAGE_SCRIPT, /if \(!onHarnessPage\(\)\) return/);
-  assert.match(HARNESS_PAGE_SCRIPT, /stopImmediatePropagation/);
-  assert.match(HARNESS_PAGE_SCRIPT, /refresh\(true\)/);
-  assert.doesNotMatch(HARNESS_PAGE_SCRIPT, /paseo provider models/);
+test('harness page uses the requested review guidance and removes catalog status', () => {
+  const html = enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage: 'harness' }));
+
+  assert.match(html, /Select a light or same model as the coding model if you just want to do a quick check on the code before letting it move on to human PR review, another heavy external PR review workflow, or will use our web ChatGPT setup for review\./);
+  assert.match(html, /Pick your heavy PR review model if you wont be doing one of the above bullet options and want the PR review cycle to start immediately\./);
+  assert.match(html, /<ul class="review-guidance">/);
+  assert.doesNotMatch(html, /<h3>Catalog status<\/h3>/);
+  assert.doesNotMatch(html, /Refresh catalog/);
+});
+
+test('harness page hides shell Recheck and shows visible loading and waiting states', () => {
+  assert.match(HARNESS_PAGE_SCRIPT, /recheck\.hidden = onHarnessPage\(\)/);
+  assert.match(HARNESS_PAGE_SCRIPT, /Checking available coding harnesses from Paseo/);
+  assert.match(HARNESS_PAGE_SCRIPT, /Waiting for the coding harness catalog before checking available coding models/);
+  assert.match(HARNESS_PAGE_SCRIPT, /Waiting for the coding harness catalog before checking available review models/);
+  assert.match(HARNESS_PAGE_SCRIPT, /setRefreshBusy\(true, busyLabel\)/);
+  assert.doesNotMatch(HARNESS_PAGE_SCRIPT, /stopImmediatePropagation/);
 });
