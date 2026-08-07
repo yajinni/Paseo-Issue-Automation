@@ -6,6 +6,8 @@ import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
 import { listRepositories } from './repository-registry.mjs';
 import { loadConfig } from './state.mjs';
+import { githubSetupPageApiRequest } from './setup-wizard/github-page-api.mjs';
+import { enhanceSetupWizardWithGitHubPage } from './setup-wizard/github-page-ui.mjs';
 import { harnessSetupPageApiRequest } from './setup-wizard/harness-page-api.mjs';
 import { enhanceSetupWizardWithHarnessPage } from './setup-wizard/harness-page-ui.mjs';
 import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs';
@@ -55,6 +57,7 @@ export async function startManagerServer({
   paseoCredentialStore = null,
   paseoSetupOptions = {},
   harnessSetupOptions = {},
+  githubSetupOptions = {},
 } = {}) {
   const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const reviewWorkers = reviewWorkerManager || createManagerReviewWorkerPool();
@@ -80,7 +83,8 @@ export async function startManagerServer({
           return;
         }
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        response.end(enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage })));
+        const harnessHtml = enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage }));
+        response.end(enhanceSetupWizardWithGitHubPage(harnessHtml));
         return;
       }
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method)
@@ -114,6 +118,19 @@ export async function startManagerServer({
       });
       if (harnessSetup.handled) {
         json(response, harnessSetup.status, harnessSetup.body);
+        return;
+      }
+
+      const githubSetup = githubSetupPageApiRequest({
+        method: request.method,
+        pathname: url.pathname,
+        body,
+      }, {
+        rootDir,
+        ...githubSetupOptions,
+      });
+      if (githubSetup.handled) {
+        json(response, githubSetup.status, githubSetup.body);
         return;
       }
 
