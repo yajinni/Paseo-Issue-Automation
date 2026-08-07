@@ -2,13 +2,15 @@
 name: Automated coding task
 about: Define an issue clearly enough for autonomous implementation and independent review
 title: ""
-labels: "agent-ready"
+labels: "paseo:ready"
 assignees: ""
 ---
 
+<!-- paseo-issue-template:v2 -->
+
 ## Objective
 
-<!-- State the concrete outcome this issue must achieve. -->
+<!-- Required: state the concrete outcome this issue must achieve. -->
 
 ## Current behavior
 
@@ -16,7 +18,7 @@ assignees: ""
 
 ## Required behavior
 
-<!-- Describe exactly what must change. -->
+<!-- Required: describe exactly what must change. -->
 
 ## Scope
 
@@ -36,7 +38,7 @@ assignees: ""
 
 ## Dependencies
 
-<!-- Configure every execution constraint using GitHub's native "blocked by" relationships. Use this section only to explain why those native relationships exist. Write None when there are no dependencies. Dependency-like body text is not read by the controller. -->
+<!-- Configure every execution constraint using GitHub's native "blocked by" relationships. Use this section only to explain why those native relationships exist. Parent/sub-issue hierarchy and dependency-like body references are not execution dependencies. Write None when there are no dependencies. -->
 
 ## Privacy and security
 
@@ -44,13 +46,13 @@ assignees: ""
 
 ## Acceptance criteria
 
-- [ ] <!-- Add verifiable completion criteria. -->
+<!-- Required: add one or more verifiable completion criteria. -->
+- [ ]
 
 ## Validation and checks
 
-<!-- The issue author owns defining the checks appropriate for this task. Include focused tests, required repository commands, manual verification, or other evidence. -->
-
-- [ ] <!-- Add an explicit validation or check. -->
+<!-- Required: define the checks appropriate for this task. Include focused tests, required repository commands, manual verification, or other evidence. -->
+- [ ]
 
 ## Documentation
 
@@ -58,4 +60,4 @@ assignees: ""
 
 ## Stop conditions
 
-<!-- State conditions that require the automation to block instead of guessing, broadening scope, or taking unsafe action. -->
+<!-- Required: state conditions that require the automation to block instead of guessing, broadening scope, or taking unsafe action. -->

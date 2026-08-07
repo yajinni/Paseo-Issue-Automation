@@ -1,14 +1,12 @@
-import { LABELS, loadConfig, loadRun, loadRuntime, saveRun, saveRuntime } from './state.mjs';
-import { run, runJson } from './process.mjs';
 import { appendControllerLog } from './controller-log.mjs';
+import {
+  sectionContent,
+  validateIssueBody,
+} from './issue-contract.mjs';
+import { run, runJson } from './process.mjs';
+import { LABELS, loadConfig, loadRun, loadRuntime, saveRun, saveRuntime } from './state.mjs';
 
-const REQUIRED_SECTIONS = [
-  'Objective',
-  'Required behavior',
-  'Acceptance criteria',
-  'Validation and checks',
-  'Stop conditions',
-];
+export { sectionContent, validateIssueBody };
 
 function safeIssueLog(root, input) {
   try { return appendControllerLog(root, { category: 'issues', source: 'automation', ...input }); }
@@ -24,37 +22,6 @@ export function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48) || 'task';
-}
-
-export function sectionContent(body, heading) {
-  const text = String(body || '');
-  const headings = [...text.matchAll(/^##\s+(.+?)\s*$/gm)];
-  const target = headings.findIndex((match) => match[1].trim().toLowerCase() === heading.toLowerCase());
-  if (target < 0) return '';
-  const start = headings[target].index + headings[target][0].length;
-  const end = headings[target + 1]?.index ?? text.length;
-  return text.slice(start, end).trim();
-}
-
-function meaningfulSectionContent(content) {
-  return String(content || '')
-    .replace(/<!--[^]*?-->/g, '')
-    .replace(/^\s*- \[ \]\s*$/gm, '')
-    .trim();
-}
-
-export function validateIssueBody(body) {
-  const missing = REQUIRED_SECTIONS.filter((heading) => {
-    const content = meaningfulSectionContent(sectionContent(body, heading));
-    return !content || /^(?:none|n\/a|todo|tbd)$/i.test(content);
-  });
-  return {
-    ok: missing.length === 0,
-    missing,
-    reason: missing.length
-      ? `Missing meaningful issue sections: ${missing.join(', ')}.`
-      : null,
-  };
 }
 
 function editLabels(root, issueNumber, { add = [], remove = [] }) {
