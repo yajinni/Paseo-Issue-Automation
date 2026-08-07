@@ -19,19 +19,23 @@ if (!root || !Number.isInteger(issueNumber) || issueNumber <= 0 || !['keep', 'de
     const startedAt = now();
     saveRun(root, issueNumber, {
       ...state,
-      phase: 'restarting',
+      phase: 'starting-agent',
+      restartPending: true,
       reason: 'Restarting as a fresh coding attempt.',
       updatedAt: startedAt,
       activity: appendActivity(state, 'restart-started', 'Background restart worker started.', startedAt),
     });
     restartCodingIssue(root, issueNumber, { branchAction });
+    const restarted = loadRun(root, issueNumber);
+    if (restarted) saveRun(root, issueNumber, { ...restarted, restartPending: false, restartRequestedAt: null });
   } catch (error) {
     const state = loadRun(root, issueNumber) || { issueNumber };
     const failedAt = now();
     const message = error instanceof Error ? error.message : String(error);
     saveRun(root, issueNumber, {
       ...state,
-      phase: 'restart-failed',
+      phase: 'failed',
+      restartPending: false,
       reason: `Restart failed: ${message}`,
       updatedAt: failedAt,
       activity: appendActivity(state, 'restart-failed', message, failedAt),
