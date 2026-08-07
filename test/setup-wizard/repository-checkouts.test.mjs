@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,9 +15,7 @@ import {
 
 function tempDir(t, prefix = 'paseo-checkout-') {
   const root = mkdtempSync(path.join(os.tmpdir(), prefix));
-  t.after(() => run(process.platform === 'win32' ? 'cmd' : 'rm', process.platform === 'win32'
-    ? ['/d', '/s', '/c', 'rmdir', '/s', '/q', root]
-    : ['-rf', root], { allowFailure: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }
 
@@ -164,6 +162,6 @@ test('successful managed clone validates before atomic rename and registration',
   assert.equal(existsSync(result.checkout.path), true);
   assert.equal(path.dirname(result.checkout.path), path.resolve(managedRoot));
   assert.deepEqual(registrations, [result.checkout.path]);
-  const entries = existsSync(managedRoot) ? new Set(require('node:fs').readdirSync(managedRoot)) : new Set();
+  const entries = new Set(readdirSync(managedRoot));
   assert.equal([...entries].some((name) => name.includes('.partial-') || name.endsWith('.incomplete')), false);
 });
