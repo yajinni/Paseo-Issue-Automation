@@ -1,5 +1,4 @@
 import {
-  getReviewSetupPageStatus,
   installChatGptChromium,
   openChatGptProfile,
   recheckReviewSetupPage,
@@ -15,7 +14,7 @@ function failure(error, status = 400) {
 export async function reviewSetupPageApiRequest({ method, pathname, body = {} }, options = {}) {
   if (!pathname.startsWith('/api/setup/review')) return { handled: false };
   try {
-    if (pathname === '/api/setup/review/status' && method === 'GET') return response(getReviewSetupPageStatus(options));
+    if (pathname === '/api/setup/review/status' && method === 'GET') return response(await recheckReviewSetupPage(options));
     if (pathname === '/api/setup/review/save' && method === 'POST') return response(saveReviewSetupPage(body, options));
     if (pathname === '/api/setup/review/chat' && method === 'POST') return response(await saveReviewChat(body, options));
     if (pathname === '/api/setup/review/profile/open' && method === 'POST') return response(await openChatGptProfile(options));
