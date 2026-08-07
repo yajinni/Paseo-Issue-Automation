@@ -2,12 +2,14 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { browserPaths } from './browser-profile.mjs';
 import { submitReviewPrompt } from './browser-service.mjs';
+import { expiredProfileSession } from './chatgpt-profile-readiness.mjs';
 import { appendControllerLog } from './controller-log.mjs';
 import { releaseLease, startLeaseHeartbeat } from './durable-lease.mjs';
 import { PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
 import { markReviewSubmitted, markReviewSubmissionFailed } from './pr-review-queue.mjs';
-import { findManaged, findReviewJob, loadPrReviewStore } from './pr-review-store.mjs';
+import { findManaged, findReviewJob, loadPrReviewStore, mutatePrReviewStore } from './pr-review-store.mjs';
 import {
+  pauseWebReviewsForExpiredProfile,
   renderWebChatGptFullReviewPrompt,
   webChatGptFullReviewMetadata,
 } from './web-chatgpt-full-review.mjs';
@@ -70,11 +72,31 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
     });
     return saved;
   } catch (error) {
+    const expired = expiredProfileSession(error);
+    const saved = markReviewSubmissionFailed(root, job.id, error, error.diagnostics || {});
+    if (expired) {
+      mutatePrReviewStore(root, (next) => pauseWebReviewsForExpiredProfile(next, { reason: expired.message }));
+      setPrReviewLabels(root, managed.pullRequestNumber, {
+        add: [PR_REVIEW_LABELS.queued],
+        remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.failed],
+      });
+      safeLog(root, {
+        action: 'submit-web-chatgpt-full-review',
+        status: 'paused',
+        message: expired.message,
+        details: {
+          reviewJobId: job.id,
+          reviewRequestId: job.reviewRequestId,
+          headSha: job.headSha,
+          failActivePullRequests: false,
+        },
+      });
+      return { ...saved, profileSignInRequired: true, queuePaused: true };
+    }
     setPrReviewLabels(root, managed.pullRequestNumber, {
       add: [PR_REVIEW_LABELS.failed],
       remove: [PR_REVIEW_LABELS.reviewing],
     });
-    markReviewSubmissionFailed(root, job.id, error, error.diagnostics || {});
     safeLog(root, {
       level: 'error',
       action: 'submit-web-chatgpt-full-review',
