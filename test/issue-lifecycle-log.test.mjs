@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  DEFAULT_CONFIG,
   issueLifecycleFile,
   loadIssueLifecycle,
   removeRun,
+  saveConfig,
   saveRun,
 } from '../src/state.mjs';
 
@@ -25,6 +27,7 @@ function repository() {
   git(root, 'commit', '-m', 'initial');
   git(root, 'branch', '-M', 'main');
   git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  saveConfig(root, { ...DEFAULT_CONFIG, baseBranch: 'main' });
   return root;
 }
 
