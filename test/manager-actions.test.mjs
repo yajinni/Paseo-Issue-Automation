@@ -35,7 +35,10 @@ function fakeActions(calls) {
     skipIssue: (root, issue) => { calls.push(['skip', root, issue]); return { issue }; },
     unskipIssue: (root, issue) => { calls.push(['unskip', root, issue]); return { issue }; },
     abandonAttempt: (root, issue, reason) => { calls.push(['abandon', root, issue, reason]); return { issue }; },
-    restartCodingIssue: (root, issue, options) => { calls.push(['restart', root, issue, options]); return { issue }; },
+    queueCodingIssueRestart: (root, issue, options) => {
+      calls.push(['restart-queued', root, issue, options]);
+      return { queued: true, issueNumber: issue, phase: 'queued' };
+    },
   };
 }
 
@@ -77,16 +80,17 @@ test('manager configuration merges nested selections without dropping existing v
   assert.equal(saved[1], '/repo-b');
 });
 
-test('manager issue actions validate issue numbers and preserve branch choices', () => {
+test('manager issue actions validate issue numbers and queue restart without running it inline', () => {
   const calls = [];
   const actions = fakeActions(calls);
   managerRepositoryAction('/repo-c', '/api/start-issue', { issueNumber: 12, branchAction: 'delete' }, actions);
   managerRepositoryAction('/repo-c', '/api/skip-issue', { issueNumber: 12 }, actions);
   managerRepositoryAction('/repo-c', '/api/unskip-issue', { issueNumber: 12 }, actions);
-  managerRepositoryAction('/repo-c', '/api/restart-issue', { issueNumber: 12, branchAction: 'keep' }, actions);
+  const restart = managerRepositoryAction('/repo-c', '/api/restart-issue', { issueNumber: 12, branchAction: 'keep' }, actions);
   managerRepositoryAction('/repo-c', '/api/abandon-issue', { issueNumber: 12, reason: 'operator stop' }, actions);
   assert.ok(calls.some((entry) => entry[0] === 'start' && entry[3].branchAction === 'delete'));
-  assert.ok(calls.some((entry) => entry[0] === 'restart' && entry[3].branchAction === 'keep'));
+  assert.ok(calls.some((entry) => entry[0] === 'restart-queued' && entry[3].branchAction === 'keep'));
+  assert.equal(restart.queued, true);
   assert.ok(calls.some((entry) => entry[0] === 'abandon' && entry[3] === 'operator stop'));
   assert.throws(
     () => managerRepositoryAction('/repo-c', '/api/start-issue', { issueNumber: 0 }, actions),

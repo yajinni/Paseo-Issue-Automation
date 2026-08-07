@@ -84,6 +84,14 @@ function refreshedResult(context, options, result) {
   };
 }
 
+function lightweightAcceptedResult(result) {
+  return {
+    handled: true,
+    status: 202,
+    body: { result },
+  };
+}
+
 function installationResult(context, options, handler, dependencyKey) {
   const result = handler(context.repository, {
     workerManager: options.workerManager,
@@ -168,6 +176,7 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     const result = actionHandler(context.root, context.pathname, body, options.actions);
     if (result !== null) {
       if (context.pathname === '/api/config') options.workerManager?.refresh?.(context.repository);
+      if (context.pathname === '/api/restart-issue') return lightweightAcceptedResult(result);
       return refreshedResult(context, options, result);
     }
   }

@@ -6,8 +6,9 @@ import {
   unskipIssue,
   updateManagedDispatch,
 } from './attempts.mjs';
-import { dispatchSpecificCodingIssue, restartCodingIssue } from './coding-dispatch.mjs';
+import { dispatchSpecificCodingIssue } from './coding-dispatch.mjs';
 import { dispatchAvailableIssues } from './dispatch-batch.mjs';
+import { queueCodingIssueRestart } from './manager-restart.mjs';
 import { mergeRepositoryConfig } from './setup-wizard/schema.mjs';
 import { loadConfig, saveConfig } from './state.mjs';
 
@@ -19,7 +20,7 @@ const defaultActions = {
   unskipIssue,
   updateManagedDispatch,
   dispatchSpecificCodingIssue,
-  restartCodingIssue,
+  queueCodingIssueRestart,
   dispatchAvailableIssues,
   loadConfig,
   saveConfig,
@@ -55,7 +56,7 @@ export function managerRepositoryAction(root, pathname, body = {}, actions = def
     return actions.abandonAttempt(root, issueNumber(body), body.reason || 'Abandoned by user');
   }
   if (pathname === '/api/restart-issue') {
-    return actions.restartCodingIssue(root, issueNumber(body), {
+    return actions.queueCodingIssueRestart(root, issueNumber(body), {
       branchAction: body.branchAction || 'keep',
     });
   }
