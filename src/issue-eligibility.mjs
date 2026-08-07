@@ -1,5 +1,5 @@
+import { LEGACY_LABELS, PASEO_LABELS } from './label-catalog.mjs';
 import { validateIssueBody } from './issue-contract.mjs';
-import { PASEO_LABELS } from './label-catalog.mjs';
 import { evaluateIssueDependencies } from './dependencies.mjs';
 import { runJson } from './process.mjs';
 import { loadRun, saveRun } from './state.mjs';
@@ -14,18 +14,26 @@ function candidateFields() {
   return 'number,title,body,labels,state,stateReason,url,createdAt,blockedBy,blocking';
 }
 
-export function listIssueCandidates(root, config, { jsonRunner = runJson } = {}) {
-  const mode = config?.issueSelection?.mode || 'recommended-labels';
-  const args = ['issue', 'list', '--state', 'open', '--limit', '1000'];
-  if (mode === 'recommended-labels') args.push('--label', PASEO_LABELS.ready);
-  else if (mode !== 'all-open') throw new Error(`Unsupported issue selection mode: ${mode}.`);
-  args.push('--json', candidateFields());
-  const rich = jsonRunner('gh', args, { cwd: root, allowFailure: true });
+function listWithArgs(root, args, jsonRunner) {
+  const rich = jsonRunner('gh', [...args, '--json', candidateFields()], { cwd: root, allowFailure: true });
   if (Array.isArray(rich)) return rich;
-  const fallbackArgs = args.slice(0, -1).concat('number,title,body,labels,state,stateReason,url,createdAt');
-  const fallback = jsonRunner('gh', fallbackArgs, { cwd: root, allowFailure: true });
+  const fallback = jsonRunner('gh', [...args, '--json', 'number,title,body,labels,state,stateReason,url,createdAt'], { cwd: root, allowFailure: true });
   if (!Array.isArray(fallback)) throw new Error('Could not list open GitHub issues for deterministic eligibility evaluation.');
   return fallback;
+}
+
+export function listIssueCandidates(root, config, { jsonRunner = runJson } = {}) {
+  const mode = config?.issueSelection?.mode || 'recommended-labels';
+  const base = ['issue', 'list', '--state', 'open', '--limit', '1000'];
+  if (mode === 'all-open') return listWithArgs(root, base, jsonRunner);
+  if (mode !== 'recommended-labels') throw new Error(`Unsupported issue selection mode: ${mode}.`);
+
+  // New installations use paseo:ready. Until the dedicated migration PR removes
+  // legacy compatibility, also consume agent-ready without requiring repositories
+  // to be migrated mid-rollout.
+  const current = listWithArgs(root, [...base, '--label', PASEO_LABELS.ready], jsonRunner);
+  const legacy = listWithArgs(root, [...base, '--label', LEGACY_LABELS.ready], jsonRunner);
+  return [...new Map([...current, ...legacy].map((issue) => [Number(issue.number), issue])).values()];
 }
 
 export function issueAlreadyClaimed(root, issue, { runLoader = loadRun } = {}) {
@@ -45,7 +53,9 @@ export function baseIssueEligibility(root, issue, config, options = {}) {
   const excluded = new Set((config?.issueSelection?.excludedLabels || []).map(String));
   const matchedExcluded = [...labels].filter((label) => excluded.has(label));
   if (matchedExcluded.length) return { ok: false, kind: 'excluded-label', reason: `Issue #${number} has excluded label ${matchedExcluded[0]}.` };
-  if ((config?.issueSelection?.mode || 'recommended-labels') === 'recommended-labels' && !labels.has(PASEO_LABELS.ready)) {
+  if ((config?.issueSelection?.mode || 'recommended-labels') === 'recommended-labels'
+    && !labels.has(PASEO_LABELS.ready)
+    && !labels.has(LEGACY_LABELS.ready)) {
     return { ok: false, kind: 'not-ready', reason: `Issue #${number} is not labeled ${PASEO_LABELS.ready}.` };
   }
   const contract = (options.validateBody || validateIssueBody)(issue?.body || '');
