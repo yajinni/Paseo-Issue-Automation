@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { PR_REVIEW_LABELS } from './label-catalog.mjs';
 import { atomicWrite, statePaths } from './state.mjs';
 import {
   DEFAULT_REVIEW_PROMPT_TEMPLATE,
@@ -17,13 +18,7 @@ import {
   validateReviewPromptTemplate,
 } from './review-prompt.mjs';
 
-export const PR_REVIEW_LABELS = Object.freeze({
-  queued: 'paseo:review-queued',
-  reviewing: 'paseo:reviewing',
-  changesRequested: 'paseo:changes-requested',
-  fixing: 'paseo:fixing',
-  failed: 'paseo:review-failed',
-});
+export { PR_REVIEW_LABELS };
 
 export const MANAGED_PR_STATES = Object.freeze([
   'queued',
