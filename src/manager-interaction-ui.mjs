@@ -185,7 +185,7 @@ export const MANAGER_INTERACTION_SCRIPT = String.raw`
     if (!approved) return;
     pendingButton = button;
     try { await window.postRepositoryAction(config.action); }
-    catch (error) { if (typeof showError === 'function') showError(error); toast('error', 'Action failed', error.message || String(error)); }
+    catch (error) { if (typeof showError === 'function') showError(error); }
     finally { pendingButton = null; }
   }
 
@@ -212,7 +212,7 @@ export const MANAGER_INTERACTION_SCRIPT = String.raw`
     }
     pendingButton = button;
     try { await window.postRepositoryAction(action, payload); }
-    catch (error) { if (typeof showError === 'function') showError(error); toast('error', 'Issue action failed', error.message || String(error)); }
+    catch (error) { if (typeof showError === 'function') showError(error); }
     finally { pendingButton = null; }
   }
 
