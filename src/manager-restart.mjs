@@ -36,14 +36,26 @@ export function queueCodingIssueRestart(root, number, {
   }
 
   const queuedAt = now();
+  const recoverFirst = branchAction === 'keep';
   const queuedState = {
     ...state,
     phase: 'queued',
     restartPending: true,
     restartRequestedAt: queuedAt,
-    reason: 'Fresh restart queued. Cleanup and the new coding attempt will continue in the background.',
+    restartPreviousPhase: state.phase || null,
+    restartPreviousReason: state.reason || null,
+    reason: recoverFirst
+      ? 'Recover-first restart queued. Existing work will be reused when it can be verified safely; otherwise a fresh attempt will start.'
+      : 'Fresh restart queued with branch deletion.',
     updatedAt: queuedAt,
-    activity: withActivity(state, 'restart-queued', 'Fresh restart requested from the manager.', queuedAt),
+    activity: withActivity(
+      state,
+      'restart-queued',
+      recoverFirst
+        ? 'Recover-first restart requested from the manager.'
+        : 'Explicit fresh restart with branch deletion requested from the manager.',
+      queuedAt,
+    ),
   };
   writeRun(root, issueNumber, queuedState);
 
@@ -74,6 +86,8 @@ export function queueCodingIssueRestart(root, number, {
     issueNumber,
     branchAction,
     phase: 'queued',
-    message: `Issue #${issueNumber} restart queued. A fresh attempt will start in the background.`,
+    message: recoverFirst
+      ? `Issue #${issueNumber} restart queued. Paseo will recover the existing failed attempt first and create a fresh attempt only if reuse is unsafe or already exhausted.`
+      : `Issue #${issueNumber} fresh restart queued with branch deletion.`,
   };
 }

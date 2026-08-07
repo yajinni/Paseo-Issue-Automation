@@ -35,6 +35,14 @@ test('each queue item exposes existing issue actions without introducing new act
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /skippedIssueNumbers/);
 });
 
+test('failed work is presented as recover-first rather than an unconditional fresh restart', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /actionButton\('Recover', 'restart-issue'/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Recover existing work first \(recommended\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Start fresh and delete old branch/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /using its existing branch, workspace, and coder/);
+  assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /Restart issue #' \+ item\.issueNumber \+ ' with a fresh attempt/);
+});
+
 test('detail drawer shows exact review identity and recorded timeline', () => {
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Review identity/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /review\.headSha/);

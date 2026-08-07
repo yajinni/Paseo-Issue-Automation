@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { queueCodingIssueRestart } from '../src/manager-restart.mjs';
 
-test('manager restart records a queued state and detaches slow restart work', () => {
+test('manager restart records a recover-first queued state and detaches slow restart work', () => {
   const writes = [];
   const spawns = [];
   let unrefCalled = false;
@@ -11,6 +11,7 @@ test('manager restart records a queued state and detaches slow restart work', ()
     issueTitle: 'Reconcile accepted OpenSpec and rewrite status',
     status: 'paseo:failed',
     phase: 'failed',
+    reason: 'Completion evidence was missing.',
     workspaceId: 'ws-old',
     attempt: 2,
     activity: [],
@@ -32,7 +33,10 @@ test('manager restart records a queued state and detaches slow restart work', ()
   assert.equal(writes.length, 1);
   assert.equal(writes[0].phase, 'queued');
   assert.equal(writes[0].restartPending, true);
-  assert.match(writes[0].reason, /continue in the background/);
+  assert.equal(writes[0].restartPreviousPhase, 'failed');
+  assert.equal(writes[0].restartPreviousReason, 'Completion evidence was missing.');
+  assert.match(writes[0].reason, /Recover-first restart queued/);
+  assert.match(result.message, /recover the existing failed attempt first/i);
   assert.equal(spawns.length, 1);
   assert.equal(spawns[0].command, '/node');
   assert.deepEqual(spawns[0].args, ['/restart-worker.mjs', '/repo', '274', 'keep']);
