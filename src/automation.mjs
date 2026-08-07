@@ -3,6 +3,8 @@ import {
   sectionContent,
   validateIssueBody,
 } from './issue-contract.mjs';
+import { issueFailureRetryDecision } from './issue-failure-policy.mjs';
+import { PASEO_LABELS } from './label-catalog.mjs';
 import { run, runJson } from './process.mjs';
 import { LABELS, loadConfig, loadRun, loadRuntime, saveRun, saveRuntime } from './state.mjs';
 
@@ -165,6 +167,74 @@ export function markHumanReview(root, issueNumber, prNumber) {
 
 export function terminalState(root, issueNumber, status, reason) {
   const state = requireRun(root, issueNumber);
+  if (status === 'failed') {
+    const retry = issueFailureRetryDecision({ message: String(reason || '') }, loadConfig(root), state);
+    if (retry.transient && retry.retry) {
+      const at = new Date().toISOString();
+      const saved = saveRun(root, issueNumber, {
+        ...state,
+        status: LABELS.running,
+        phase: 'retry-pending',
+        reason: retry.reason,
+        failureType: retry.type,
+        temporaryFailureCount: retry.attempt,
+        temporaryFailureMaximum: retry.maximum,
+        controllerPid: null,
+        completedAt: null,
+        updatedAt: at,
+        activity: [
+          ...(state.activity || []),
+          {
+            type: 'temporary-failure-retry-scheduled',
+            at,
+            details: `${retry.type} failure; retry ${retry.attempt}/${retry.maximum} will run on a later scheduler turn. ${retry.reason}`,
+          },
+        ],
+      });
+      safeIssueLog(root, {
+        level: 'warn',
+        action: 'issue-temporary-failure-retry-scheduled',
+        status: 'waiting',
+        message: `Issue #${Number(issueNumber)} scheduled temporary-failure retry ${retry.attempt}/${retry.maximum}.`,
+        details: { issueNumber: Number(issueNumber), failureType: retry.type, reason: retry.reason },
+      });
+      return saved;
+    }
+    if (retry.transient && retry.exhausted) {
+      editLabels(root, issueNumber, {
+        add: [PASEO_LABELS.failed, PASEO_LABELS.needsAttention],
+        remove: [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview, PASEO_LABELS.ready],
+      });
+      const exhaustedReason = `Temporary ${retry.type} failure exhausted ${retry.maximum} configured retries: ${retry.reason}`;
+      run('gh', ['issue', 'comment', String(issueNumber), '--body', `Automation failed and needs attention: ${exhaustedReason}`], { cwd: root });
+      const at = new Date().toISOString();
+      const saved = saveRun(root, issueNumber, {
+        ...state,
+        status: PASEO_LABELS.failed,
+        phase: 'failed',
+        reason: exhaustedReason,
+        failureType: retry.type,
+        temporaryFailureCount: retry.attempt,
+        temporaryFailureMaximum: retry.maximum,
+        controllerPid: null,
+        completedAt: at,
+        updatedAt: at,
+        activity: [
+          ...(state.activity || []),
+          { type: 'temporary-failure-retries-exhausted', at, details: exhaustedReason },
+        ],
+      });
+      safeIssueLog(root, {
+        level: 'error',
+        action: 'issue-temporary-failure-retries-exhausted',
+        status: 'failed',
+        message: `Issue #${Number(issueNumber)} exhausted temporary-failure retries and needs attention.`,
+        details: { issueNumber: Number(issueNumber), failureType: retry.type, reason: exhaustedReason },
+      });
+      return saved;
+    }
+  }
+
   const label = status === 'blocked' ? LABELS.blocked : LABELS.failed;
   editLabels(root, issueNumber, {
     add: [label],
