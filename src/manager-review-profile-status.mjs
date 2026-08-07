@@ -1,21 +1,4 @@
-import { loadSetupSessionStore } from './setup-wizard/store.mjs';
-
-function repositoryName(session = {}) {
-  const selected = String(session.pages?.repository?.selections?.repository || '').trim();
-  if (selected) return selected;
-  const owner = String(session.repository?.owner || '').trim();
-  const name = String(session.repository?.name || '').trim();
-  return owner && name ? `${owner}/${name}` : null;
-}
-
-function matchingSession(repository, options = {}) {
-  if (!options.rootDir) return null;
-  let store;
-  try { store = loadSetupSessionStore(options); }
-  catch { return null; }
-  const sessions = [store.activeSession, ...(store.completedSessions || []).slice().reverse()].filter(Boolean);
-  return sessions.find((session) => repositoryName(session) === repository) || null;
-}
+import { chatGptProfilePrerequisites } from './chatgpt-profile-readiness.mjs';
 
 export function managerReviewProfileStatus(repository, config = {}, options = {}) {
   const required = config.review?.workflow === 'quick-web-chatgpt';
@@ -32,43 +15,29 @@ export function managerReviewProfileStatus(repository, config = {}, options = {}
     passwordStored: false,
   };
 
-  const nameWithOwner = String(repository || '').trim();
-  const session = matchingSession(nameWithOwner, options);
-  if (!session) return {
-    required: true,
-    known: false,
-    ready: false,
-    repositoryMatches: false,
-    conversationUrlConfigured: false,
-    checkedAt: null,
-    summary: 'No saved ChatGPT Profile verification was found for this repository. Open Review setup to verify it.',
-    blockers: [],
-    setupPath: '/setup/review',
-    passwordStored: false,
-  };
+  const prerequisites = (options.prerequisiteStatus || chatGptProfilePrerequisites)();
+  const playwrightReady = prerequisites.libraryInstalled === true;
+  const chromiumReady = prerequisites.chromiumInstalled === true;
+  const conversationUrlConfigured = Boolean(String(prerequisites.conversationUrl || '').trim());
+  const blockers = [];
+  if (!playwrightReady) blockers.push({ code: 'playwright-required', message: 'Install Playwright for Web ChatGPT full review.', recoveryAction: 'Install Playwright' });
+  if (!chromiumReady) blockers.push({ code: 'chromium-required', message: 'Install Chromium for Web ChatGPT full review.', recoveryAction: 'Install Chromium' });
+  if (!conversationUrlConfigured) blockers.push({ code: 'review-chat-required', message: 'Save a PR review chat URL for Web ChatGPT full review.', recoveryAction: 'Configure PR review chat' });
+  const ready = blockers.length === 0;
 
-  const page = session.pages?.review || {};
-  const selection = page.selections || {};
-  const check = page.lastCheck || null;
-  const workflowMatches = selection.workflow === 'quick-web-chatgpt';
-  const conversationUrlConfigured = Boolean(String(selection.conversationUrl || '').trim());
-  const ready = workflowMatches && conversationUrlConfigured && check?.ok === true;
   return {
     required: true,
     known: true,
     ready,
     repositoryMatches: true,
     conversationUrlConfigured,
-    checkedAt: check?.checkedAt || page.updatedAt || null,
+    checkedAt: null,
     summary: ready
-      ? (check?.summary || 'The saved ChatGPT Profile verification passed for this repository.')
-      : (check?.summary || 'ChatGPT Profile needs to be verified for this repository.'),
-    blockers: Array.isArray(check?.blockers) ? check.blockers.map((blocker) => ({
-      code: blocker.code,
-      message: blocker.message,
-      recoveryAction: blocker.recoveryAction || null,
-    })) : [],
+      ? 'ChatGPT Profile prerequisites and PR review chat are configured.'
+      : blockers[0].message,
+    blockers,
     setupPath: '/setup/review',
     passwordStored: false,
+    repository: repository || null,
   };
 }

@@ -21,21 +21,38 @@ test('configuration tabs mirror the simplified setup walkthrough', () => {
   }
 });
 
+test('configuration tab content is explicitly hidden when it does not belong to the active tab', () => {
+  assert.match(MANAGER_CONFIGURATION_TABS_STYLE, /\[data-config-step\]\[hidden\].*display:none!important/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /function setElementHidden\(element, hidden\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /style\.setProperty\('display', 'none', 'important'\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /setElementHidden\(element, element\.dataset\.configStep !== step\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /configConditionalHidden/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /paseo:configuration-tab/);
+});
+
+test('review workflow changes immediately re-evaluate conditional Review setup content', () => {
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /getElementById\('review-workflow'\).*addEventListener\('change'/s);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /queueMicrotask\(\(\) => showStep\(activeStep\)\)/);
+});
+
+test('configuration groups map to the setup tab that owns them', () => {
+  for (const mapping of [
+    "['Coder model', 'harness']",
+    "['Review model', 'harness']",
+    "['Provider/Coding Harness', 'harness']",
+    "['GitHub repository', 'repository']",
+    "['Issue processing', 'issues']",
+    "['Review workflow', 'review']",
+    "['ChatGPT Profile', 'review']",
+  ]) assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, new RegExp(mapping.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
 test('integration and maintenance become configuration content instead of sidebar destinations', () => {
   assert.match(MANAGER_CONFIGURATION_TABS_STYLE, /data-manager-view-target=\"integration\"/);
   assert.match(MANAGER_CONFIGURATION_TABS_STYLE, /data-manager-view-target=\"maintenance\"/);
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /moveViewCards\(integration, configuration, 'repository'\)/);
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /moveViewCards\(maintenance, configuration, 'readiness'\)/);
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /Open Configuration/);
-});
-
-test('configuration fields are grouped under their matching setup tabs without cloning inputs', () => {
-  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /\['Provider\/Coding Harness', 'harness'\]/);
-  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /\['Review model', 'harness'\]/);
-  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /\['Runtime', 'repository'\]/);
-  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /\['Issue processing', 'issues'\]/);
-  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /\['Review workflow', 'review'\]/);
-  assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_SCRIPT, /cloneNode/);
 });
 
 test('configuration tab enhancer preserves the existing manager markup and injects assets', () => {

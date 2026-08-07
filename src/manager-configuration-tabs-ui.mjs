@@ -8,6 +8,7 @@ export const MANAGER_CONFIGURATION_TABS_STYLE = String.raw`
 .manager-config-step-link{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .manager-config-step-link h2{margin-bottom:5px}.manager-config-step-link p{margin:0;color:var(--paseo-muted);line-height:1.45}
 .manager-config-step-link .paseo-action{flex:0 0 auto}
+[data-config-step][hidden],[data-config-step-group][hidden],[data-manager-config-edit-card][hidden]{display:none!important}
 [data-manager-view-target="integration"],[data-manager-view-target="maintenance"]{display:none!important}
 @media(max-width:720px){.manager-config-step-link{display:block}.manager-config-step-link .paseo-action{display:inline-flex;margin-top:12px}.manager-config-tabs{margin-inline:-2px}}
 `;
@@ -23,11 +24,13 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     ['readiness', 'Final readiness', '/setup/readiness', 'Review health, managed installation state, repair, removal, and recovery controls.'],
   ];
   const GROUP_STEP = new Map([
-    ['Provider/Coding Harness', 'harness'],
+    ['Coder model', 'harness'],
     ['Review model', 'harness'],
-    ['Runtime', 'repository'],
+    ['Provider/Coding Harness', 'harness'],
+    ['GitHub repository', 'repository'],
     ['Issue processing', 'issues'],
     ['Review workflow', 'review'],
+    ['ChatGPT Profile', 'review'],
   ]);
   let built = false;
   let activeStep = localStorage.getItem('paseo-manager-config-tab') || 'paseo';
@@ -76,6 +79,13 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     heading.textContent = labels[step] || 'Repository configuration';
   }
 
+  function setElementHidden(element, hidden) {
+    if (!element) return;
+    element.hidden = hidden;
+    if (hidden) element.style.setProperty('display', 'none', 'important');
+    else element.style.removeProperty('display');
+  }
+
   function showStep(step, { focus = false } = {}) {
     if (!STEPS.some(([id]) => id === step)) step = 'paseo';
     activeStep = step;
@@ -85,16 +95,22 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
       button.setAttribute('aria-selected', selected ? 'true' : 'false');
       button.tabIndex = selected ? 0 : -1;
     }
-    for (const element of document.querySelectorAll('[data-config-step]')) element.hidden = element.dataset.configStep !== step;
+    for (const element of document.querySelectorAll('[data-config-step]')) {
+      setElementHidden(element, element.dataset.configStep !== step);
+    }
 
     const configCard = document.querySelector('[data-manager-config-edit-card]');
     const groups = [...(configCard?.querySelectorAll('[data-config-step-group]') || [])];
     const editable = groups.some((group) => group.dataset.configStepGroup === step);
     if (configCard) {
-      configCard.hidden = !editable;
+      setElementHidden(configCard, !editable);
       setConfigCardTitle(configCard, step);
-      for (const group of groups) group.hidden = group.dataset.configStepGroup !== step;
+      for (const group of groups) {
+        const conditionalHidden = group.dataset.configConditionalHidden === 'true';
+        setElementHidden(group, group.dataset.configStepGroup !== step || conditionalHidden);
+      }
     }
+    document.dispatchEvent(new CustomEvent('paseo:configuration-tab', { detail: { step } }));
     if (focus) document.querySelector('.manager-config-tab[aria-selected="true"]')?.focus();
   }
 
@@ -146,9 +162,12 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     }
     configuration.prepend(tabs);
 
+    let insertionPoint = tabs;
     for (const [id] of STEPS) {
       const linkCard = setupLinkCard(id);
-      if (linkCard) tabs.after(linkCard);
+      if (!linkCard) continue;
+      insertionPoint.after(linkCard);
+      insertionPoint = linkCard;
     }
 
     moveViewCards(integration, configuration, 'repository');
@@ -156,6 +175,10 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     patchOverview();
     showStep(activeStep);
     redirectLegacyViews();
+
+    document.getElementById('review-workflow')?.addEventListener('change', () => {
+      queueMicrotask(() => showStep(activeStep));
+    });
 
     const title = document.getElementById('manager-view-title');
     const description = document.getElementById('manager-view-description');
