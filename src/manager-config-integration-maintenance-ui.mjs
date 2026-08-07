@@ -7,6 +7,7 @@ export const MANAGER_CONFIG_INTEGRATION_STYLE = String.raw`
 .manager-config-group[hidden],.manager-config-fields [hidden]{display:none!important}
 .manager-config-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.manager-config-fields label{display:grid;gap:5px;color:var(--paseo-muted)}
 .manager-config-inline-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}.manager-config-inline-status{color:var(--paseo-muted);font-size:13px;line-height:1.4}.manager-config-inline-status.error{color:#ffaca5}
+.manager-paseo-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.manager-paseo-fields label{display:grid;gap:6px;color:var(--paseo-muted)}.manager-paseo-status{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin-top:14px}.manager-paseo-status div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #263143;padding:8px 0}.manager-paseo-status span{color:var(--paseo-muted)}.manager-paseo-status strong{text-align:right;overflow-wrap:anywhere}.manager-paseo-ok{color:#65c987}.manager-paseo-bad{color:#ffaca5}
 .manager-profile-checks{display:grid;gap:8px;margin:12px 0}.manager-profile-check{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid #253042}.manager-profile-check:last-child{border-bottom:0}.manager-profile-check-dot{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;border:1px solid #526074;font-size:11px}.manager-profile-check.ok .manager-profile-check-dot{background:#24633d;border-color:#2f8d55}.manager-profile-check.bad .manager-profile-check-dot{background:#5f302d;border-color:#98514b}.manager-profile-check-copy small{display:block;color:var(--paseo-muted);margin-top:2px}.manager-chat-url-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;margin-top:12px}.manager-chat-url-row label{display:grid;gap:6px;color:var(--paseo-muted)}.manager-chat-saved{color:#65c987;font-weight:700}
 .manager-config-savebar{position:sticky;bottom:12px;z-index:25;margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #39485e;border-radius:11px;padding:10px 12px;background:#101720eF;backdrop-filter:blur(8px)}
 .manager-config-savebar.clean{opacity:.8}.manager-config-savebar.dirty{border-color:#66572f;background:#211d12f2}.manager-config-save-copy{font-size:13px;color:var(--paseo-muted)}.manager-config-savebar.dirty .manager-config-save-copy{color:#e2cf91}
@@ -16,12 +17,13 @@ export const MANAGER_CONFIG_INTEGRATION_STYLE = String.raw`
 .manager-context-note{margin-top:12px;padding:10px 12px;border:1px solid #334156;border-radius:9px;background:#111a26;color:var(--paseo-muted);line-height:1.45}
 .manager-detail-disclosure{margin:0!important}.manager-detail-disclosure>summary{cursor:pointer;font-weight:650;color:#dce8fb}.manager-detail-disclosure-body{display:grid;gap:12px;margin-top:12px}.manager-detail-disclosure-body>.card{margin:0!important}
 .manager-maintenance-summary-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-@media(max-width:760px){.manager-config-groups,.manager-context-grid,.manager-config-fields,.manager-context-summary{grid-template-columns:1fr}.manager-config-group.wide,.manager-context-grid>.wide{grid-column:auto}.manager-config-savebar{position:static;display:block}.manager-config-save-actions{margin-top:10px}.manager-profile-check{grid-template-columns:22px minmax(0,1fr)}.manager-profile-check button{grid-column:2}.manager-chat-url-row{grid-template-columns:1fr}.manager-chat-saved{justify-self:start}}
+@media(max-width:760px){.manager-config-groups,.manager-context-grid,.manager-config-fields,.manager-context-summary,.manager-paseo-fields,.manager-paseo-status{grid-template-columns:1fr}.manager-config-group.wide,.manager-context-grid>.wide{grid-column:auto}.manager-config-savebar{position:static;display:block}.manager-config-save-actions{margin-top:10px}.manager-profile-check{grid-template-columns:22px minmax(0,1fr)}.manager-profile-check button{grid-column:2}.manager-chat-url-row{grid-template-columns:1fr}.manager-chat-saved{justify-self:start}}
 `;
 
 export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
 (function managerConfigIntegrationMaintenance() {
   const CONFIG_GROUPS = [
+    ['Paseo connection', 'Connect this repository to the Paseo daemon used for coding and review work.', []],
     ['Coder model', 'Coding model and thinking level used for issue implementation.', ['coder-model', 'coder-thinking']],
     ['Review model', 'Reviewer model and thinking level. Workflow behavior is configured separately.', ['reviewer-model', 'reviewer-thinking']],
     ['Provider/Coding Harness', 'Choose from the coding harnesses currently reported by Paseo.', ['coding-harness']],
@@ -37,6 +39,8 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
   };
   let built = false;
   let baseline = null;
+  let paseoState = null;
+  let paseoLoading = false;
   let harnessCatalog = null;
   let harnessLoading = false;
   let chatGptState = null;
@@ -150,6 +154,76 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     discard.disabled = !dirty;
   }
 
+  function paseoSummaryRow(target, label, value) {
+    const row = document.createElement('div');
+    const name = document.createElement('span'); name.textContent = label;
+    const result = document.createElement('strong'); result.textContent = value == null || value === '' ? 'Unknown' : String(value);
+    row.append(name, result); target.append(row);
+  }
+
+  function renderPaseoConnection(errorMessage = null) {
+    const target = document.getElementById('manager-paseo-connection');
+    if (!target) return;
+    const existingHost = document.getElementById('manager-paseo-host')?.value || paseoState?.host || '';
+    target.textContent = '';
+    const fields = document.createElement('div'); fields.className = 'manager-paseo-fields';
+    const hostLabel = document.createElement('label'); hostLabel.textContent = 'Paseo host';
+    const host = document.createElement('input'); host.id = 'manager-paseo-host'; host.type = 'text'; host.placeholder = '127.0.0.1:6767'; host.value = existingHost; host.dataset.managerTransient = 'true'; hostLabel.append(host);
+    const passwordLabel = document.createElement('label'); passwordLabel.textContent = 'Paseo password (only if configured)';
+    const password = document.createElement('input'); password.id = 'manager-paseo-password'; password.type = 'password'; password.autocomplete = 'off'; password.dataset.managerTransient = 'true'; passwordLabel.append(password);
+    fields.append(hostLabel, passwordLabel); target.append(fields);
+
+    const actions = document.createElement('div'); actions.className = 'manager-config-inline-actions';
+    const connect = document.createElement('button'); connect.type = 'button'; connect.className = 'primary'; connect.id = 'manager-connect-paseo'; connect.textContent = 'Connect & check'; connect.disabled = paseoLoading;
+    const recheck = document.createElement('button'); recheck.type = 'button'; recheck.className = 'secondary'; recheck.id = 'manager-recheck-paseo'; recheck.textContent = 'Check again'; recheck.disabled = paseoLoading;
+    const state = document.createElement('span'); state.className = 'manager-config-inline-status ' + (errorMessage || paseoState && !paseoState.ok ? 'error' : '');
+    state.textContent = errorMessage || (paseoLoading ? 'Checking Paseo…' : paseoState?.ok ? 'Paseo connection is ready.' : paseoState?.diagnostic || 'Paseo has not been checked yet.');
+    actions.append(connect, recheck, state); target.append(actions);
+
+    if (paseoState) {
+      const summary = document.createElement('div'); summary.className = 'manager-paseo-status';
+      paseoSummaryRow(summary, 'Connection', paseoState.ok ? 'Ready' : 'Needs attention');
+      paseoSummaryRow(summary, 'Source', paseoState.source || 'Unknown');
+      paseoSummaryRow(summary, 'CLI', paseoState.cli?.path || paseoState.cli?.resolvedCommand || (paseoState.cli?.ok ? 'Available' : 'Unavailable'));
+      paseoSummaryRow(summary, 'Daemon', paseoState.daemon?.reachable ? (paseoState.daemon?.version || 'Reachable') : 'Not reachable');
+      paseoSummaryRow(summary, 'Authentication', paseoState.authentication?.required ? (paseoState.authentication?.ok ? 'Accepted' : 'Required') : 'Not required');
+      paseoSummaryRow(summary, 'Compatibility', paseoState.compatibility?.ok ? 'Compatible' : paseoState.compatibility?.reason || 'Not verified');
+      target.append(summary);
+    }
+    connect.addEventListener('click', connectPaseo);
+    recheck.addEventListener('click', () => loadPaseoConnection(true));
+  }
+
+  async function loadPaseoConnection(force = false) {
+    if (paseoLoading || paseoState && !force) { renderPaseoConnection(); return; }
+    paseoLoading = true; renderPaseoConnection();
+    try {
+      const body = await jsonRequest(selectedPath('configuration/paseo-connection'));
+      paseoState = body.status || null;
+      if (paseoState?.ok) harnessCatalog = null;
+      renderPaseoConnection();
+    } catch (error) {
+      renderPaseoConnection(error.message || String(error));
+    } finally { paseoLoading = false; renderPaseoConnection(); }
+  }
+
+  async function connectPaseo() {
+    if (paseoLoading) return;
+    const host = String(document.getElementById('manager-paseo-host')?.value || '').trim();
+    const password = String(document.getElementById('manager-paseo-password')?.value || '');
+    paseoLoading = true; renderPaseoConnection();
+    try {
+      const body = await jsonRequest(selectedPath('configuration/paseo-connection/connect'), {
+        method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ host, password, remember: true }),
+      });
+      paseoState = body.status || null;
+      harnessCatalog = null;
+      renderPaseoConnection();
+    } catch (error) {
+      renderPaseoConnection(error.message || String(error));
+    } finally { paseoLoading = false; renderPaseoConnection(); }
+  }
+
   function ensureHarnessSelect() {
     const existing = document.getElementById('coding-harness');
     if (!existing || existing.tagName === 'SELECT') return existing;
@@ -218,6 +292,12 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     const status = document.createElement('span'); status.id = 'manager-harness-status'; status.className = 'manager-config-inline-status'; status.textContent = 'Open this tab to check the coding harnesses Paseo currently provides.';
     refresh.addEventListener('click', () => loadHarnessCatalog(true));
     actions.append(refresh, status); group.append(actions);
+  }
+
+  function addPaseoTools(group) {
+    group.dataset.configStepGroup = 'paseo';
+    const target = document.createElement('div'); target.id = 'manager-paseo-connection'; group.append(target);
+    renderPaseoConnection();
   }
 
   function profileCheck(target, label, ready, buttonText, buttonId, disabled = false) {
@@ -317,7 +397,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     const groups = document.createElement('div'); groups.className = 'manager-config-groups';
     for (const [title, description, ids] of CONFIG_GROUPS) {
       const group = document.createElement('section'); group.className = 'manager-config-group';
-      if (['Provider/Coding Harness', 'Review workflow', 'ChatGPT Profile', 'GitHub repository'].includes(title)) group.classList.add('wide');
+      if (['Paseo connection', 'Provider/Coding Harness', 'Review workflow', 'ChatGPT Profile', 'GitHub repository'].includes(title)) group.classList.add('wide');
       const h3 = document.createElement('h3'); h3.textContent = title;
       const copy = document.createElement('p'); copy.textContent = description;
       const fields = document.createElement('div'); fields.className = 'manager-config-fields';
@@ -331,6 +411,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
       }
       group.append(h3, copy);
       if (ids.length || title === 'Review workflow') group.append(fields);
+      if (title === 'Paseo connection') addPaseoTools(group);
       if (title === 'Provider/Coding Harness') addHarnessTools(group);
       if (title === 'ChatGPT Profile') {
         group.dataset.configConditionalHidden = 'true';
@@ -430,17 +511,26 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     renderMaintenance(data);
   }
 
+  function removeSetupLinkCards() {
+    for (const card of document.querySelectorAll('.manager-config-step-link')) card.remove();
+  }
+
   function build() {
     if (built) return;
     if (!document.querySelector('[data-manager-view="configuration"]')) return;
     built = true;
     buildConfiguration(); buildIntegration(); buildMaintenance();
+    removeSetupLinkCards();
     baseline = snapshotConfigForm(); renderDirtyState();
     try { if (typeof currentStatus !== 'undefined' && currentStatus) render(currentStatus); } catch {}
   }
 
   document.addEventListener('paseo:configuration-tab', (event) => {
+    removeSetupLinkCards();
     const step = event.detail?.step;
+    const savebar = document.getElementById('manager-config-savebar');
+    if (savebar) savebar.style.display = step === 'paseo' ? 'none' : '';
+    if (step === 'paseo') loadPaseoConnection();
     if (step === 'harness') loadHarnessCatalog();
     if (step === 'review' && document.getElementById('review-workflow')?.value === 'quick-web-chatgpt') loadChatGptProfile();
   });
