@@ -33,8 +33,8 @@ Protocol:
 2. Follow the repository's own coding instructions. Do not assume a particular instruction filename.
 3. Implement only the approved issue scope. Block instead of guessing when the issue has a material contradiction, missing required decision, unsafe ambiguity, or a semantic integration conflict.
 4. Perform every validation and check required by the issue. The issue author owns selecting those checks; do not weaken or silently omit them.
-5. Commit all intended changes, push the exact branch head, and create or update a draft pull request from ${branch} into ${config.baseBranch}. Include Closes #${issue.number}, changed areas, validation evidence, and unresolved concerns. Do not finish with uncommitted worktree changes.
-6. The Issue Execution Controller owns the internal validation-summary bookkeeping after it verifies a clean worktree and exact PR-head alignment. Do not call Paseo's hooks command and do not search for or invent another validation-summary API.
+5. Commit all intended changes and push the exact branch head. If a draft pull request already exists from ${branch} into ${config.baseBranch}, update it with Closes #${issue.number}, changed areas, validation evidence, and unresolved concerns. If no PR exists yet, the controller will create the draft after it verifies a clean worktree and exact pushed head. Do not finish with uncommitted worktree changes.
+6. The Issue Execution Controller owns ensuring a missing draft PR exists and owns the internal validation-summary bookkeeping after it verifies the clean exact pushed head. Do not call Paseo's hooks command and do not search for or invent another validation-summary API.
 7. Send a heartbeat at phase transitions:
    ${cli} heartbeat --issue ${issue.number} --phase <phase>
 8. If blocked, record the terminal state and make sure this command succeeds before ending:
@@ -66,11 +66,11 @@ Do not restart the implementation or broaden scope. Repair the existing branch $
 1. Inspect the current worktree and preserve completed work.
 2. Commit every intended in-scope change so the worktree is clean. Do not discard completed work merely to make the worktree clean.
 3. Push the exact current branch head.
-4. Ensure there is an open draft pull request from ${branch} into ${baseBranch}. Create or update it if necessary.
-5. Run or rerun every validation/check required by the issue against the exact current PR HEAD. Never claim a check passed unless it actually passed.
-6. Finish only after the worktree is clean and the pushed PR head exactly matches local HEAD.
+4. If a draft pull request from ${branch} into ${baseBranch} already exists, update its substantive completion evidence. If no PR exists, do not spend time creating one; the controller will create the draft mechanically after it verifies the pushed exact head.
+5. Run or rerun every validation/check required by the issue against the exact current branch head. Never claim a check passed unless it actually passed.
+6. Finish only after the worktree is clean and the pushed branch head exactly matches local HEAD.
 
-The controller owns its internal validation-summary record after those conditions are met. Do NOT call \`paseo hooks\`, \`$env:PASEO_CLI hooks\`, or any other validation-summary hook/API. Those are not the controller's completion record.
+The controller owns missing-PR creation and its internal validation-summary record after those conditions are met. Do NOT call \`paseo hooks\`, \`$env:PASEO_CLI hooks\`, or any other validation-summary hook/API. Those are not the controller's completion record.
 
 If required validation cannot pass, fix ordinary in-scope failures and revalidate; if genuinely blocked, use the controller block command from the original protocol.`;
 }
