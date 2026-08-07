@@ -54,11 +54,15 @@ test('ChatGPT Profile shows real Playwright and Chromium prerequisite checks wit
   assert.match(REVIEW_PAGE_SCRIPT, /review\/chromium\/install/);
 });
 
-test('ChatGPT Profile login is disabled until Playwright and Chromium are both ready', () => {
+test('ChatGPT Profile login is enabled by browser prerequisites and no longer requires a recheck', () => {
   assert.match(REVIEW_PAGE_SCRIPT, /const browserReady = playwrightReady && chromiumReady/);
+  assert.match(REVIEW_PAGE_SCRIPT, /const missing = !browserReady \|\| !conversation/);
   assert.match(REVIEW_PAGE_SCRIPT, /Log into ChatGPT Profile/);
   assert.match(REVIEW_PAGE_SCRIPT, /browserReady \? '' : 'disabled'/);
   assert.match(REVIEW_PAGE_SCRIPT, /never asks for or stores your ChatGPT password/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /then Recheck/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /id="review-profile-recheck"/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, />Recheck<\/button>/);
 });
 
 test('PR review chat URL is last in the profile card, auto-saves, and shows a green Saved indicator', () => {
@@ -72,6 +76,14 @@ test('PR review chat URL is last in the profile card, auto-saves, and shows a gr
   assert.match(REVIEW_PAGE_SCRIPT, /review-chat-url[^]*addEventListener\('change', saveChat\)/);
   assert.match(REVIEW_PAGE_SCRIPT, /mode: 'existing'/);
   assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Save review chat/);
+});
+
+test('profile instructions do not make login verification a setup gate', () => {
+  assert.match(REVIEW_PAGE_SCRIPT, /Log into ChatGPT Profile if needed/);
+  assert.match(REVIEW_PAGE_SCRIPT, /close Chromium when you are finished/);
+  assert.match(REVIEW_PAGE_SCRIPT, /The URL saves automatically/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /profile\.ready/);
+  assert.doesNotMatch(REVIEW_PAGE_SCRIPT, /Signed in and ready/);
 });
 
 test('removed ChatGPT Profile controls and repository-access copy stay absent', () => {
