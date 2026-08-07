@@ -13,6 +13,8 @@ import { enhanceSetupWizardWithHarnessPage } from './setup-wizard/harness-page-u
 import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs';
 import { paseoSetupPageApiRequest } from './setup-wizard/paseo-page-api.mjs';
 import { setupPageIdFromPath, setupWizardHtml } from './setup-wizard/ui.mjs';
+import { workspaceSetupPageApiRequest } from './setup-wizard/workspace-page-api.mjs';
+import { enhanceSetupWizardWithWorkspacePage } from './setup-wizard/workspace-page-ui.mjs';
 
 function json(response, status, body) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -58,6 +60,7 @@ export async function startManagerServer({
   paseoSetupOptions = {},
   harnessSetupOptions = {},
   githubSetupOptions = {},
+  workspaceSetupOptions = {},
 } = {}) {
   const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const reviewWorkers = reviewWorkerManager || createManagerReviewWorkerPool();
@@ -84,65 +87,27 @@ export async function startManagerServer({
         }
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
         const harnessHtml = enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage }));
-        response.end(enhanceSetupWizardWithGitHubPage(harnessHtml));
+        const githubHtml = enhanceSetupWizardWithGitHubPage(harnessHtml);
+        response.end(enhanceSetupWizardWithWorkspacePage(githubHtml));
         return;
       }
-      const body = ['POST', 'PUT', 'PATCH'].includes(request.method)
-        ? await readBody(request)
-        : {};
+      const body = ['POST', 'PUT', 'PATCH'].includes(request.method) ? await readBody(request) : {};
+      const pageApiOptions = { rootDir, credentialStore: credentials };
 
-      const pageApiOptions = {
-        rootDir,
-        credentialStore: credentials,
-      };
-      const paseoSetup = await paseoSetupPageApiRequest({
-        method: request.method,
-        pathname: url.pathname,
-        body,
-      }, {
-        ...pageApiOptions,
-        ...paseoSetupOptions,
-      });
-      if (paseoSetup.handled) {
-        json(response, paseoSetup.status, paseoSetup.body);
-        return;
-      }
+      const paseoSetup = await paseoSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { ...pageApiOptions, ...paseoSetupOptions });
+      if (paseoSetup.handled) { json(response, paseoSetup.status, paseoSetup.body); return; }
 
-      const harnessSetup = await harnessSetupPageApiRequest({
-        method: request.method,
-        pathname: url.pathname,
-        body,
-      }, {
-        ...pageApiOptions,
-        ...harnessSetupOptions,
-      });
-      if (harnessSetup.handled) {
-        json(response, harnessSetup.status, harnessSetup.body);
-        return;
-      }
+      const harnessSetup = await harnessSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { ...pageApiOptions, ...harnessSetupOptions });
+      if (harnessSetup.handled) { json(response, harnessSetup.status, harnessSetup.body); return; }
 
-      const githubSetup = githubSetupPageApiRequest({
-        method: request.method,
-        pathname: url.pathname,
-        body,
-      }, {
-        rootDir,
-        ...githubSetupOptions,
-      });
-      if (githubSetup.handled) {
-        json(response, githubSetup.status, githubSetup.body);
-        return;
-      }
+      const githubSetup = githubSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, ...githubSetupOptions });
+      if (githubSetup.handled) { json(response, githubSetup.status, githubSetup.body); return; }
 
-      const result = managerApiRequest({
-        method: request.method,
-        pathname: url.pathname,
-        body,
-      }, { rootDir, workerManager: workers, reviewWorkerManager: reviewWorkers });
-      if (!result.handled) {
-        json(response, 404, { error: 'Not found' });
-        return;
-      }
+      const workspaceSetup = await workspaceSetupPageApiRequest({ method: request.method, pathname: url.pathname, body }, { ...pageApiOptions, ...workspaceSetupOptions });
+      if (workspaceSetup.handled) { json(response, workspaceSetup.status, workspaceSetup.body); return; }
+
+      const result = managerApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, workerManager: workers, reviewWorkerManager: reviewWorkers });
+      if (!result.handled) { json(response, 404, { error: 'Not found' }); return; }
       json(response, result.status, result.body);
     } catch (error) {
       json(response, 400, { error: error.message });
@@ -156,10 +121,7 @@ export async function startManagerServer({
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}`;
   console.log(`Paseo repository manager: ${url}`);
-  server.on('close', () => {
-    workers.close();
-    reviewWorkers.close();
-  });
+  server.on('close', () => { workers.close(); reviewWorkers.close(); });
   if (open) openBrowser(url);
   return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers, paseoCredentialStore: credentials };
 }
