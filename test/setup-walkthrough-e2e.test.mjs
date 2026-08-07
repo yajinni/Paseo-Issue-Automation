@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { startManagerServer } from '../src/manager-server.mjs';
-import { SETUP_PAGE_CATALOG } from '../src/setup-wizard/store.mjs';
+import { SETUP_PAGE_IDS } from '../src/setup-wizard/store.mjs';
 
 function tempManager(t) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'paseo-walkthrough-e2e-'));
@@ -33,8 +33,8 @@ test('first standalone-manager run outside a Git repository enters the walkthrou
   assert.match(html, /Recheck/i);
   assert.match(html, /Back/i);
 
-  for (const page of SETUP_PAGE_CATALOG) {
-    assert.match(html, new RegExp(`data-page-id=["']${page.id}["']`));
+  for (const pageId of SETUP_PAGE_IDS) {
+    assert.match(html, new RegExp(`data-page=["']${pageId}["']`));
   }
 });
 
@@ -43,11 +43,11 @@ test('every explicit walkthrough page is reloadable and unknown setup routes fai
   const { server, url } = await startManagerServer({ port: 0, rootDir });
   t.after(() => new Promise((resolve) => server.close(resolve)));
 
-  for (const page of SETUP_PAGE_CATALOG) {
-    const response = await request(url, `/setup/${page.id}`);
-    assert.equal(response.status, 200, page.id);
+  for (const pageId of SETUP_PAGE_IDS) {
+    const response = await request(url, `/setup/${pageId}`);
+    assert.equal(response.status, 200, pageId);
     const html = await response.text();
-    assert.match(html, new RegExp(`data-requested-page=["']${page.id}["']`));
+    assert.match(html, new RegExp(`data-requested-page=["']${pageId}["']`));
   }
 
   const unknown = await request(url, '/setup/not-a-real-page');
