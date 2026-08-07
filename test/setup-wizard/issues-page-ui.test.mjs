@@ -31,6 +31,14 @@ test('only issue settings can highlight the page while labels and template stay 
   assert.doesNotMatch(ISSUES_PAGE_SCRIPT, /id="issues-save"/);
 });
 
+test('managed lifecycle labels use indented text without empty status circles', () => {
+  assert.match(ISSUES_PAGE_SCRIPT, /issues-label-list/);
+  assert.match(ISSUES_PAGE_SCRIPT, /issues-label-row/);
+  assert.doesNotMatch(ISSUES_PAGE_SCRIPT, /<span class="check-dot">·<\/span>/);
+  const enhanced = enhanceSetupWizardWithIssuesPage(setupWizardHtml({ requestedPage: 'issues' }));
+  assert.match(enhanced, /\.issues-label-row\{padding:9px 0 9px 32px/);
+});
+
 test('issues page enhancer adds preview styling and one standalone page script without replacing shell markup', () => {
   const base = setupWizardHtml({ requestedPage: 'issues' });
   const enhanced = enhanceSetupWizardWithIssuesPage(base);
