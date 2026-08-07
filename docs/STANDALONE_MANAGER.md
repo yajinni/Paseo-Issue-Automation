@@ -8,6 +8,8 @@ For normal onboarding, follow [Standalone setup walkthrough](SETUP_WIZARD.md). T
 
 ## 1. Install an exact controller revision
 
+### Install for standalone manager
+
 Install a reviewed immutable commit at machine scope:
 
 ```bash
@@ -21,7 +23,7 @@ paseo-issue-automation --help
 paseo-issue-automation
 ```
 
-The bare command works outside a Git repository. On first run, if no repository has completed setup, the manager redirects to `/setup` and opens the standalone walkthrough. The global package is the controller installation; new managed repositories do not need `paseo-issue-automation` in `package.json`, a lockfile entry, repository `node_modules`, or a `paseo.json` service.
+The bare command starts the standalone manager and opens its dashboard. It works outside a Git repository. On first run, if no repository has completed setup, the manager redirects to `/setup` and opens the standalone walkthrough. The global package is the controller installation; new managed repositories do not need `paseo-issue-automation` in `package.json`, a lockfile entry, repository `node_modules`, or a `paseo.json` service.
 
 Default dashboard:
 
@@ -136,7 +138,7 @@ The removal workflow:
 7. archives only the workspace recorded as package-created;
 8. clears controller mode after every cleanup step succeeds.
 
-Modified/user-owned files, labels, and workspaces are never deleted automatically. A partial cleanup remains recoverable through **Reconcile removal PR**.
+Modified or user-owned files, labels, and workspaces are never deleted automatically. A partial cleanup remains recoverable through **Reconcile removal PR**.
 
 Removing a repository from the manager registry is different: registry removal stops its manager workers and forgets the registry entry, but does not delete repository files or controller state.
 
