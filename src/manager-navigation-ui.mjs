@@ -34,6 +34,7 @@ export const MANAGER_NAVIGATION_STYLE = String.raw`
 .manager-content-title-row{display:flex;gap:10px;align-items:flex-start}.manager-content-header h1{font-size:28px;margin:0 0 6px}.manager-content-header p{margin:0;color:var(--paseo-muted);line-height:1.45}
 .manager-content-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .manager-current-repository{font-size:12px;color:#8fa0b4;margin-top:5px}
+.manager-last-updated{font-size:12px;color:#718298;white-space:nowrap}
 .manager-mobile-menu{display:none!important;padding:9px 11px!important;min-width:42px}
 .manager-view{display:grid;gap:14px}.manager-view[hidden]{display:none!important}
 .manager-view>.card,.manager-view>.manager-overview{margin:0!important;width:100%}
@@ -43,6 +44,11 @@ export const MANAGER_NAVIGATION_STYLE = String.raw`
 .manager-view-empty{padding:22px;border:1px dashed #344153;border-radius:12px;color:var(--paseo-muted);background:#111821}
 .manager-review-summary .facts{margin-bottom:0}
 .manager-sidebar-scrim{display:none}
+.manager-overview-support{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.manager-overview-support .card{margin:0!important}.overview-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.overview-card-head h2{margin-bottom:5px}.overview-card-head p{margin:0;color:var(--paseo-muted);font-size:13px;line-height:1.4}
+.overview-summary-list{display:grid;gap:8px;margin-top:14px}.overview-summary-row{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #253042}.overview-summary-row:last-child{border-bottom:0}.overview-summary-row span{color:var(--paseo-muted)}.overview-summary-row strong{text-align:right;overflow-wrap:anywhere}
+.overview-latest-result{margin-top:12px;padding:11px 12px;border:1px solid #2d394b;border-radius:9px;background:#0f1620;color:#b9c7d8;line-height:1.45}.overview-latest-result strong{color:var(--paseo-text)}
+.overview-quick-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 #mode-banner{margin-bottom:16px}
 @media(max-width:900px){
   .manager-app-shell{grid-template-columns:1fr}
@@ -55,6 +61,7 @@ export const MANAGER_NAVIGATION_STYLE = String.raw`
   .manager-content-header{align-items:center}
   .manager-content-header h1{font-size:24px}
 }
+@media(max-width:720px){.manager-overview-support{grid-template-columns:1fr}}
 @media(max-width:640px){
   .manager-main{padding:14px}.manager-content-header{display:block}.manager-content-title-row{align-items:flex-start}.manager-content-actions{margin-top:12px;padding-left:52px}.manager-view-grid{grid-template-columns:1fr}
 }
@@ -81,6 +88,7 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
     ['Manager', [['manager-settings', 'Manager Settings']]],
   ];
   let activeView = 'overview';
+  let lastUpdatedAt = null;
 
   function panelByHeading(root, heading) {
     for (const panel of root.querySelectorAll('section.card')) {
@@ -144,11 +152,41 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
     return card;
   }
 
+  function overviewSupport() {
+    const root = document.createElement('div');
+    root.className = 'manager-overview-support';
+    root.innerHTML = '<section class="card" id="overview-current-work-card">'
+      + '<div class="overview-card-head"><div><h2>Current work</h2><p>Live repository workload from the manager state.</p></div></div>'
+      + '<div class="overview-summary-list" id="overview-current-work"><div class="muted">Loading…</div></div>'
+      + '<div class="overview-quick-actions"><button type="button" class="secondary" data-overview-view="work-queue">Open Work Queue</button><button type="button" class="secondary" data-overview-view="reviews">Open Reviews</button></div></section>'
+      + '<section class="card" id="overview-recent-activity-card">'
+      + '<div class="overview-card-head"><div><h2>Latest controller activity</h2><p>The most recent scheduler action already recorded by this repository.</p></div></div>'
+      + '<div class="overview-summary-list" id="overview-recent-activity"><div class="muted">Loading…</div></div>'
+      + '<div class="overview-latest-result" id="overview-latest-result"><strong>Latest result</strong><div>No dispatch has been recorded.</div></div>'
+      + '<div class="overview-quick-actions"><button type="button" class="secondary" data-overview-view="automation">Open Automation</button><button type="button" class="secondary" data-overview-view="maintenance">Open Maintenance</button></div></section>';
+    root.querySelectorAll('[data-overview-view]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.overviewView, { historyMode: 'push', focusHeading: true })));
+    return root;
+  }
+
   function reviewWorkflowLabel(workflow) {
     if (workflow === 'quick-manual') return 'Quick → Manual';
     if (workflow === 'quick-web-chatgpt') return 'Quick → Web ChatGPT';
     if (workflow === 'full-immediate') return 'Full review immediately';
     return workflow || 'Not configured';
+  }
+
+  function renderPairs(targetId, entries) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    target.textContent = '';
+    for (const [label, value] of entries) {
+      const row = document.createElement('div');
+      row.className = 'overview-summary-row';
+      const name = document.createElement('span'); name.textContent = label;
+      const result = document.createElement('strong'); result.textContent = value == null || value === '' ? 'None' : String(value);
+      row.append(name, result);
+      target.append(row);
+    }
   }
 
   function renderReviewSummary(data) {
@@ -172,6 +210,68 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
     }
   }
 
+  function dispatchSummary(result) {
+    if (!result) return 'No dispatch has been recorded.';
+    if (typeof result === 'string') return result;
+    const issue = result.issueNumber || result.issue || result.number;
+    const text = result.message || result.summary || result.reason || result.status || result.action;
+    if (issue && text) return 'Issue #' + issue + ' · ' + text;
+    if (text) return String(text);
+    if (issue) return 'Issue #' + issue + ' was the latest dispatch target.';
+    return 'A controller action completed. Open Work Queue or Automation for current state.';
+  }
+
+  function statusBreakdown(statusCounts) {
+    const counts = Object.entries(statusCounts || {}).filter(([, count]) => Number(count) > 0);
+    if (!counts.length) return 'No recorded run states';
+    return counts.slice(0, 4).map(([status, count]) => status + ': ' + count).join(' · ');
+  }
+
+  function renderOverview(data) {
+    const automation = data.automation || {};
+    const blockers = Array.isArray(data.blockers) ? data.blockers : [];
+    const attentionCount = blockers.filter((item) => item.severity === 'error' || item.severity === 'warning').length;
+    renderPairs('overview-current-work', [
+      ['Active automation', Number(automation.activeRunCount || 0) + ' active'],
+      ['Recorded runs', Number(automation.runCount || 0)],
+      ['Run states', statusBreakdown(automation.statusCounts)],
+      ['Claims', automation.claimsEnabled ? 'Enabled' : 'Paused'],
+    ]);
+    renderPairs('overview-recent-activity', [
+      ['Last dispatch', automation.lastDispatchAt ? new Date(automation.lastDispatchAt).toLocaleString() : 'Not yet'],
+      ['Coding worker', data.worker?.running ? 'Running' : 'Stopped'],
+      ['PR-review worker', data.reviewWorker?.running ? 'Running' : 'Stopped'],
+      ['Needs attention', attentionCount],
+    ]);
+    const latest = document.getElementById('overview-latest-result');
+    if (latest) {
+      latest.textContent = '';
+      const title = document.createElement('strong'); title.textContent = 'Latest result';
+      const detail = document.createElement('div'); detail.textContent = dispatchSummary(automation.lastDispatchResult);
+      latest.append(title, detail);
+    }
+    lastUpdatedAt = Date.now();
+    renderLastUpdated();
+    setBadge('work-queue', Number(automation.activeRunCount || 0), false);
+    setBadge('maintenance', attentionCount, attentionCount > 0);
+  }
+
+  function setBadge(viewId, value, attention) {
+    const badge = document.querySelector('[data-manager-badge="' + viewId + '"]');
+    if (!badge) return;
+    const count = Number(value || 0);
+    badge.textContent = String(count);
+    badge.classList.toggle('visible', count > 0);
+    badge.classList.toggle('attention', attention && count > 0);
+  }
+
+  function renderLastUpdated() {
+    const target = document.getElementById('manager-last-updated');
+    if (!target || !lastUpdatedAt) return;
+    const seconds = Math.max(0, Math.floor((Date.now() - lastUpdatedAt) / 1000));
+    target.textContent = seconds < 5 ? 'Updated just now' : 'Updated ' + seconds + 's ago';
+  }
+
   function renderSidebarState(data) {
     if (!data) return;
     const label = document.getElementById('manager-current-repository');
@@ -181,6 +281,7 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
       label.textContent = branch ? name + ' · ' + branch : name;
     }
     renderReviewSummary(data);
+    renderOverview(data);
   }
 
   function closeSidebar() {
@@ -242,8 +343,7 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
     const moved = new Set();
 
     appendPanel(views.overview, overview, moved);
-    appendPanel(views.overview, panelByHeading(shell, 'Repository'), moved);
-    appendPanel(views.overview, panelByHeading(shell, 'Setup'), moved);
+    views.overview.append(overviewSupport());
 
     appendPanel(views['work-queue'], panelByHeading(shell, 'Manual issue action'), moved);
     appendPanel(views['work-queue'], panelByHeading(shell, 'Latest action result'), moved);
@@ -254,6 +354,9 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
     appendPanel(views.reviews, reviewSummaryCard(), moved);
 
     appendPanel(views.configuration, panelByHeading(shell, 'Configuration'), moved);
+
+    appendPanel(views.integration, panelByHeading(shell, 'Repository'), moved);
+    appendPanel(views.integration, panelByHeading(shell, 'Setup'), moved);
     appendPanel(views.integration, panelByHeading(shell, 'Repository integration'), moved);
 
     appendPanel(views.maintenance, repositoryHealth, moved);
@@ -311,7 +414,12 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
     titleRow.append(mobile, headingBox);
     const headerActions = document.createElement('div');
     headerActions.className = 'manager-content-actions';
+    const updated = document.createElement('span');
+    updated.className = 'manager-last-updated';
+    updated.id = 'manager-last-updated';
+    updated.setAttribute('aria-live', 'polite');
     if (refreshButton) headerActions.append(refreshButton);
+    headerActions.append(updated);
     header.append(titleRow, headerActions);
     main.append(header);
     if (banner) main.append(banner);
@@ -354,6 +462,7 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
   window.showManagerView = (id) => showView(id, { historyMode: 'push', focusHeading: true });
   window.addEventListener('popstate', () => showView(viewFromLocation(), { historyMode: 'none' }));
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeSidebar(); });
+  setInterval(renderLastUpdated, 1000);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', buildShell, { once: true });
   else buildShell();
 })();
