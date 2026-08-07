@@ -2,6 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   REVIEW_OUTPUT_SCHEMA,
   buildBaseUpdatePrompt,
+  buildCompletionRecoveryPrompt,
   buildRepairPrompt,
   buildReviewerPrompt,
 } from './controller-prompts.mjs';
@@ -13,6 +14,7 @@ import { agentCommandTimeoutMs, run, runJson } from './process.mjs';
 
 const CHECK_POLL_MS = 15_000;
 const MAX_CHECK_POLLS = 120;
+const MAX_COMPLETION_RECOVERY_ATTEMPTS = 1;
 
 function updateState(root, issueNumber, patch, activity = null) {
   const state = loadRun(root, issueNumber);
@@ -68,19 +70,51 @@ function worktreeHead(root, state) {
   return result.ok ? result.stdout : null;
 }
 
+function completionEvidenceError(message) {
+  const error = new Error(message);
+  error.code = 'CODER_COMPLETION_EVIDENCE_INCOMPLETE';
+  return error;
+}
+
 function requireValidatedPr(root, issueNumber) {
   const state = loadRun(root, issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${issueNumber}.`);
   if (state.status !== 'agent-running') return { terminal: true, state };
   const validation = latestValidation(state);
-  if (!validation) throw new Error('Coder finished without recording a passing validation-summary event.');
+  if (!validation) throw completionEvidenceError('Coder finished without recording a passing validation-summary event.');
   const pr = currentPr(root, state);
-  if (!pr) throw new Error(`Coder finished without an open pull request for ${state.branch}.`);
+  if (!pr) throw completionEvidenceError(`Coder finished without an open pull request for ${state.branch}.`);
   const head = worktreeHead(root, state);
   if (!head || head !== pr.headRefOid || validation.commit !== pr.headRefOid) {
-    throw new Error('Validation, worktree HEAD, and pull-request HEAD do not identify the same exact commit.');
+    throw completionEvidenceError('Validation, worktree HEAD, and pull-request HEAD do not identify the same exact commit.');
   }
   return { terminal: false, state, validation, pr, head };
+}
+
+function requireValidatedPrWithRecovery(root, issueNumber, recovery) {
+  try {
+    return requireValidatedPr(root, issueNumber);
+  } catch (error) {
+    if (error?.code !== 'CODER_COMPLETION_EVIDENCE_INCOMPLETE'
+        || recovery.attempts >= MAX_COMPLETION_RECOVERY_ATTEMPTS) {
+      throw error;
+    }
+    const state = loadRun(root, issueNumber);
+    if (!state || state.status !== 'agent-running') throw error;
+    recovery.attempts += 1;
+    const reason = String(error.message || error);
+    updateState(root, issueNumber, { phase: 'recovering-completion-evidence', reason }, {
+      type: 'completion-evidence-recovery',
+      details: `Coder completion evidence was incomplete; recovery attempt ${recovery.attempts}/${MAX_COMPLETION_RECOVERY_ATTEMPTS}: ${reason}`,
+    });
+    sendCoder(root, state, buildCompletionRecoveryPrompt({
+      issueNumber,
+      branch: state.branch,
+      baseBranch: loadConfig(root).baseBranch,
+      reason,
+    }));
+    return requireValidatedPr(root, issueNumber);
+  }
 }
 
 function runReviewer(root, issueNumber, snapshot, reviewRound) {
@@ -191,11 +225,12 @@ async function execute(root, issueNumber) {
   const config = loadConfig(root);
   let repairCycles = 0;
   let completedReviews = 0;
+  const completionRecovery = { attempts: 0 };
 
   waitForCoder(root, loadRun(root, issueNumber));
 
   while (repairCycles <= config.maxReviewRounds + 4) {
-    const snapshot = requireValidatedPr(root, issueNumber);
+    const snapshot = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
     if (snapshot.terminal) return;
 
     const freshness = branchContainsLatestBase(root, snapshot.state, config.baseBranch);
@@ -225,7 +260,7 @@ async function execute(root, issueNumber) {
       continue;
     }
 
-    const afterReview = requireValidatedPr(root, issueNumber);
+    const afterReview = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
     if (afterReview.head !== snapshot.head) continue;
     const postReviewFreshness = branchContainsLatestBase(root, afterReview.state, config.baseBranch);
     if (!postReviewFreshness.ok) {
@@ -251,7 +286,7 @@ async function execute(root, issueNumber) {
     }
     if (ci.state === 'timeout') throw new Error('Timed out waiting for GitHub checks to finish.');
 
-    const finalSnapshot = requireValidatedPr(root, issueNumber);
+    const finalSnapshot = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
     if (finalSnapshot.terminal) return;
     if (finalSnapshot.head !== afterReview.head) continue;
     const finalFreshness = branchContainsLatestBase(root, finalSnapshot.state, config.baseBranch);
