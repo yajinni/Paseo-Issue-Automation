@@ -86,10 +86,12 @@ export async function runFinalReadinessChecks(options = {}) {
         previewBuilder: options.setupInstallationPreviewBuilder || options.previewBuilder,
       });
       const pullRequest = repair?.pullRequest || null;
+      const pendingRepairPullRequest = repair?.ready !== true && Boolean(pullRequest?.url);
       checks.push({
         id: 'setup-pull-request',
         label: 'setup pull request',
         ok: repair?.ready === true,
+        informational: pendingRepairPullRequest,
         state: repair?.action || (repair?.ready ? 'current' : 'pending'),
         summary: repair?.summary || null,
         pendingFiles: Array.isArray(repair?.files) ? repair.files : [],
@@ -99,16 +101,15 @@ export async function runFinalReadinessChecks(options = {}) {
         autoMerge: repair?.autoMerge || pullRequest?.autoMerge || null,
         reconciliationError: repair?.reconciliationError || null,
       });
-      if (repair?.ready !== true) blockers.push(blocker(
+      // Once Paseo has successfully created or found the reviewed repair PR,
+      // that PR is informational setup follow-up. Normal GitHub merge policy is
+      // allowed to complete it independently and setup itself may finish.
+      if (repair?.ready !== true && !pendingRepairPullRequest) blockers.push(blocker(
         'readiness-repository-setup-pending',
-        repair?.summary || 'Repository setup fixes are still pending.',
-        pullRequest?.url
-          ? 'Open the setup pull request if needed, let normal repository checks/reviews complete, then Recheck.'
-          : 'Resolve the reported repository setup problem, then Recheck.',
+        repair?.summary || 'Repository setup fixes could not be queued in a setup pull request.',
+        'Resolve the reported repository setup problem, then Recheck. Paseo will retry the managed setup repair.',
         {
           pendingFiles: Array.isArray(repair?.files) ? repair.files : [],
-          pullRequestNumber: pullRequest?.number || null,
-          pullRequestUrl: pullRequest?.url || null,
           action: repair?.action || null,
         },
       ));
@@ -118,6 +119,7 @@ export async function runFinalReadinessChecks(options = {}) {
         id: 'setup-pull-request',
         label: 'setup pull request',
         ok: false,
+        informational: false,
         state: 'repair-failed',
         summary: message,
       });
@@ -149,7 +151,7 @@ export async function runFinalReadinessChecks(options = {}) {
   session = recordSetupPageCheck('readiness', {
     ok: blockers.length === 0,
     summary: blockers.length === 0
-      ? 'All selected setup workflows are ready. Finish setup can now commit configuration safely.'
+      ? 'Setup is ready. Any setup pull request shown below can finish merging through normal GitHub policy.'
       : `${blockers.length} final readiness requirement${blockers.length === 1 ? '' : 's'} need attention.`,
     blockers,
   }, options);
