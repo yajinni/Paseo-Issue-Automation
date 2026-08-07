@@ -7,10 +7,8 @@ import {
   recordSetupPageCheck,
   saveSetupPage,
 } from './store.mjs';
-import {
-  confirmedSetupPullRequestReady,
-  reconcileConfirmedSetupPullRequest,
-} from './setup-pr-service.mjs';
+import { buildIssueInstallationPreview } from './issues-page-service.mjs';
+import { reconcileConfirmedSetupPullRequest } from './setup-pr-service.mjs';
 
 const REQUIRED_PAGES = Object.freeze(['paseo', 'harness', 'repository', 'issues', 'review']);
 
@@ -61,6 +59,34 @@ function blocker(code, message, recoveryAction, details = null) {
   return { code, message, recoveryAction, details };
 }
 
+function setupInstallationStatus(root, session, options = {}) {
+  const preview = (options.setupInstallationPreviewBuilder || buildIssueInstallationPreview)({
+    repository: repositoryName(session),
+    checkoutPath: root,
+  }, options);
+  const pendingFiles = Array.isArray(preview?.setupPullRequestChanges)
+    ? preview.setupPullRequestChanges.map((file) => String(file || '').trim()).filter(Boolean)
+    : [];
+  const template = preview?.template || {};
+  const templateError = preview?.previewErrors?.template || null;
+  const ok = !templateError && pendingFiles.length === 0;
+  let summary = 'Repository setup files are installed.';
+  if (!ok) {
+    if (templateError) summary = `Repository setup files could not be verified: ${templateError}`;
+    else if (template.status === 'missing') summary = `${template.path || pendingFiles[0] || 'The automation issue template'} is missing and needs to be installed through the setup pull request.`;
+    else if (template.status === 'update') summary = `${template.path || pendingFiles[0] || 'The automation issue template'} does not match the current Paseo template and needs to be updated through the setup pull request.`;
+    else summary = `Repository setup changes are still required${pendingFiles.length ? `: ${pendingFiles.join(', ')}` : ''}.`;
+  }
+  return {
+    ok,
+    summary,
+    pendingFiles,
+    templatePath: template.path || null,
+    templateStatus: template.status || null,
+    templateError,
+  };
+}
+
 export async function runFinalReadinessChecks(options = {}) {
   let session = activeSession(options);
   const blockers = [];
@@ -82,17 +108,43 @@ export async function runFinalReadinessChecks(options = {}) {
     blockers.push(blocker('readiness-checkout-missing', 'The Paseo project checkout is unavailable.', 'Return to GitHub repository setup and Recheck.'));
   } else {
     let setupPr = null;
+    let reconciliationError = null;
     try {
       setupPr = (options.setupPrReconciler || reconcileConfirmedSetupPullRequest)(root, options);
-      const ready = confirmedSetupPullRequestReady(setupPr);
-      checks.push({ id: 'setup-pull-request', ok: ready, state: setupPr?.state || 'not-required', syncedAt: setupPr?.syncedAt || null, installationVerifiedAt: setupPr?.installationVerifiedAt || null });
-      if (!ready) blockers.push(blocker(
-        'readiness-setup-pr-incomplete',
-        setupPr?.autoMerge?.reason || setupPr?.syncError || setupPr?.installationVerificationError || 'The setup pull request is not merged, synchronized, and verified yet.',
-        setupPr?.autoMerge?.action || 'Open the setup pull request, satisfy repository policy, merge it, synchronize the checkout, then Recheck.',
+    } catch (error) {
+      reconciliationError = String(error?.message || error);
+    }
+
+    try {
+      const installation = setupInstallationStatus(root, session, options);
+      checks.push({
+        id: 'setup-pull-request',
+        ok: installation.ok,
+        state: installation.ok ? 'installed' : 'repository-changes-required',
+        summary: installation.summary,
+        pendingFiles: installation.pendingFiles,
+        templatePath: installation.templatePath,
+        templateStatus: installation.templateStatus,
+        historicalPullRequestState: setupPr?.state || null,
+        reconciliationError,
+      });
+      if (!installation.ok) blockers.push(blocker(
+        'readiness-repository-setup-incomplete',
+        installation.summary,
+        'Install or update the required repository setup files through the reviewed setup pull request, then Recheck.',
+        {
+          pendingFiles: installation.pendingFiles,
+          historicalPullRequestState: setupPr?.state || null,
+          reconciliationError,
+        },
       ));
     } catch (error) {
-      blockers.push(blocker('readiness-setup-pr-check-failed', String(error?.message || error), 'Resolve the setup PR or repository problem, then Recheck.'));
+      blockers.push(blocker(
+        'readiness-repository-setup-check-failed',
+        String(error?.message || error),
+        'Resolve the repository setup-file problem, then Recheck.',
+        { historicalPullRequestState: setupPr?.state || null, reconciliationError },
+      ));
     }
 
     const probes = Array.isArray(options.safeProbes) ? options.safeProbes : [];
