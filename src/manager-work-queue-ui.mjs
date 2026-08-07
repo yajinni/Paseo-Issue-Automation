@@ -123,7 +123,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     if (skipped) actions.append(actionButton('Unskip', 'unskip-issue', item));
     else actions.append(actionButton('Skip', 'skip-issue', item));
     if (item.stage === 'ready' && !skipped) actions.append(actionButton('Start', 'start-issue', item, ''));
-    if (isAttention(item)) actions.append(actionButton('Restart', 'restart-issue', item, 'warning'));
+    if (isAttention(item)) actions.append(actionButton('Recover', 'restart-issue', item, 'warning'));
     if (isActive(item)) actions.append(actionButton('Abandon', 'abandon-issue', item, 'danger'));
     return actions;
   }
@@ -204,12 +204,12 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     const section = document.createElement('section'); section.className = 'work-detail-section';
     const heading = document.createElement('h3'); heading.textContent = 'Issue actions';
     const actions = document.createElement('div'); actions.className = 'work-detail-actions';
-    const branch = document.createElement('select'); branch.id = 'work-detail-branch-action'; branch.innerHTML = '<option value="keep">Keep branch on restart</option><option value="delete">Delete branch on restart</option>';
+    const branch = document.createElement('select'); branch.id = 'work-detail-branch-action'; branch.innerHTML = '<option value="keep">Recover existing work first (recommended)</option><option value="delete">Start fresh and delete old branch</option>';
     actions.append(branch);
     const skipped = (statusData?.automation?.skippedIssueNumbers || []).includes(Number(item.issueNumber));
     if (skipped) actions.append(actionButton('Unskip', 'unskip-issue', item)); else actions.append(actionButton('Skip', 'skip-issue', item));
     if (item.stage === 'ready' && !skipped) actions.append(actionButton('Start', 'start-issue', item, ''));
-    if (isAttention(item)) actions.append(actionButton('Restart', 'restart-issue', item, 'warning'));
+    if (isAttention(item)) actions.append(actionButton('Recover', 'restart-issue', item, 'warning'));
     if (isActive(item)) actions.append(actionButton('Abandon', 'abandon-issue', item, 'danger'));
     section.append(heading, actions); return section;
   }
@@ -257,7 +257,13 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
       if (reason === null) return;
       payload.reason = reason;
     }
-    if (action === 'restart-issue' && !confirm('Restart issue #' + item.issueNumber + ' with a fresh attempt?')) return;
+    if (action === 'restart-issue') {
+      const fresh = payload.branchAction === 'delete';
+      const message = fresh
+        ? 'Start issue #' + item.issueNumber + ' fresh and delete the recorded old branch?'
+        : 'Recover issue #' + item.issueNumber + ' using its existing branch, workspace, and coder when they can be verified safely? A fresh attempt will be used only if recovery is unavailable or already exhausted.';
+      if (!confirm(message)) return;
+    }
     await postRepositoryAction(action, payload);
     if (selectedIssue === item.issueNumber) {
       const refreshed = queueData.items?.find((candidate) => candidate.issueNumber === item.issueNumber);
