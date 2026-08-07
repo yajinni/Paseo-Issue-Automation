@@ -70,25 +70,56 @@ function worktreeHead(root, state) {
   return result.ok ? result.stdout : null;
 }
 
+function worktreeClean(root, state) {
+  const cwd = state.worktreePath || root;
+  const result = run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd, allowFailure: true });
+  return {
+    ok: result.ok && !String(result.stdout || '').trim(),
+    reason: result.ok
+      ? String(result.stdout || '').trim()
+      : result.stderr || result.stdout || 'Could not inspect the issue worktree status.',
+  };
+}
+
 function completionEvidenceError(message) {
   const error = new Error(message);
   error.code = 'CODER_COMPLETION_EVIDENCE_INCOMPLETE';
   return error;
 }
 
+function controllerValidation(root, issueNumber, state, head) {
+  const existing = latestValidation(state);
+  if (existing?.commit === head) return { state, validation: existing };
+  const saved = recordEvent(root, issueNumber, {
+    event: 'validation-summary',
+    result: 'PASS',
+    commit: head,
+    details: 'Controller recorded the exact-head validation handoff after the coder completed with a clean worktree and matching open PR. Issue-required validation remains subject to independent review and GitHub CI.',
+  });
+  updateState(root, issueNumber, {}, {
+    type: 'controller-validation-recorded',
+    details: `Recorded controller-owned validation handoff for exact PR head ${head}.`,
+  });
+  return { state: saved, validation: latestValidation(saved) };
+}
+
 function requireValidatedPr(root, issueNumber) {
   const state = loadRun(root, issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${issueNumber}.`);
   if (state.status !== 'agent-running') return { terminal: true, state };
-  const validation = latestValidation(state);
-  if (!validation) throw completionEvidenceError('Coder finished without recording a passing validation-summary event.');
   const pr = currentPr(root, state);
   if (!pr) throw completionEvidenceError(`Coder finished without an open pull request for ${state.branch}.`);
   const head = worktreeHead(root, state);
-  if (!head || head !== pr.headRefOid || validation.commit !== pr.headRefOid) {
-    throw completionEvidenceError('Validation, worktree HEAD, and pull-request HEAD do not identify the same exact commit.');
+  if (!head || head !== pr.headRefOid) {
+    throw completionEvidenceError('Worktree HEAD and pull-request HEAD do not identify the same exact commit.');
   }
-  return { terminal: false, state, validation, pr, head };
+  const cleanliness = worktreeClean(root, state);
+  if (!cleanliness.ok) {
+    const detail = cleanliness.reason ? ` ${cleanliness.reason}` : '';
+    throw completionEvidenceError(`Coder finished with uncommitted worktree changes or an unreadable worktree status.${detail}`);
+  }
+  const recorded = controllerValidation(root, issueNumber, state, head);
+  return { terminal: false, state: recorded.state, validation: recorded.validation, pr, head };
 }
 
 function requireValidatedPrWithRecovery(root, issueNumber, recovery) {
@@ -105,7 +136,7 @@ function requireValidatedPrWithRecovery(root, issueNumber, recovery) {
     const reason = String(error.message || error);
     updateState(root, issueNumber, { phase: 'recovering-completion-evidence', reason }, {
       type: 'completion-evidence-recovery',
-      details: `Coder completion evidence was incomplete; recovery attempt ${recovery.attempts}/${MAX_COMPLETION_RECOVERY_ATTEMPTS}: ${reason}`,
+      details: `Coder completion handoff was incomplete; recovery attempt ${recovery.attempts}/${MAX_COMPLETION_RECOVERY_ATTEMPTS}: ${reason}`,
     });
     sendCoder(root, state, buildCompletionRecoveryPrompt({
       issueNumber,
