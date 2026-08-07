@@ -16,6 +16,7 @@ import { issuesSetupPageApiRequest } from './setup-wizard/issues-page-api.mjs';
 import { enhanceSetupWizardWithIssuesPage } from './setup-wizard/issues-page-ui.mjs';
 import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs';
 import { paseoSetupPageApiRequest } from './setup-wizard/paseo-page-api.mjs';
+import { enhanceSetupWizardWithRequiredState } from './setup-wizard/required-state-ui.mjs';
 import { reviewSetupPageApiRequest } from './setup-wizard/review-page-api.mjs';
 import { enhanceSetupWizardWithReviewPage } from './setup-wizard/review-page-ui.mjs';
 import { enhanceSetupWizardWithShellFeedback } from './setup-wizard/shell-feedback-ui.mjs';
@@ -120,7 +121,8 @@ export async function startManagerServer({
         }
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
         const shellHtml = enhanceSetupWizardWithShellFeedback(setupWizardHtml({ requestedPage }));
-        const harnessHtml = enhanceSetupWizardWithHarnessPage(shellHtml);
+        const requiredHtml = enhanceSetupWizardWithRequiredState(shellHtml);
+        const harnessHtml = enhanceSetupWizardWithHarnessPage(requiredHtml);
         const githubHtml = enhanceSetupWizardWithGitHubPage(harnessHtml);
         const workspaceHtml = enhanceSetupWizardWithWorkspacePage(githubHtml);
         const issuesHtml = enhanceSetupWizardWithIssuesPage(workspaceHtml);
