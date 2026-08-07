@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managerIssuePlan } from '../src/manager-issues.mjs';
+import { buildManagerIssueFlow, managerIssuePlan } from '../src/manager-issues.mjs';
 
 function issue(number, title = `Issue ${number}`) {
   return { number, title, url: `https://github.test/issues/${number}`, labels: [], state: 'OPEN', blockedBy: [], blocking: [] };
@@ -43,6 +43,7 @@ test('manager issue plan shows every open issue while preserving scheduler order
   assert.equal(plan.blocked, 1);
   assert.equal(plan.active, 1);
   assert.equal(plan.skipped, 1);
+  assert.ok(plan.flow);
 
   assert.equal(queueOptions.issues, issues);
   for (const callback of ['recordInvalid', 'restoreInvalid', 'recordWait', 'recordReady']) {
@@ -70,4 +71,48 @@ test('manager issue plan returns eligible issues in lowest issue-number order', 
   assert.deepEqual(plan.items.map((item) => item.issueNumber), [3, 8, 12]);
   assert.deepEqual(plan.items.map((item) => item.processingOrder), [1, 2, 3]);
   assert.equal(plan.nextIssueNumber, 3);
+});
+
+test('dependency flow groups independent issues into parallel waves and records unlocks', () => {
+  const flow = buildManagerIssueFlow([
+    { issueNumber: 1, statusId: 'next', dependencies: [] },
+    { issueNumber: 2, statusId: 'eligible', dependencies: [] },
+    { issueNumber: 3, statusId: 'blocked', dependencies: [1] },
+    { issueNumber: 4, statusId: 'blocked', dependencies: [1] },
+    { issueNumber: 5, statusId: 'blocked', dependencies: [3, 4] },
+  ]);
+
+  assert.deepEqual(flow.waves, [
+    { wave: 1, issueNumbers: [1, 2] },
+    { wave: 2, issueNumbers: [3, 4] },
+    { wave: 3, issueNumbers: [5] },
+  ]);
+  assert.deepEqual(flow.unlocks[1], [3, 4]);
+  assert.deepEqual(flow.unlocks[3], [5]);
+  assert.deepEqual(flow.unlocks[4], [5]);
+  assert.deepEqual(flow.unresolvedIssueNumbers, []);
+});
+
+test('dependency flow includes an unselected open issue when automatic work depends on it', () => {
+  const flow = buildManagerIssueFlow([
+    { issueNumber: 10, statusId: 'not-ready', dependencies: [] },
+    { issueNumber: 11, statusId: 'blocked', dependencies: [10] },
+    { issueNumber: 12, statusId: 'not-ready', dependencies: [] },
+  ]);
+
+  assert.deepEqual(flow.automaticIssueNumbers, [11]);
+  assert.deepEqual(flow.includedIssueNumbers, [10, 11]);
+  assert.deepEqual(flow.waves, [
+    { wave: 1, issueNumbers: [10] },
+    { wave: 2, issueNumbers: [11] },
+  ]);
+});
+
+test('dependency flow reports cycles instead of inventing a runnable order', () => {
+  const flow = buildManagerIssueFlow([
+    { issueNumber: 21, statusId: 'blocked', dependencies: [22] },
+    { issueNumber: 22, statusId: 'blocked', dependencies: [21] },
+  ]);
+  assert.deepEqual(flow.waves, []);
+  assert.deepEqual(flow.unresolvedIssueNumbers, [21, 22]);
 });
