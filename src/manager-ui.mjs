@@ -10,11 +10,11 @@ export function managerHtml() {
 *{box-sizing:border-box}body{margin:0;background:#0b1018;color:#edf3ff}button,input,select{font:inherit}
 .shell{max-width:1180px;margin:0 auto;padding:24px}.header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:18px}
 h1{margin:0 0 6px;font-size:1.65rem}.muted{color:#9dacbf}.toolbar,.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-select,input{background:#111a27;color:#edf3ff;border:1px solid #2c3b50;border-radius:8px;padding:9px 11px}select{min-width:220px}
+select,input:not([type="checkbox"]){background:#111a27;color:#edf3ff;border:1px solid #2c3b50;border-radius:8px;padding:9px 11px}select{min-width:220px}
 button{border:0;border-radius:8px;padding:9px 13px;background:#2869d8;color:white;cursor:pointer}button.secondary{background:#243247}button.warning{background:#8b621d}button.danger{background:#9c3342}button:disabled{opacity:.55;cursor:not-allowed}
 .banner{border:1px solid #365275;background:#132137;border-radius:10px;padding:12px 14px;margin-bottom:16px}.error{border-color:#804451;background:#301820}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:#111924;border:1px solid #253348;border-radius:12px;padding:16px}.card h2{font-size:1rem;margin:0 0 12px}.facts{display:grid;grid-template-columns:minmax(130px,.65fr) minmax(0,1.35fr);gap:8px 14px}.facts dt{color:#9dacbf}.facts dd{margin:0;overflow-wrap:anywhere}.wide{grid-column:1/-1}
-.register{display:flex;gap:10px;margin-top:16px}.register input{flex:1}.field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.field-grid label{display:grid;gap:5px;color:#9dacbf}.issue-row{display:grid;grid-template-columns:minmax(120px,.5fr) minmax(140px,.5fr) minmax(0,2fr);gap:10px;align-items:end}
+.register{display:flex;gap:10px;margin-top:16px}.register input{flex:1}.field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.field-grid label{display:grid;gap:5px;color:#9dacbf}.issue-row{display:grid;grid-template-columns:minmax(120px,.5fr) minmax(140px,.5fr) minmax(0,2fr);gap:10px;align-items:end}.check-row{display:flex;gap:9px;align-items:flex-start;color:#dce8fb;margin-top:12px}.check-row input{margin-top:3px}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a111b;border-radius:8px;padding:12px;max-height:300px;overflow:auto}
 @media(max-width:760px){.header{display:block}.toolbar{margin-top:14px}.grid,.field-grid,.issue-row{grid-template-columns:1fr}.facts{grid-template-columns:1fr}.facts dd{margin-bottom:8px}.register{flex-direction:column}select{min-width:0;width:100%}}
 </style>
@@ -53,17 +53,27 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a111b;border-radius
       </div>
       <p class="muted">These actions use only the selected repository root. They do not start a permanent manager worker.</p>
     </section>
-    <section class="card">
+    <section class="card wide">
       <h2>Configuration</h2>
       <form id="config-form">
         <div class="field-grid">
           <label>Base branch<input id="base-branch"></label>
-          <label>Poll interval<input id="poll-interval" type="number" min="60" max="3600"></label>
-          <label>Maximum active<input id="max-active" type="number" min="1" max="10"></label>
-          <label>Review rounds<input id="max-review-rounds" type="number" min="1" max="10"></label>
+          <label>Poll interval in seconds<input id="poll-interval" type="number" min="60" max="3600"></label>
+          <label>Maximum active issues<input id="max-active" type="number" min="1" max="20"></label>
+          <label>Provider/Coding Harness<input id="coding-harness" placeholder="harness id"></label>
+          <label>Issue processing<select id="issue-selection-mode"><option value="recommended-labels">Recommended labels</option><option value="all-open">All open issues</option></select></label>
+          <label>Transient failure retries<input id="temporary-failure-retries" type="number" min="0" max="20"></label>
+          <label>Excluded issue labels<input id="excluded-labels" placeholder="label-one, label-two"></label>
+          <label>Review workflow<select id="review-workflow"><option value="quick-manual">Quick → Manual</option><option value="quick-web-chatgpt">Quick → Web ChatGPT</option><option value="full-immediate">Full review immediately</option></select></label>
+          <label>Quick review rounds<input id="quick-review-rounds" type="number" min="1" max="20"></label>
+          <label>Full review rounds<input id="full-review-rounds" type="number" min="1" max="20"></label>
           <label>Coder model<input id="coder-model" placeholder="provider/model"></label>
+          <label>Coder thinking level<input id="coder-thinking" placeholder="thinking option id"></label>
           <label>Reviewer model<input id="reviewer-model" placeholder="provider/model"></label>
+          <label>Reviewer thinking level<input id="reviewer-thinking" placeholder="thinking option id"></label>
         </div>
+        <label class="check-row"><input id="auto-merge-approved" type="checkbox"><span>Automatically merge fully approved coding PRs</span></label>
+        <p class="muted" id="auto-merge-help">Automatic merge availability depends on the selected review workflow.</p>
         <div class="actions" style="margin-top:12px"><button class="repository-action" type="submit">Save configuration</button></div>
       </form>
     </section>
@@ -131,9 +141,39 @@ function setActionsEnabled(enabled) {
   for (const button of document.querySelectorAll('.repository-action')) button.disabled = !enabled;
 }
 
+function issueSelectionLabel(mode) {
+  return mode === 'all-open' ? 'All open issues' : mode === 'recommended-labels' ? 'Recommended labels' : mode;
+}
+
+function reviewWorkflowLabel(workflow) {
+  if (workflow === 'quick-manual') return 'Quick → Manual';
+  if (workflow === 'quick-web-chatgpt') return 'Quick → Web ChatGPT';
+  if (workflow === 'full-immediate') return 'Full review immediately';
+  return workflow;
+}
+
+function syncAutoMergeAvailability() {
+  const workflow = document.getElementById('review-workflow').value;
+  const checkbox = document.getElementById('auto-merge-approved');
+  const help = document.getElementById('auto-merge-help');
+  const available = workflow === 'full-immediate' || workflow === 'quick-web-chatgpt';
+  checkbox.disabled = !available;
+  if (!available) checkbox.checked = false;
+  help.textContent = available
+    ? 'Off by default. Merge is requested only after exact-head full-review approval, validation, passing checks, a current mergeable base, and repository policy allow it.'
+    : 'Automatic merge is unavailable for Quick → Manual. A person must merge the PR after manual review.';
+}
+
+function parseExcludedLabels(value) {
+  return [...new Set(String(value || '').split(',').map((label) => label.trim()).filter(Boolean))];
+}
+
 function renderStatus(data) {
   currentStatus = data;
   const repository = data.repository;
+  const configuration = data.configuration || {};
+  const issueSelection = configuration.issueSelection || {};
+  const review = configuration.review || {};
   facts('repository-facts', [
     ['Name', repository.repository || repository.name],
     ['Path', repository.path],
@@ -144,6 +184,9 @@ function renderStatus(data) {
   facts('setup-facts', [
     ['Setup complete', data.setup.complete ? 'Yes' : 'No'],
     ['Base branch', data.setup.baseBranch],
+    ['Provider/Coding Harness', configuration.codingHarness],
+    ['Issue processing', issueSelectionLabel(issueSelection.mode)],
+    ['Review workflow', reviewWorkflowLabel(review.workflow)],
     ['Workspace', data.setup.workspaceId],
     ['Managed labels', data.setup.managedLabelCount],
     ['Issue template', data.setup.issueTemplateManaged ? 'Managed' : 'Not managed'],
@@ -155,6 +198,8 @@ function renderStatus(data) {
     ['Recorded runs', data.automation.runCount],
     ['Maximum active', data.automation.maxActive],
     ['Poll interval', data.automation.pollIntervalSeconds + ' seconds'],
+    ['Quick review limit', review.quickMaxRounds],
+    ['Full review limit', review.fullMaxRounds],
     ['Background worker', data.capabilities.backgroundWorkers ? 'Running' : 'Not managed yet'],
     ['Coder', data.models.coder],
     ['Reviewer', data.models.reviewer],
@@ -162,9 +207,19 @@ function renderStatus(data) {
   document.getElementById('base-branch').value = data.setup.baseBranch || '';
   document.getElementById('poll-interval').value = data.automation.pollIntervalSeconds || 120;
   document.getElementById('max-active').value = data.automation.maxActive || 1;
-  document.getElementById('max-review-rounds').value = data.automation.maxReviewRounds || 4;
+  document.getElementById('coding-harness').value = configuration.codingHarness || '';
+  document.getElementById('issue-selection-mode').value = issueSelection.mode || 'recommended-labels';
+  document.getElementById('temporary-failure-retries').value = issueSelection.temporaryFailureRetries ?? 3;
+  document.getElementById('excluded-labels').value = (issueSelection.excludedLabels || []).join(', ');
+  document.getElementById('review-workflow').value = review.workflow || 'quick-manual';
+  document.getElementById('quick-review-rounds').value = review.quickMaxRounds || 3;
+  document.getElementById('full-review-rounds').value = review.fullMaxRounds || data.automation.maxReviewRounds || 3;
+  document.getElementById('auto-merge-approved').checked = review.autoMergeApproved === true;
   document.getElementById('coder-model').value = data.models.coder || '';
+  document.getElementById('coder-thinking').value = data.models.coderThinking || '';
   document.getElementById('reviewer-model').value = data.models.reviewer || '';
+  document.getElementById('reviewer-thinking').value = data.models.reviewerThinking || '';
+  syncAutoMergeAvailability();
   document.getElementById('dispatch-result').textContent = data.automation.lastDispatchResult
     ? JSON.stringify(data.automation.lastDispatchResult, null, 2)
     : 'No dispatch has been recorded.';
@@ -215,6 +270,7 @@ async function postRepositoryAction(action, payload) {
 
 select.addEventListener('change', () => loadStatus().catch(showError));
 document.getElementById('refresh-button').addEventListener('click', () => loadRepositories(select.value).catch(showError));
+document.getElementById('review-workflow').addEventListener('change', syncAutoMergeAvailability);
 for (const button of document.querySelectorAll('[data-action]')) {
   button.addEventListener('click', () => postRepositoryAction(button.dataset.action).catch(showError));
 }
@@ -236,14 +292,29 @@ for (const button of document.querySelectorAll('[data-issue-action]')) {
 document.getElementById('config-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
+    const workflow = document.getElementById('review-workflow').value;
+    const autoMergeAvailable = workflow === 'full-immediate' || workflow === 'quick-web-chatgpt';
     await postRepositoryAction('config', {
       baseBranch: document.getElementById('base-branch').value.trim(),
       pollIntervalSeconds: Number(document.getElementById('poll-interval').value),
       maxActive: Number(document.getElementById('max-active').value),
-      maxReviewRounds: Number(document.getElementById('max-review-rounds').value),
+      codingHarness: document.getElementById('coding-harness').value.trim(),
+      issueSelection: {
+        mode: document.getElementById('issue-selection-mode').value,
+        excludedLabels: parseExcludedLabels(document.getElementById('excluded-labels').value),
+        temporaryFailureRetries: Number(document.getElementById('temporary-failure-retries').value),
+      },
+      review: {
+        workflow,
+        quickMaxRounds: Number(document.getElementById('quick-review-rounds').value),
+        fullMaxRounds: Number(document.getElementById('full-review-rounds').value),
+        autoMergeApproved: autoMergeAvailable && document.getElementById('auto-merge-approved').checked,
+      },
       models: {
         coder: document.getElementById('coder-model').value.trim(),
+        coderThinking: document.getElementById('coder-thinking').value.trim(),
         reviewer: document.getElementById('reviewer-model').value.trim(),
+        reviewerThinking: document.getElementById('reviewer-thinking').value.trim(),
       },
     });
   } catch (error) { showError(error); }
@@ -270,6 +341,7 @@ removeButton.addEventListener('click', async () => {
   } catch (error) { showError(error); }
 });
 setActionsEnabled(false);
+syncAutoMergeAvailability();
 loadRepositories().catch(showError);
 </script>
 </body>
