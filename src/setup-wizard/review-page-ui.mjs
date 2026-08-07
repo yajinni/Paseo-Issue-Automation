@@ -6,6 +6,7 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   const onPage = () => location.pathname.replace(/\/$/, '').split('/').at(-1) === 'review';
   function escape(value) { return String(value == null ? '' : value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;'); }
   function selectedWorkflow() { return document.querySelector('input[name="review-workflow"]:checked')?.value || state?.selection?.workflow || 'quick-manual'; }
+  function autoMergeAvailable() { const workflow = selectedWorkflow(); return workflow === 'full-immediate' || workflow === 'quick-web-chatgpt'; }
   function profileCard() {
     if (selectedWorkflow() !== 'quick-web-chatgpt') return '';
     const profile = state?.profile || {};
@@ -22,6 +23,12 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
       + '<div class="inline-actions"><button class="action" id="review-install-chromium" type="button">Install Chromium</button><button class="action" id="review-open-profile" type="button">Open ChatGPT Profile</button><button class="action" id="review-save-chat" type="button">Save review chat</button><button class="action primary" id="review-profile-recheck" type="button">Recheck</button></div>'
       + '<p class="muted">GitHub access is verified for the selected repository using the safe review-protocol capability check. The check must not modify repository state.</p></section>';
   }
+  function autoMergeControl() {
+    if (!autoMergeAvailable()) return '<div class="notice">Automatic merge is unavailable for Quick → Manual review. A person must merge the coding PR after full manual review.</div>';
+    const checked = state?.selection?.autoMergeApproved === true ? 'checked' : '';
+    return '<label class="choice"><input id="review-auto-merge" type="checkbox" ' + checked + '> Automatically merge approved coding PRs</label>'
+      + '<div class="notice">Off by default. Paseo can request GitHub auto-merge only after the exact current head has full approval, required checks pass, the configured base is still current, no findings remain, and repository policy permits merge. Paseo never bypasses checks, reviews, protections, or rulesets.</div>';
+  }
   function render() {
     if (!onPage() || !state || !content()) return;
     const s = state.selection || {};
@@ -36,6 +43,7 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
       + '<div class="field"><label for="review-quick-rounds">Maximum quick-review and correction rounds</label><input id="review-quick-rounds" type="number" min="1" max="20" value="' + escape(s.quickMaxRounds ?? 3) + '"></div>'
       + '<div class="field"><label for="review-full-rounds">Maximum full-review and correction rounds</label><input id="review-full-rounds" type="number" min="1" max="20" value="' + escape(s.fullMaxRounds ?? 3) + '"></div>'
       + '<p>Initial review counts as round 1. Quick-review exhaustion hands unresolved findings to the selected full reviewer instead of stopping the PR.</p>'
+      + autoMergeControl()
       + '<div class="inline-actions"><button class="action primary" id="review-save" type="button">Save review settings</button></div></section>'
       + profileCard()
       + '<section class="setup-card"><h3>Prompt previews</h3><p>Quick and full review prompts are versioned defaults. They are copyable but not editable during initial setup.</p><div class="notice">Quick prompt: focused issue/acceptance/validation check. Full prompt: broader changed-area and surrounding-code review.</div></section>'
@@ -55,7 +63,7 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   async function saveSettings() {
     if (loading) return; loading = true;
     try {
-      state = await api('/api/setup/review/save', { method: 'POST', body: JSON.stringify({ workflow: selectedWorkflow(), quickMaxRounds: Number(document.getElementById('review-quick-rounds')?.value || 3), fullMaxRounds: Number(document.getElementById('review-full-rounds')?.value || 3) }) });
+      state = await api('/api/setup/review/save', { method: 'POST', body: JSON.stringify({ workflow: selectedWorkflow(), quickMaxRounds: Number(document.getElementById('review-quick-rounds')?.value || 3), fullMaxRounds: Number(document.getElementById('review-full-rounds')?.value || 3), autoMergeApproved: autoMergeAvailable() && document.getElementById('review-auto-merge')?.checked === true }) });
       await syncShell(); render();
     } catch (error) { if (typeof showError === 'function') showError(error); }
     finally { loading = false; }

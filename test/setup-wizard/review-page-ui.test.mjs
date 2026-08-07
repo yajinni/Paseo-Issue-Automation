@@ -11,6 +11,14 @@ test('review setup UI offers all explicit workflows and independent round contro
   assert.match(REVIEW_PAGE_SCRIPT, /max="20"/);
 });
 
+test('eligible workflows offer opt-in coding PR auto-merge without policy bypass', () => {
+  assert.match(REVIEW_PAGE_SCRIPT, /review-auto-merge/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Off by default/);
+  assert.match(REVIEW_PAGE_SCRIPT, /exact current head has full approval/);
+  assert.match(REVIEW_PAGE_SCRIPT, /never bypasses checks, reviews, protections, or rulesets/);
+  assert.match(REVIEW_PAGE_SCRIPT, /unavailable for Quick → Manual review/);
+});
+
 test('Web ChatGPT conditional section uses ChatGPT Profile as the normal user-facing name', () => {
   assert.match(REVIEW_PAGE_SCRIPT, /<h3>ChatGPT Profile<\/h3>/);
   assert.match(REVIEW_PAGE_SCRIPT, /Open ChatGPT Profile/);

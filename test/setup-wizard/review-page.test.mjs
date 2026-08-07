@@ -43,10 +43,23 @@ test('review page defaults to quick then manual with independent three-round lim
     fullMaxRounds: 3,
     conversationUrl: null,
     reviewChatMode: null,
+    autoMergeApproved: false,
   });
   assert.equal(status.profile, null);
   assert.equal(status.check.ok, true);
+  assert.equal(status.autoMerge.available, false);
+  assert.equal(status.autoMerge.approved, false);
   assert.equal(status.technicalDetails.passwordStored, false);
+});
+
+test('automatic coding PR merge is opt-in only for full-immediate or Web ChatGPT workflows', (t) => {
+  const rootDir = setup(t);
+  let result = saveReviewSetupPage({ workflow: 'full-immediate', autoMergeApproved: true }, { rootDir });
+  assert.equal(result.autoMerge.available, true);
+  assert.equal(result.selection.autoMergeApproved, true);
+  result = saveReviewSetupPage({ workflow: 'quick-manual', autoMergeApproved: true }, { rootDir });
+  assert.equal(result.autoMerge.available, false);
+  assert.equal(result.selection.autoMergeApproved, false);
 });
 
 test('manual and full-immediate workflows can save round limits through 20 without ChatGPT Profile', (t) => {

@@ -30,6 +30,10 @@ function normalizedRound(value, fallback, label) {
   return number;
 }
 
+function autoMergeAvailable(workflow) {
+  return workflow === 'full-immediate' || workflow === 'quick-web-chatgpt';
+}
+
 function selections(session) {
   const value = session.pages?.review?.selections || {};
   const workflow = REVIEW_WORKFLOWS.includes(value.workflow) ? value.workflow : 'quick-manual';
@@ -39,6 +43,7 @@ function selections(session) {
     fullMaxRounds: normalizedRound(value.fullMaxRounds, 3, 'Maximum full-review rounds'),
     conversationUrl: String(value.conversationUrl || '').trim() || null,
     reviewChatMode: value.reviewChatMode === 'existing' ? 'existing' : value.reviewChatMode === 'dedicated' ? 'dedicated' : null,
+    autoMergeApproved: autoMergeAvailable(workflow) && value.autoMergeApproved === true,
   };
 }
 
@@ -83,6 +88,14 @@ function response(session, profileStatus = null) {
   return {
     selection,
     profile,
+    autoMerge: {
+      available: autoMergeAvailable(selection.workflow),
+      approved: selection.autoMergeApproved,
+      defaultApproved: false,
+      explanation: autoMergeAvailable(selection.workflow)
+        ? 'Optional automatic merge is off by default and can run only after full exact-head approval, passing required checks, current-base verification, and repository policy all allow it.'
+        : 'Automatic merge is unavailable for Quick → Manual review. A person must merge manually after review.',
+    },
     check: session.pages?.review?.lastCheck || {
       ok: validation.ok,
       summary: validation.ok ? 'Review workflow is ready.' : validation.blockers[0]?.message || 'Review setup needs attention.',
@@ -102,6 +115,8 @@ function response(session, profileStatus = null) {
       workflow: selection.workflow,
       quickMaxRounds: selection.quickMaxRounds,
       fullMaxRounds: selection.fullMaxRounds,
+      autoMergeAvailable: autoMergeAvailable(selection.workflow),
+      autoMergeApproved: selection.autoMergeApproved,
       conversationUrlConfigured: Boolean(selection.conversationUrl),
       profileState: profile?.state || null,
       passwordStored: false,
@@ -116,12 +131,14 @@ export function getReviewSetupPageStatus(options = {}) {
 
 export function saveReviewSetupPage(input = {}, options = {}) {
   const prior = selections(activeSession(options));
+  const nextWorkflow = String(input.workflow ?? prior.workflow).trim();
   const next = {
-    workflow: String(input.workflow ?? prior.workflow).trim(),
+    workflow: nextWorkflow,
     quickMaxRounds: normalizedRound(input.quickMaxRounds, prior.quickMaxRounds, 'Maximum quick-review rounds'),
     fullMaxRounds: normalizedRound(input.fullMaxRounds, prior.fullMaxRounds, 'Maximum full-review rounds'),
     conversationUrl: prior.conversationUrl,
     reviewChatMode: prior.reviewChatMode,
+    autoMergeApproved: autoMergeAvailable(nextWorkflow) && input.autoMergeApproved === true,
   };
   if (!REVIEW_WORKFLOWS.includes(next.workflow)) throw new Error('Choose a supported review workflow.');
   let session = saveSetupPage('review', { selections: next }, options);
