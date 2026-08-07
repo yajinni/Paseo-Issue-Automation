@@ -42,3 +42,11 @@
 - Preserve superseded setup-PR details in the completed migration audit, refresh normal setup readiness, and keep issue claims paused after existing-migration finalization.
 - Document the existing-migration finalization workflow, including the post-PR #380 Julie's Dashboard recovery steps.
 - Make bare `paseo-issue-automation` start the standalone manager and open its dashboard, keep only `--help` as the top-level help command, and retire the `help`, `-h`, `manager`, and `manager --open` aliases.
+- Add the standalone first-run setup walkthrough with resumable machine-local state, explicit Paseo/Provider/GitHub/checkout/workspace/issues/review/final-readiness pages, safe Back/Recheck behavior, and automatic first-run routing outside a Git repository.
+- Add secure Paseo credential handling, GitHub CLI account/repository discovery, bounded manager-owned cloning, permanent workspace reuse/creation, and no-paid-prompt worktree readiness probes.
+- Add deterministic issue selection with `paseo:ready`, All open mode, strict lowest-number-first ordering, native dependency waiting, invalid-issue recovery, and bounded temporary-failure retries.
+- Add versioned quick/full review prompts and Quick → Manual, Quick → Web ChatGPT, and Full review immediately workflows with independent 3-default/20-maximum round limits.
+- Add conditional ChatGPT Profile setup, exact-head review identity, session-expiry recovery, setup-PR auto-merge through normal GitHub policy, and opt-in approved coding-PR auto-merge.
+- Add fail-closed final readiness that commits setup before optional worker startup and keeps completion recoverable after worker-start failure.
+- Add preview-first migration of supported v2 config and legacy lifecycle assignments while preserving active coding/review work, skipped issues, history, PR heads/branches, and current Web ChatGPT review state.
+- Make the walkthrough the documented primary onboarding path, keep the embedded repository-local dashboard operational for compatibility, move post-setup repair/maintenance guidance to the normal manager UI, and document optional live integration checks separately from offline default CI.
