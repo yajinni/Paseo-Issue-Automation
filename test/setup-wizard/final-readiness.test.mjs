@@ -229,12 +229,12 @@ test('Final readiness uses one consolidated setup checklist and only the footer 
   assert.match(FINAL_READINESS_SCRIPT, /Confirm the saved setup and any repository repair before finishing/);
   assert.doesNotMatch(FINAL_READINESS_SCRIPT, /Approved setup summary/);
   assert.doesNotMatch(FINAL_READINESS_SCRIPT, /Final safe checks/);
-  assert.equal((FINAL_READINESS_SCRIPT.match(/class=\\"checklist\\"/g) || []).length, 1);
+  assert.equal((FINAL_READINESS_SCRIPT.match(/class="checklist"/g) || []).length, 1);
   assert.match(FINAL_READINESS_SCRIPT, /pageById/);
   assert.match(FINAL_READINESS_SCRIPT, /Open setup PR/);
   assert.match(FINAL_READINESS_SCRIPT, /font-size:16px;font-weight:650/);
   assert.match(FINAL_READINESS_SCRIPT, /> Start automation after setup<\/label>/);
-  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /id=\\"readiness-finish\\"/);
+  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /id="readiness-finish"/);
   assert.match(FINAL_READINESS_SCRIPT, /closest\?\.\('#continue'\)/);
   assert.match(FINAL_READINESS_SCRIPT, /api\('\/api\/setup\/readiness\/finish'/);
   assert.match(FINAL_READINESS_SCRIPT, /querySelector\('#readiness-start'\)/);
