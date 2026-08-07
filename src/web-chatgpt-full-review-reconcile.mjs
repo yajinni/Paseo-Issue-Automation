@@ -3,6 +3,7 @@ import { setPrReviewLabels } from './pr-review-github.mjs';
 import {
   reconcileManagedPullRequest,
   reconcileManagedPullRequests,
+  recoverPrReviewState,
 } from './pr-review-reconcile.mjs';
 import {
   appendHistory,
@@ -13,18 +14,21 @@ import {
   transitionManaged,
 } from './pr-review-store.mjs';
 import { run } from './process.mjs';
-import { webChatGptFullReviewMetadata } from './web-chatgpt-full-review.mjs';
+import { loadConfig } from './state.mjs';
+import {
+  recordWebChatGptFullReviewMetadata,
+  webChatGptFullReviewMetadata,
+} from './web-chatgpt-full-review.mjs';
 
-function exhaustionForOutcome(root, managedId, outcome) {
-  const fixJobId = outcome?.review?.fixJobId;
-  if (!fixJobId || outcome?.review?.result !== 'changes_requested') return null;
+function exhaustedFixes(root) {
   const store = loadPrReviewStore(root);
-  const fix = store.fixJobs.find((job) => job.id === fixJobId && job.managedPullRequestId === managedId);
-  if (!fix) return null;
-  const metadata = webChatGptFullReviewMetadata(root, fix.reviewJobId);
-  if (!metadata || metadata.stage !== 'full') return null;
-  if (Number(metadata.stageRound) < Number(metadata.maxStageRounds)) return null;
-  return { fix, metadata };
+  return store.fixJobs.flatMap((fix) => {
+    if (!['queued', 'interrupted'].includes(fix.state)) return [];
+    const metadata = webChatGptFullReviewMetadata(root, fix.reviewJobId);
+    if (!metadata || metadata.stage !== 'full') return [];
+    if (Number(metadata.stageRound) < Number(metadata.maxStageRounds)) return [];
+    return [{ fix, metadata }];
+  });
 }
 
 function applyNeedsAttentionLabels(root, managed) {
@@ -41,32 +45,29 @@ function applyNeedsAttentionLabels(root, managed) {
   }
 }
 
-export function enforceWebChatGptFullReviewLimit(root, managedId, outcome, { now = Date.now() } = {}) {
-  const exhaustion = exhaustionForOutcome(root, managedId, outcome);
-  if (!exhaustion) return { enforced: false, outcome };
+function cancelExhaustedFix(root, entry, { now = Date.now(), applyLabels = applyNeedsAttentionLabels } = {}) {
   const at = nowIso(now);
   const result = mutatePrReviewStore(root, (store) => {
-    const managed = findManaged(store, managedId);
-    if (!managed) throw new Error(`Managed PR ${managedId} was not found.`);
-    const fix = store.fixJobs.find((job) => job.id === exhaustion.fix.id);
-    if (fix && !['completed', 'cancelled'].includes(fix.state)) {
-      const previous = fix.state;
-      fix.state = 'cancelled';
-      fix.completedAt = at;
-      fix.updatedAt = at;
-      fix.lastError = `Full Web ChatGPT review reached round ${exhaustion.metadata.stageRound} of ${exhaustion.metadata.maxStageRounds}; automatic fixes stopped.`;
-      appendHistory(store, {
-        entityType: 'fix_job',
-        entityId: fix.id,
-        previousState: previous,
-        newState: 'cancelled',
-        reason: fix.lastError,
-        actor: 'review-reconciliation',
-        sha: fix.reviewedHeadSha,
-        timestamp: at,
-      });
-    }
-    managed.lastError = `Full Web ChatGPT review exhausted ${exhaustion.metadata.maxStageRounds} review rounds with unresolved changes.`;
+    const fix = store.fixJobs.find((job) => job.id === entry.fix.id);
+    if (!fix || !['queued', 'interrupted'].includes(fix.state)) return null;
+    const managed = findManaged(store, fix.managedPullRequestId);
+    if (!managed) throw new Error(`Managed PR ${fix.managedPullRequestId} was not found.`);
+    const previous = fix.state;
+    fix.state = 'cancelled';
+    fix.completedAt = at;
+    fix.updatedAt = at;
+    fix.lastError = `Full Web ChatGPT review reached round ${entry.metadata.stageRound} of ${entry.metadata.maxStageRounds}; automatic fixes stopped.`;
+    appendHistory(store, {
+      entityType: 'fix_job',
+      entityId: fix.id,
+      previousState: previous,
+      newState: 'cancelled',
+      reason: fix.lastError,
+      actor: 'review-reconciliation',
+      sha: fix.reviewedHeadSha,
+      timestamp: at,
+    });
+    managed.lastError = `Full Web ChatGPT review exhausted ${entry.metadata.maxStageRounds} review rounds with unresolved changes.`;
     transitionManaged(store, managed, 'failed', {
       reason: managed.lastError,
       actor: 'review-reconciliation',
@@ -74,43 +75,72 @@ export function enforceWebChatGptFullReviewLimit(root, managedId, outcome, { now
       at,
     });
     managed.activeReviewRequestId = null;
-    return {
-      managed: { ...managed },
-      metadata: { ...exhaustion.metadata },
-      cancelledFixJobId: fix?.id || null,
-    };
+    return { managed: { ...managed }, cancelledFixJobId: fix.id };
   });
-  applyNeedsAttentionLabels(root, result.managed);
+  if (!result) return null;
+  applyLabels(root, result.managed);
   return {
-    enforced: true,
-    outcome: {
-      ...outcome,
-      state: 'failed',
-      review: {
-        ...outcome.review,
-        exhausted: true,
-        stopAutomaticFixes: true,
-        fullReviewRound: result.metadata.stageRound,
-        fullReviewRoundLimit: result.metadata.maxStageRounds,
-        cancelledFixJobId: result.cancelledFixJobId,
-      },
-    },
+    managedId: result.managed.id,
+    cancelledFixJobId: result.cancelledFixJobId,
+    fullReviewRound: entry.metadata.stageRound,
+    fullReviewRoundLimit: entry.metadata.maxStageRounds,
   };
+}
+
+function carryFullReviewMetadataToCurrentHeads(root) {
+  let config;
+  try { config = loadConfig(root); } catch { return []; }
+  if (config.review?.workflow !== 'quick-web-chatgpt') return [];
+  const store = loadPrReviewStore(root);
+  const carried = [];
+  for (const managed of store.managedPullRequests) {
+    const current = store.reviewJobs
+      .filter((job) => job.managedPullRequestId === managed.id
+        && job.headSha === managed.currentHeadSha
+        && ['queued', 'submitting', 'awaiting_result'].includes(job.state))
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+    if (!current || webChatGptFullReviewMetadata(root, current.id)) continue;
+    const prior = store.reviewJobs
+      .filter((job) => job.managedPullRequestId === managed.id && job.id !== current.id)
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+      .map((job) => ({ job, metadata: webChatGptFullReviewMetadata(root, job.id) }))
+      .find((entry) => entry.metadata?.stage === 'full');
+    if (!prior) continue;
+    const nextRound = Number(prior.metadata.stageRound) + 1;
+    if (nextRound > Number(prior.metadata.maxStageRounds)) continue;
+    const metadata = recordWebChatGptFullReviewMetadata(root, current.id, {
+      stageRound: nextRound,
+      maxStageRounds: prior.metadata.maxStageRounds,
+      quickFindings: prior.metadata.quickFindings,
+    });
+    carried.push({ reviewJobId: current.id, headSha: current.headSha, metadata });
+  }
+  return carried;
+}
+
+export function enforceWebChatGptFullReviewLimits(root, options = {}) {
+  const exhausted = exhaustedFixes(root);
+  const stopped = exhausted
+    .map((entry) => cancelExhaustedFix(root, entry, options))
+    .filter(Boolean);
+  const carried = carryFullReviewMetadataToCurrentHeads(root);
+  return { stopped, carried };
 }
 
 export function reconcileManagedPullRequestWithWebFullReview(root, managedId, options = {}) {
   const outcome = reconcileManagedPullRequest(root, managedId, options);
-  return enforceWebChatGptFullReviewLimit(root, managedId, outcome, options).outcome;
+  const runtime = enforceWebChatGptFullReviewLimits(root, options);
+  return { ...outcome, webChatGptFullReview: runtime };
 }
 
 export function reconcileManagedPullRequestsWithWebFullReview(root, options = {}) {
   const outcome = reconcileManagedPullRequests(root, options);
-  const entries = Array.isArray(outcome) ? outcome : outcome?.results;
-  if (!Array.isArray(entries)) return outcome;
-  const adjusted = entries.map((entry) => {
-    const managedId = entry.managedId || entry.id;
-    if (!managedId) return entry;
-    return enforceWebChatGptFullReviewLimit(root, managedId, entry, options).outcome;
-  });
-  return Array.isArray(outcome) ? adjusted : { ...outcome, results: adjusted };
+  const runtime = enforceWebChatGptFullReviewLimits(root, options);
+  return { ...outcome, webChatGptFullReview: runtime };
+}
+
+export function recoverPrReviewStateWithWebFullReview(root, options = {}) {
+  const outcome = recoverPrReviewState(root, options);
+  const runtime = enforceWebChatGptFullReviewLimits(root, options);
+  return { ...outcome, webChatGptFullReview: runtime };
 }
