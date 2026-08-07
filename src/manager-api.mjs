@@ -9,6 +9,7 @@ import {
   removeExternalRepositoryFromManager,
   repairExternalRepositoryFromManager,
 } from './manager-installation.mjs';
+import { managerIssueProcessingAction } from './manager-issue-processing.mjs';
 import { managerIssuePlan } from './manager-issues.mjs';
 import {
   parseRepositoryApiPath,
@@ -196,6 +197,17 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
       return installationResult(context, options, installationRoute[0], installationRoute[1]);
     }
 
+    const actionHandler = options.actionHandler || managerRepositoryAction;
+    const issueProcessingResult = (options.issueProcessingHandler || managerIssueProcessingAction)({
+      root: context.root,
+      repository: context.repository,
+      pathname: context.pathname,
+      workerManager: options.workerManager,
+      actionHandler,
+      actions: options.actions,
+    });
+    if (issueProcessingResult !== null) return refreshedResult(context, options, issueProcessingResult);
+
     const codingWorkerResult = workerAction(options.workerManager, context, context.pathname);
     if (codingWorkerResult !== null) {
       return refreshedResult(context, options, codingWorkerResult);
@@ -205,7 +217,6 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
       return refreshedResult(context, options, reviewResult);
     }
 
-    const actionHandler = options.actionHandler || managerRepositoryAction;
     const result = actionHandler(context.root, context.pathname, body, options.actions);
     if (result !== null) {
       if (context.pathname === '/api/config') options.workerManager?.refresh?.(context.repository);
