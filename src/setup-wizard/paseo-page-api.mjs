@@ -1,7 +1,6 @@
 import {
   connectPaseoSetupPage,
   forgetPaseoSetupCredential,
-  getPaseoSetupPageStatus,
   recheckPaseoSetupPage,
 } from './paseo-page-service.mjs';
 
@@ -22,7 +21,7 @@ export async function paseoSetupPageApiRequest({ method, pathname, body = {} }, 
   if (!pathname.startsWith('/api/setup/paseo')) return { handled: false };
   try {
     if (pathname === '/api/setup/paseo/status' && method === 'GET') {
-      return response(await getPaseoSetupPageStatus(options));
+      return response(await recheckPaseoSetupPage(options));
     }
     if (pathname === '/api/setup/paseo/connect' && method === 'POST') {
       return response(await connectPaseoSetupPage({

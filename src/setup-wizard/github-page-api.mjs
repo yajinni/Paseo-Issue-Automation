@@ -1,5 +1,4 @@
 import {
-  getGitHubSetupPageStatus,
   recheckGitHubSetupPage,
   runGitHubSetupAccountAction,
   saveGitHubSetupPage,
@@ -13,7 +12,7 @@ function failure(error, status = 400) {
 export function githubSetupPageApiRequest({ method, pathname, body = {} }, options = {}) {
   if (!pathname.startsWith('/api/setup/github')) return { handled: false };
   try {
-    if (pathname === '/api/setup/github/status' && method === 'GET') return response(getGitHubSetupPageStatus(options));
+    if (pathname === '/api/setup/github/status' && method === 'GET') return response(recheckGitHubSetupPage(options));
     if (pathname === '/api/setup/github/save' && method === 'POST') return response(saveGitHubSetupPage(body, options));
     if (pathname === '/api/setup/github/recheck' && method === 'POST') return response(recheckGitHubSetupPage(options));
     if (pathname === '/api/setup/github/account' && method === 'POST') return response(runGitHubSetupAccountAction(body, options));
