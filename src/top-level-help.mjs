@@ -1,7 +1,8 @@
 export const TOP_LEVEL_HELP = `Paseo Issue Automation
 
 Standalone manager:
-  paseo-issue-automation manager [--open]
+  paseo-issue-automation
+  paseo-issue-automation --help
   paseo-issue-automation repo list
   paseo-issue-automation repo add [PATH]
   paseo-issue-automation repo show ID|OWNER/REPO|PATH
@@ -18,6 +19,7 @@ Repository-scoped commands:
   paseo-issue-automation pr-review status [--repo SELECTOR]
   paseo-issue-automation browser doctor [--repo SELECTOR]
 
+Run paseo-issue-automation with no arguments to start the standalone manager and open its dashboard.
 Run a repository-scoped command inside a Git repository or select a registered repository with --repo.
 The standalone manager listens on 127.0.0.1:4318 by default.
 `;

@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -49,7 +53,7 @@ jobs:
           cd package-smoke-test
           npm init -y >/dev/null
           npm install "../$PACKAGE_TGZ"
-          npx paseo-issue-automation help
+          npx paseo-issue-automation --help
           test -x node_modules/.bin/playwright
           ./node_modules/.bin/playwright --version
           node -e "import('playwright').then(module => { if (!module.chromium) process.exit(1); })"

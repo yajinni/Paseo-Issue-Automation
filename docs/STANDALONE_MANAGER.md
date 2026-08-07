@@ -15,7 +15,7 @@ npm install --global github:yajinni/Paseo-Issue-Automation#<approved-commit-sha>
 Confirm the command is available:
 
 ```bash
-paseo-issue-automation help
+paseo-issue-automation --help
 ```
 
 The global package is the controller installation. Managed repositories do not need `paseo-issue-automation` in `package.json`, a lockfile entry, `node_modules`, or a `paseo.json` service.
@@ -46,14 +46,10 @@ Registration records the normalized local path and GitHub identity in machine-lo
 ## 3. Start the manager
 
 ```bash
-paseo-issue-automation manager --open
+paseo-issue-automation
 ```
 
-Without `--open`, the server starts without opening a browser:
-
-```bash
-paseo-issue-automation manager
-```
+The bare command starts the standalone manager and opens its dashboard in the browser.
 
 Default dashboard:
 

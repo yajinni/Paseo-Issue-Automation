@@ -41,3 +41,4 @@
 - Add fail-closed finalization for repositories whose embedded dependency and service were already removed through another reviewed PR while machine-local state still reports an embedded installation.
 - Preserve superseded setup-PR details in the completed migration audit, refresh normal setup readiness, and keep issue claims paused after existing-migration finalization.
 - Document the existing-migration finalization workflow, including the post-PR #380 Julie's Dashboard recovery steps.
+- Make bare `paseo-issue-automation` start the standalone manager and open its dashboard, keep only `--help` as the top-level help command, and retire the `help`, `-h`, `manager`, and `manager --open` aliases.

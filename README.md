@@ -57,9 +57,9 @@ npm install --global github:yajinni/Paseo-Issue-Automation#<approved-commit-sha>
 Verify the CLI, register a repository, and start the manager:
 
 ```bash
-paseo-issue-automation help
+paseo-issue-automation --help
 paseo-issue-automation repo add /path/to/repository
-paseo-issue-automation manager --open
+paseo-issue-automation
 ```
 
 The standalone dashboard listens on:
@@ -200,8 +200,8 @@ A floating Git dependency is unsafe for an embedded automated repository because
 ## Commands
 
 ```bash
-paseo-issue-automation help
-paseo-issue-automation manager --open
+paseo-issue-automation
+paseo-issue-automation --help
 paseo-issue-automation repo list
 paseo-issue-automation repo add /path/to/repository
 paseo-issue-automation repo show OWNER/REPOSITORY
