@@ -17,6 +17,7 @@ export const GITHUB_PAGE_SCRIPT = String.raw`
   function activeAccount() { return state?.auth?.activeAccount || null; }
   function selectedRepo() { return state?.repositories?.find((repo) => repo.nameWithOwner === (document.getElementById('github-repository')?.value || state?.selection?.repository)) || null; }
   function disabledText(repo) { return (repo.disabledReasons || []).map((reason) => reason.message).join(' '); }
+  function cardClass(missing) { return 'setup-card' + (missing ? ' required-missing' : ''); }
 
   function render() {
     if (!onPage() || !state || !content()) return;
@@ -30,22 +31,25 @@ export const GITHUB_PAGE_SCRIPT = String.raw`
     const accountRows = accounts.map((item) => '<div class="check-row ' + (item.active ? 'ok' : '') + '"><span class="check-dot">' + (item.active ? '✓' : '·') + '</span><div><strong>' + escape(item.login) + '</strong><div class="check-detail">' + escape(item.host) + (item.active ? ' · active' : '') + '</div>' + (!item.active ? '<button class="action" type="button" data-github-switch="' + escape(item.login) + '" data-github-host="' + escape(item.host) + '">Use account</button>' : '') + '</div></div>').join('');
     const repoOptions = [option('', repos.length ? 'Choose a repository' : 'No repositories found', !selection.repository)];
     for (const item of repos) repoOptions.push(option(item.nameWithOwner, item.nameWithOwner + ' · ' + (item.visibility || 'unknown') + (item.selectable ? '' : ' · unavailable'), item.nameWithOwner === selection.repository, !item.selectable));
+    const accountMissing = state.cli?.installed !== true || !account;
+    const repositoryMissing = !repo || repo.selectable !== true;
+    const branchMissing = Boolean(repo?.selectable && !selection.baseBranch);
 
     content().className = '';
     content().innerHTML = '<div class="paseo-grid">'
-      + '<section class="setup-card"><h3>GitHub CLI and account</h3><p>The wizard uses GitHub CLI as the authentication boundary. Tokens are never copied into setup state.</p>'
+      + '<section class="' + cardClass(accountMissing) + '"><h3>GitHub CLI and account</h3><p>The wizard uses GitHub CLI as the authentication boundary. Tokens are never copied into setup state.</p>'
       + '<div class="checklist">' + (state.cli?.installed ? '<div class="check-row ok"><span class="check-dot">✓</span><div><strong>GitHub CLI</strong><div class="check-detail">' + escape(state.cli.version || state.cli.path || 'Installed') + '</div></div></div>' : '<div class="check-row bad"><span class="check-dot">!</span><div><strong>GitHub CLI required</strong><div class="check-detail">Install gh, then recheck.</div></div></div>') + accountRows + '</div>'
       + '<div class="inline-actions"><button class="action" id="github-add-account" type="button">Add account</button>' + (account ? '<button class="action" id="github-reauth" type="button">Reauthenticate</button><button class="action" id="github-setup-git" type="button">Set up Git credentials</button>' : '') + '</div></section>'
-      + '<section class="setup-card"><h3>Repository</h3><p>Only repositories with the read, branch-push, pull-request, issue, and label capabilities required by automation can be selected.</p>'
+      + '<section class="' + cardClass(repositoryMissing) + '"><h3>Repository</h3><p>Only repositories with the read, branch-push, pull-request, issue, and label capabilities required by automation can be selected.</p>'
       + '<div class="field"><label for="github-repository-filter">Filter repositories</label><input id="github-repository-filter" type="text" value="' + escape(filter) + '" placeholder="owner or repository"></div>'
       + '<div class="field"><label for="github-repository">Repository</label><select id="github-repository">' + repoOptions.join('') + '</select></div>'
       + (repo && !repo.selectable ? '<div class="notice">' + escape(disabledText(repo)) + '</div>' : '')
       + (state.catalogBlocker ? '<div class="notice">' + escape(state.catalogBlocker.message) + ' ' + escape(state.catalogBlocker.recoveryAction || '') + '</div>' : '')
       + '</section>'
-      + '<section class="setup-card"><h3>Base branch</h3><p>The repository default branch is recommended, but any discovered branch may be selected. Protected base branches remain valid.</p>'
+      + '<section class="' + cardClass(branchMissing) + '"><h3>Base branch</h3><p>The repository default branch is recommended, but any discovered branch may be selected. Protected base branches remain valid.</p>'
       + '<div class="field"><label for="github-base-branch">Base branch</label><select id="github-base-branch">' + branchChoices.join('') + '</select></div>'
       + (state.branchBlocker ? '<div class="notice">' + escape(state.branchBlocker.message) + ' ' + escape(state.branchBlocker.recoveryAction || '') + '</div>' : '')
-      + '<div class="inline-actions"><button class="action primary" id="github-save" type="button">Save repository</button><button class="action" id="github-refresh" type="button">Refresh repositories</button></div></section>'
+      + '<div class="inline-actions"><button class="action" id="github-refresh" type="button">Refresh repositories</button></div></section>'
       + '</div>';
 
     document.querySelectorAll('[data-github-switch]').forEach((button) => button.addEventListener('click', () => accountAction('switch', { user: button.dataset.githubSwitch, host: button.dataset.githubHost })));
@@ -54,7 +58,7 @@ export const GITHUB_PAGE_SCRIPT = String.raw`
     document.getElementById('github-setup-git')?.addEventListener('click', () => accountAction('setup-git', { host: account?.host }));
     document.getElementById('github-repository-filter')?.addEventListener('input', (event) => { filter = event.target.value; render(); });
     document.getElementById('github-repository')?.addEventListener('change', (event) => save({ repository: event.target.value }));
-    document.getElementById('github-save')?.addEventListener('click', () => save({ repository: document.getElementById('github-repository')?.value || '', baseBranch: document.getElementById('github-base-branch')?.value || '' }));
+    document.getElementById('github-base-branch')?.addEventListener('change', (event) => save({ repository: document.getElementById('github-repository')?.value || '', baseBranch: event.target.value }));
     document.getElementById('github-refresh')?.addEventListener('click', () => refresh(true));
     if (typeof technical !== 'undefined') {
       technical = state.technicalDetails || {};

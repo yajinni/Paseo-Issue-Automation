@@ -15,6 +15,17 @@ test('issues page UI exposes approved selection, advanced options, and installat
   assert.match(ISSUES_PAGE_SCRIPT, /api\/setup\/issues\/recheck/);
 });
 
+test('issue settings save immediately and missing preview/settings are highlighted', () => {
+  assert.match(ISSUES_PAGE_SCRIPT, /input\[name="issue-mode"\][^]*addEventListener\('change', save\)/);
+  assert.match(ISSUES_PAGE_SCRIPT, /issues-max-active[^]*addEventListener\('change', save\)/);
+  assert.match(ISSUES_PAGE_SCRIPT, /issues-retries[^]*addEventListener\('change', save\)/);
+  assert.match(ISSUES_PAGE_SCRIPT, /issues-excluded[^]*addEventListener\('change', save\)/);
+  assert.match(ISSUES_PAGE_SCRIPT, /Issue settings save automatically when changed/);
+  assert.match(ISSUES_PAGE_SCRIPT, /cardClass\(settingsMissing\)/);
+  assert.match(ISSUES_PAGE_SCRIPT, /cardClass\(previewMissing\)/);
+  assert.doesNotMatch(ISSUES_PAGE_SCRIPT, /id="issues-save"/);
+});
+
 test('issues page enhancer adds one standalone page script without replacing shell markup', () => {
   const base = setupWizardHtml({ requestedPage: 'issues' });
   const enhanced = enhanceSetupWizardWithIssuesPage(base);

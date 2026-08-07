@@ -7,13 +7,15 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   function escape(value) { return String(value == null ? '' : value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;'); }
   function selectedWorkflow() { return document.querySelector('input[name="review-workflow"]:checked')?.value || state?.selection?.workflow || 'quick-manual'; }
   function autoMergeAvailable() { const workflow = selectedWorkflow(); return workflow === 'full-immediate' || workflow === 'quick-web-chatgpt'; }
+  function cardClass(missing) { return 'setup-card' + (missing ? ' required-missing' : ''); }
   function profileCard() {
     if (selectedWorkflow() !== 'quick-web-chatgpt') return '';
     const profile = state?.profile || {};
     const ui = profile.ui || {};
     const ready = profile.ready === true;
     const conversation = state?.selection?.conversationUrl || '';
-    return '<section class="setup-card" id="chatgpt-profile-card"><h3>ChatGPT Profile</h3>'
+    const missing = !ready || !conversation;
+    return '<section class="' + cardClass(missing) + '" id="chatgpt-profile-card"><h3>ChatGPT Profile</h3>'
       + '<p>The ChatGPT Profile is an isolated signed-in browser session used only for Web ChatGPT full review. Paseo never asks for or stores your ChatGPT password.</p>'
       + '<div class="checklist"><div class="check-row ' + (ready ? 'ok' : 'bad') + '"><span class="check-dot">' + (ready ? '✓' : '!') + '</span><div><strong>' + escape(ui.statusText || (ready ? 'Signed in and ready' : 'Not ready')) + '</strong><div class="check-detail">' + escape(profile.message || (ready ? 'Authenticated session, review chat, repository access, and session persistence verified.' : 'Open ChatGPT Profile, sign in if needed, choose a review chat, then Recheck.')) + '</div></div></div></div>'
       + '<div class="field"><label for="review-chat-url">PR review chat URL</label><input id="review-chat-url" type="text" autocomplete="off" value="' + escape(conversation) + '" placeholder="https://chatgpt.com/c/..."></div>'
@@ -32,24 +34,29 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   function render() {
     if (!onPage() || !state || !content()) return;
     const s = state.selection || {};
+    const workflowMissing = !['quick-manual', 'quick-web-chatgpt', 'full-immediate'].includes(s.workflow);
+    const roundsMissing = !Number.isInteger(Number(s.quickMaxRounds)) || Number(s.quickMaxRounds) < 1 || Number(s.quickMaxRounds) > 20
+      || !Number.isInteger(Number(s.fullMaxRounds)) || Number(s.fullMaxRounds) < 1 || Number(s.fullMaxRounds) > 20;
     content().className = '';
     content().innerHTML = '<div class="paseo-grid">'
-      + '<section class="setup-card"><h3>Review workflow</h3><p>Choose the full-review path explicitly. The coding and review models were selected earlier; this page controls how review proceeds.</p>'
+      + '<section class="' + cardClass(workflowMissing) + '"><h3>Review workflow</h3><p>Choose the full-review path explicitly. The coding and review models were selected earlier; this page controls how review proceeds.</p>'
       + '<label class="choice"><input type="radio" name="review-workflow" value="quick-manual" ' + (s.workflow === 'quick-manual' ? 'checked' : '') + '> Quick review → Manual review</label>'
       + '<label class="choice"><input type="radio" name="review-workflow" value="quick-web-chatgpt" ' + (s.workflow === 'quick-web-chatgpt' ? 'checked' : '') + '> Quick review → Web ChatGPT full review</label>'
       + '<label class="choice"><input type="radio" name="review-workflow" value="full-immediate" ' + (s.workflow === 'full-immediate' ? 'checked' : '') + '> Full pull request review immediately</label>'
       + '<div class="notice">' + escape(state.explanations?.quick || '') + '</div></section>'
-      + '<section class="setup-card"><h3>Review rounds</h3>'
+      + '<section class="' + cardClass(roundsMissing) + '"><h3>Review rounds</h3>'
       + '<div class="field"><label for="review-quick-rounds">Maximum quick-review and correction rounds</label><input id="review-quick-rounds" type="number" min="1" max="20" value="' + escape(s.quickMaxRounds ?? 3) + '"></div>'
       + '<div class="field"><label for="review-full-rounds">Maximum full-review and correction rounds</label><input id="review-full-rounds" type="number" min="1" max="20" value="' + escape(s.fullMaxRounds ?? 3) + '"></div>'
       + '<p>Initial review counts as round 1. Quick-review exhaustion hands unresolved findings to the selected full reviewer instead of stopping the PR.</p>'
       + autoMergeControl()
-      + '<div class="inline-actions"><button class="action primary" id="review-save" type="button">Save review settings</button></div></section>'
+      + '<p class="muted">Review settings save automatically when changed.</p></section>'
       + profileCard()
       + '<section class="setup-card"><h3>Prompt previews</h3><p>Quick and full review prompts are versioned defaults. They are copyable but not editable during initial setup.</p><div class="notice">Quick prompt: focused issue/acceptance/validation check. Full prompt: broader changed-area and surrounding-code review.</div></section>'
       + '</div>';
-    document.querySelectorAll('input[name="review-workflow"]').forEach((input) => input.addEventListener('change', render));
-    document.getElementById('review-save')?.addEventListener('click', saveSettings);
+    document.querySelectorAll('input[name="review-workflow"]').forEach((input) => input.addEventListener('change', saveSettings));
+    document.getElementById('review-quick-rounds')?.addEventListener('change', saveSettings);
+    document.getElementById('review-full-rounds')?.addEventListener('change', saveSettings);
+    document.getElementById('review-auto-merge')?.addEventListener('change', saveSettings);
     document.getElementById('review-save-chat')?.addEventListener('click', saveChat);
     document.getElementById('review-open-profile')?.addEventListener('click', openProfile);
     document.getElementById('review-install-chromium')?.addEventListener('click', installChromium);
@@ -96,7 +103,7 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
     catch (error) { if (typeof showError === 'function') showError(error); }
     finally { loading = false; }
   }
-  const observer = new MutationObserver(() => { if (onPage() && content() && !content().querySelector('#review-save')) refresh(false); });
+  const observer = new MutationObserver(() => { if (onPage() && content() && !content().querySelector('input[name="review-workflow"]')) refresh(false); });
   const title = document.getElementById('page-title'); if (title) observer.observe(title, { childList: true, subtree: true });
   const root = content(); if (root) observer.observe(root, { childList: true });
   document.getElementById('recheck')?.addEventListener('click', (event) => { if (!onPage()) return; event.preventDefault(); event.stopImmediatePropagation(); refresh(true); }, true);
