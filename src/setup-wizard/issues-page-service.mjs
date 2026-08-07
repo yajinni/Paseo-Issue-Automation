@@ -42,8 +42,9 @@ function repositorySelection(session) {
 }
 
 function checkoutSelection(session) {
-  const value = session.pages?.checkout?.selections || {};
-  return String(value.checkoutPath || session.managedCheckoutChoice || '').trim();
+  const repository = session.pages?.repository?.selections || {};
+  const legacy = session.pages?.checkout?.selections || {};
+  return String(repository.checkoutPath || legacy.checkoutPath || session.managedCheckoutChoice || '').trim();
 }
 
 function normalizeLabelList(value) {
@@ -74,18 +75,33 @@ function normalizeTemplate(value) {
   return String(value || '').replace(/\r\n/g, '\n').trimEnd() + '\n';
 }
 
+function loadBundledTemplateContent(options = {}) {
+  const readFile = options.readFileSync || readFileSync;
+  const sourcePath = options.sourceTemplatePath || SOURCE_TEMPLATE_PATH;
+  return normalizeTemplate(readFile(sourcePath, 'utf8'));
+}
+
 function loadTemplatePreview(checkoutPath, options = {}) {
   const fileExists = options.existsSync || existsSync;
   const readFile = options.readFileSync || readFileSync;
-  const sourcePath = options.sourceTemplatePath || SOURCE_TEMPLATE_PATH;
+  const source = loadBundledTemplateContent(options);
+  if (!checkoutPath) {
+    return {
+      path: INSTALLED_TEMPLATE_PATH,
+      status: 'bundled',
+      setupPrChangeRequired: true,
+      message: 'Bundled automation issue template preview.',
+      content: source,
+    };
+  }
   const targetPath = path.join(checkoutPath, INSTALLED_TEMPLATE_PATH);
-  const source = normalizeTemplate(readFile(sourcePath, 'utf8'));
   if (!fileExists(targetPath)) {
     return {
       path: INSTALLED_TEMPLATE_PATH,
       status: 'missing',
       setupPrChangeRequired: true,
       message: 'The automation issue template will be added through the reviewed setup pull request.',
+      content: source,
     };
   }
   const current = normalizeTemplate(readFile(targetPath, 'utf8'));
@@ -97,13 +113,21 @@ function loadTemplatePreview(checkoutPath, options = {}) {
     message: same
       ? 'The installed automation issue template already matches this package version.'
       : 'The installed automation issue template differs and will be updated through the reviewed setup pull request.',
+    content: source,
   };
 }
 
 export function buildIssueInstallationPreview({ repository, checkoutPath }, options = {}) {
   if (!repository) throw new Error('Choose a GitHub repository before previewing issue setup.');
-  if (!checkoutPath) throw new Error('Prepare a local checkout before previewing issue setup.');
-  const existingLabels = (options.labelLoader || loadRepositoryLabels)(repository, options);
+
+  let existingLabels = [];
+  let labelPreviewError = null;
+  try {
+    existingLabels = (options.labelLoader || loadRepositoryLabels)(repository, options);
+  } catch (error) {
+    labelPreviewError = String(error?.message || error);
+  }
+
   const byName = new Map(existingLabels.map((label) => [label.name, label]));
   const labels = Object.values(LIFECYCLE_LABEL_CATALOG).map((managed) => {
     const existing = byName.get(managed.name) || null;
@@ -111,25 +135,50 @@ export function buildIssueInstallationPreview({ repository, checkoutPath }, opti
       name: managed.name,
       desiredColor: managed.color,
       desiredDescription: managed.description,
-      status: existing ? 'reused' : 'missing',
+      status: existing ? 'reused' : labelPreviewError ? 'pending' : 'missing',
       existingColor: existing?.color || null,
       existingDescription: existing?.description || null,
       willOverwriteExistingMetadata: false,
       action: existing
         ? 'Reuse the existing label without silently changing its color or description.'
-        : 'Create this managed lifecycle label directly through GitHub after final confirmation.',
+        : 'Ensure this managed lifecycle label exists after final confirmation.',
     };
   });
-  const template = (options.templatePreviewLoader || loadTemplatePreview)(checkoutPath, options);
+
+  let templatePreviewError = null;
+  let template;
+  try {
+    const loaded = (options.templatePreviewLoader || loadTemplatePreview)(checkoutPath, options) || {};
+    template = {
+      ...loaded,
+      path: loaded.path || INSTALLED_TEMPLATE_PATH,
+      content: loaded.content || loadBundledTemplateContent(options),
+    };
+  } catch (error) {
+    templatePreviewError = String(error?.message || error);
+    template = {
+      path: INSTALLED_TEMPLATE_PATH,
+      status: 'bundled',
+      setupPrChangeRequired: true,
+      message: 'Bundled automation issue template preview.',
+      content: loadBundledTemplateContent(options),
+    };
+  }
+
   return {
     labels,
     labelSummary: {
       missing: labels.filter((label) => label.status === 'missing').length,
       reused: labels.filter((label) => label.status === 'reused').length,
+      pending: labels.filter((label) => label.status === 'pending').length,
     },
     template,
-    directGitHubChanges: ['Create missing managed lifecycle labels after final confirmation.'],
+    directGitHubChanges: ['Ensure managed lifecycle labels exist after final confirmation.'],
     setupPullRequestChanges: template.setupPrChangeRequired ? [template.path] : [],
+    previewErrors: {
+      labels: labelPreviewError,
+      template: templatePreviewError,
+    },
   };
 }
 
@@ -139,11 +188,6 @@ function validateSelection(selection, context) {
     code: 'issues-repository-required',
     message: 'Choose and verify a GitHub repository before configuring issue automation.',
     recoveryAction: 'Return to GitHub repository setup and choose a repository.',
-  });
-  if (!context.checkoutPath) blockers.push({
-    code: 'issues-checkout-required',
-    message: 'Prepare a registered local checkout before configuring issue automation.',
-    recoveryAction: 'Return to the checkout/workspace step and prepare the repository.',
   });
   if (!ISSUE_SELECTION_MODES.includes(selection.mode)) blockers.push({
     code: 'issues-selection-mode-invalid',
@@ -167,11 +211,6 @@ function validateSelection(selection, context) {
       recoveryAction: 'Remove invalid excluded-label values.',
     });
   }
-  if (context.previewError) blockers.push({
-    code: 'issues-installation-preview-unavailable',
-    message: 'Setup could not safely preview the repository labels and automation issue template.',
-    recoveryAction: 'Check GitHub access and the managed checkout, then Recheck.',
-  });
   return { ok: blockers.length === 0, blockers };
 }
 
@@ -180,7 +219,7 @@ function pageContext(session, options = {}) {
   const checkoutPath = checkoutSelection(session);
   let preview = null;
   let previewError = null;
-  if (repository.repository && checkoutPath) {
+  if (repository.repository) {
     try {
       preview = (options.previewLoader || buildIssueInstallationPreview)({
         repository: repository.repository,
@@ -209,7 +248,7 @@ function response(session, context) {
     preview: context.preview,
     check: session.pages?.issues?.lastCheck || {
       ok: validation.ok,
-      summary: validation.ok ? 'Issue selection and installation preview are ready.' : validation.blockers[0]?.message || 'Issue setup needs attention.',
+      summary: validation.ok ? 'Issue settings are ready.' : validation.blockers[0]?.message || 'Issue setup needs attention.',
       blockers: validation.blockers,
     },
     lifecycleLabels: Object.values(LIFECYCLE_LABEL_CATALOG),
@@ -217,8 +256,7 @@ function response(session, context) {
     explanations: {
       ordering: 'Eligible issues are processed by lowest issue number first. A native GitHub blocked-by dependency temporarily skips only that issue so the next eligible issue can run.',
       dependencies: 'Native GitHub blocked-by relationships are execution dependencies. Parent/sub-issue hierarchy and issue-body references do not create execution dependencies.',
-      template: 'The existing automated-coding issue template remains the issue-body contract and requires meaningful planning content before an issue can run.',
-      installation: 'Missing lifecycle labels are created directly through GitHub after final confirmation. Template file changes are made only through the reviewed setup pull request.',
+      template: 'This is the template that issues need to follow to be automatically processed.',
       customLabels: 'Existing labels with the same managed name are reused; setup does not silently overwrite user-customized colors or descriptions.',
     },
     technicalDetails: {
@@ -226,6 +264,8 @@ function response(session, context) {
       baseBranch: context.baseBranch,
       checkoutPath: context.checkoutPath,
       previewError: context.previewError,
+      labelPreviewError: context.preview?.previewErrors?.labels || null,
+      templatePreviewError: context.preview?.previewErrors?.template || null,
       templatePath: INSTALLED_TEMPLATE_PATH,
     },
   };
@@ -252,7 +292,7 @@ export function saveIssuesSetupPage(input = {}, options = {}) {
   const validation = validateSelection(selections(session), context);
   session = recordSetupPageCheck('issues', {
     ok: validation.ok,
-    summary: validation.ok ? 'Issue selection and installation preview are ready.' : validation.blockers[0]?.message || 'Issue setup needs attention.',
+    summary: validation.ok ? 'Issue settings are ready.' : validation.blockers[0]?.message || 'Issue setup needs attention.',
     blockers: validation.blockers,
   }, options);
   return response(session, context);
@@ -264,7 +304,7 @@ export function recheckIssuesSetupPage(options = {}) {
   const validation = validateSelection(selections(session), context);
   session = recordSetupPageCheck('issues', {
     ok: validation.ok,
-    summary: validation.ok ? 'Issue selection and installation preview are ready.' : validation.blockers[0]?.message || 'Issue setup needs attention.',
+    summary: validation.ok ? 'Issue settings are ready.' : validation.blockers[0]?.message || 'Issue setup needs attention.',
     blockers: validation.blockers,
   }, options);
   return response(session, context);
