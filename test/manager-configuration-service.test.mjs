@@ -53,6 +53,53 @@ test('manager configuration discovers the coding harness catalog through the sav
   assert.equal(response.status, 200);
   assert.equal(response.body.host, '127.0.0.1:6767');
   assert.deepEqual(response.body.catalog.providers.map((item) => item.id), ['opencode']);
+  assert.equal(response.body.diagnostics.providerCount, 1);
+});
+
+test('manager configuration surfaces the exact provider command failure when no coding harness is found', async (t) => {
+  const { rootDir, repository } = fixture(t);
+  await assert.rejects(() => managerConfigurationApiRequest({
+    method: 'GET',
+    pathname: route(repository, 'harnesses'),
+  }, {
+    rootDir,
+    credentialStore: { read: async () => null },
+    paseoContextFactory: ({ host, password }) => {
+      assert.equal(host, '127.0.0.1:6767');
+      assert.equal(password, null);
+      return {
+        command: (args) => {
+          assert.deepEqual(args, ['provider', 'ls', '--json']);
+          return {
+            ok: false,
+            exitCode: 1,
+            stdout: '',
+            stderr: 'Unknown command: provider',
+            timedOut: false,
+            resolvedCommand: 'C:\\Users\\Example\\.local\\bin\\paseo.cmd',
+            resolutionSource: 'paseo-desktop-user',
+          };
+        },
+      };
+    },
+    catalogLoader: async (_root, { runner }) => {
+      runner('paseo', ['provider', 'ls', '--json'], {});
+      return {
+        providers: [],
+        errors: ['Could not list Paseo providers.'],
+        complete: false,
+        elapsedMs: 2,
+      };
+    },
+  }), (error) => {
+    assert.equal(error.code, 'PASEO_HARNESS_DISCOVERY_EMPTY');
+    assert.match(error.message, /Paseo did not return any available coding harnesses/);
+    assert.match(error.message, /C:\\Users\\Example\\\.local\\bin\\paseo\.cmd/);
+    assert.match(error.message, /source: paseo-desktop-user/);
+    assert.match(error.message, /paseo provider ls --json failed \(exit 1\)/);
+    assert.match(error.message, /Unknown command: provider/);
+    return true;
+  });
 });
 
 test('manager configuration exposes live ChatGPT browser prerequisites', async (t) => {
