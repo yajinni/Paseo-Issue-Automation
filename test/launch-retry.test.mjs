@@ -6,7 +6,9 @@ import {
   expectedWorkspaceAgent,
   inspectWorkspaceAgents,
   nextReconciliationAttempt,
+  PASEO_WORKTREE_SLUG_MAX_LENGTH,
   verifyWorkspaceIdentity,
+  worktreeSlugForBranch,
   workspaceCreateArgs,
 } from '../src/launch-retry.mjs';
 
@@ -25,11 +27,29 @@ test('workspace creation and agent start are separate commands', () => {
   });
   assert.equal(create[0], 'workspace');
   assert.ok(create.includes('--new-branch'));
+  assert.ok(create.includes('--worktree-slug'));
   assert.ok(!create.includes('run'));
   assert.equal(start[0], 'run');
   assert.deepEqual(start.slice(start.indexOf('--workspace'), start.indexOf('--workspace') + 2), ['--workspace', 'wks_one']);
   assert.ok(!start.includes('--new-workspace'));
   assert.ok(!start.includes('--new-branch'));
+});
+
+test('long retry branches receive distinct short Paseo worktree slugs', () => {
+  const first = 'ai/issue-274-reconcile-accepted-openspec-and-rewrite-status';
+  const second = `${first}-attempt-2`;
+  const firstSlug = worktreeSlugForBranch(first);
+  const secondSlug = worktreeSlugForBranch(second);
+
+  assert.notEqual(firstSlug, secondSlug);
+  assert.match(firstSlug, /^pia-i274-a1-[a-f0-9]{12}$/);
+  assert.match(secondSlug, /^pia-i274-a2-[a-f0-9]{12}$/);
+  assert.ok(firstSlug.length <= PASEO_WORKTREE_SLUG_MAX_LENGTH);
+  assert.ok(secondSlug.length <= PASEO_WORKTREE_SLUG_MAX_LENGTH);
+
+  const args = workspaceCreateArgs({ root: '/repo', title: second, branch: second, baseBranch: 'main' });
+  const slugIndex = args.indexOf('--worktree-slug');
+  assert.equal(args[slugIndex + 1], secondSlug);
 });
 
 test('workspace agent inspection matches only the recorded worktree', () => {

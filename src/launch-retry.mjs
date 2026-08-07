@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { findFirstKey, run } from './process.mjs';
 
 export const AGENT_START_MAX_ATTEMPTS = 3;
 export const LAUNCH_RECONCILIATION_MAX_ATTEMPTS = 3;
+export const PASEO_WORKTREE_SLUG_MAX_LENGTH = 50;
 
 export function nextReconciliationAttempt(current = 0) {
   const previous = Number(current);
@@ -41,10 +43,21 @@ export function pathBelongsToWorkspace(workspacePath, candidatePath) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+export function worktreeSlugForBranch(branch) {
+  const raw = text(branch);
+  if (!raw) throw new Error('A Git branch is required to derive the Paseo worktree slug.');
+  const digest = createHash('sha256').update(raw).digest('hex').slice(0, 12);
+  const issue = /(?:^|\/)issue-(\d+)(?:-|$)/.exec(raw)?.[1] || null;
+  const attempt = /-attempt-(\d+)$/.exec(raw)?.[1] || '1';
+  const readable = issue ? `pia-i${issue}-a${attempt}-${digest}` : `pia-${digest}`;
+  return readable.length <= PASEO_WORKTREE_SLUG_MAX_LENGTH ? readable : `pia-${digest}`;
+}
+
 export function workspaceCreateArgs({ root, title, branch, baseBranch }) {
   return [
     'workspace', 'create', '--json',
     '--isolation', 'worktree', '--path', String(root),
+    '--worktree-slug', worktreeSlugForBranch(branch),
     '--title', String(title), '--mode', 'branch-off',
     '--new-branch', String(branch), '--base', String(baseBranch),
   ];
