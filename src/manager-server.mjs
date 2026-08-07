@@ -4,6 +4,9 @@ import { managerApiRequest } from './manager-api.mjs';
 import { managerHtml } from './manager-maintenance-ui.mjs';
 import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
+import { listRepositories } from './repository-registry.mjs';
+import { loadConfig } from './state.mjs';
+import { setupPageIdFromPath, setupWizardHtml } from './setup-wizard/ui.mjs';
 
 function json(response, status, body) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -25,6 +28,20 @@ function openBrowser(url) {
   child.unref();
 }
 
+export function managerHasConfiguredRepository({ rootDir } = {}) {
+  const repositories = listRepositories({ rootDir });
+  return repositories.some((repository) => {
+    try { return loadConfig(repository.path).setupComplete === true; }
+    catch { return false; }
+  });
+}
+
+function managerDashboardHtml() {
+  const html = managerHtml();
+  const setupLink = '<a href="/setup" data-manager-setup-link style="position:fixed;right:18px;bottom:18px;z-index:50;padding:10px 13px;border-radius:10px;background:#243044;color:#fff;text-decoration:none;border:1px solid #43526a;font:600 13px system-ui">Add repository via setup</a>';
+  return html.includes('</body>') ? html.replace('</body>', `${setupLink}</body>`) : `${html}${setupLink}`;
+}
+
 export async function startManagerServer({
   open = false,
   port = Number(process.env.PASEO_MANAGER_PORT || 4318),
@@ -38,8 +55,24 @@ export async function startManagerServer({
     try {
       const url = new URL(request.url, 'http://localhost');
       if (request.method === 'GET' && url.pathname === '/') {
+        if (!managerHasConfiguredRepository({ rootDir })) {
+          response.writeHead(302, { location: '/setup' });
+          response.end();
+          return;
+        }
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        response.end(managerHtml());
+        response.end(managerDashboardHtml());
+        return;
+      }
+      if (request.method === 'GET' && (url.pathname === '/setup' || url.pathname.startsWith('/setup/'))) {
+        const requestedPage = setupPageIdFromPath(url.pathname);
+        if (requestedPage === undefined) {
+          response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+          response.end('Unknown setup page.');
+          return;
+        }
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end(setupWizardHtml({ requestedPage }));
         return;
       }
       const body = ['POST', 'PUT', 'PATCH'].includes(request.method)
