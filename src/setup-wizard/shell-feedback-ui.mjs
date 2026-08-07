@@ -77,7 +77,7 @@ export const SETUP_SHELL_FEEDBACK_SCRIPT = String.raw`
 
   function stepMarkup(label, state, detail = '') {
     const symbol = state === 'ok' ? '✓' : state === 'bad' ? '!' : state === 'checking' ? '↻' : '·';
-    const stateLabel = state === 'ok' ? 'Verified' : state === 'bad' ? 'Needs attention' : state === 'checking' ? 'Checking' : 'Waiting';
+    const stateLabel = state === 'ok' ? 'Verified' : state === 'bad' ? 'Needs attention' : state === 'checking' ? 'Checking' : state === 'checked' ? 'Checked' : 'Waiting';
     return '<div class="setup-operation-step setup-operation-step-' + state + '"><span>' + symbol + '</span><div><strong>'
       + label.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
       + '</strong><small>' + stateLabel + (detail ? ' · ' + detail.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') : '') + '</small></div></div>';
@@ -107,6 +107,47 @@ export const SETUP_SHELL_FEEDBACK_SCRIPT = String.raw`
     return null;
   }
 
+  function blockingStepIndex(task, check) {
+    const code = String(check?.blockers?.[0]?.code || '');
+    if (!code) return 0;
+    if (task.path.includes('/paseo/')) {
+      if (code.includes('cli')) return 0;
+      if (code.includes('daemon')) return 1;
+      if (code.includes('password') || code.includes('auth')) return 2;
+      return 3;
+    }
+    if (task.path.includes('/harness/')) {
+      if (code.includes('coding-model') || code.includes('coding-thinking')) return 1;
+      if (code.includes('review-model') || code.includes('review-thinking')) return 2;
+      return 0;
+    }
+    if (task.path.includes('/github/')) {
+      if (code.includes('repository')) return 1;
+      if (code.includes('branch')) return 2;
+      return 0;
+    }
+    if (task.path.includes('/workspace/')) {
+      if (code.includes('workspace')) return 2;
+      if (code.includes('worktree') || code.includes('cleanup')) return 3;
+      return 0;
+    }
+    if (task.path.includes('/issues/')) {
+      if (code.includes('preview') || code.includes('template') || code.includes('label')) return 2;
+      return 0;
+    }
+    if (task.path.includes('/review/')) {
+      if (code.includes('round')) return 1;
+      if (code.includes('chatgpt') || code.includes('profile') || code.includes('chat')) return 2;
+      return 0;
+    }
+    if (task.path.includes('/readiness/')) {
+      if (code.includes('setup-pr')) return 1;
+      if (code.includes('probe')) return 2;
+      return 0;
+    }
+    return 0;
+  }
+
   function renderFinished(task, ok, body, failureMessage = '') {
     const overlay = ensureOverlay();
     if (!overlay || visibleTaskId !== task.id) return;
@@ -118,7 +159,11 @@ export const SETUP_SHELL_FEEDBACK_SCRIPT = String.raw`
     document.getElementById('setup-operation-copy').textContent = passed
       ? (check?.summary || 'The setup task completed.')
       : (blockerMessage || check?.summary || 'The setup task did not complete successfully.');
-    document.getElementById('setup-operation-steps').innerHTML = task.meta.steps.map((step, index) => stepMarkup(step, passed ? 'ok' : index === task.meta.steps.length - 1 ? 'bad' : 'ok')).join('');
+    const failedIndex = blockingStepIndex(task, check);
+    document.getElementById('setup-operation-steps').innerHTML = task.meta.steps.map((step, index) => {
+      if (passed) return stepMarkup(step, 'ok');
+      return stepMarkup(step, index === failedIndex ? 'bad' : 'checked');
+    }).join('');
     document.getElementById('setup-operation-elapsed').textContent = Math.max(1, Math.floor((Date.now() - task.startedAt) / 1000)) + 's total';
     setTimeout(() => {
       if (visibleTaskId !== task.id) return;
@@ -181,7 +226,8 @@ export const SETUP_SHELL_FEEDBACK_SCRIPT = String.raw`
     const status = document.getElementById('status');
     if (!status) return;
     const title = status.querySelector('.status-title')?.textContent?.trim() || '';
-    const unused = title === 'Not checked yet';
+    const copy = status.querySelector('.status-copy')?.textContent?.trim() || '';
+    const unused = !title && !copy;
     status.hidden = unused;
     status.setAttribute('aria-hidden', unused ? 'true' : 'false');
   }
@@ -200,14 +246,17 @@ export const SETUP_SHELL_FEEDBACK_SCRIPT = String.raw`
 const SETUP_SHELL_FEEDBACK_STYLE = String.raw`
 <style data-setup-shell-feedback-style>
 .setup-operation-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:#070a0fb8;backdrop-filter:blur(3px)}
-.setup-operation-overlay[hidden]{display:none}.setup-operation-card{width:min(560px,100%);display:grid;grid-template-columns:34px minmax(0,1fr);gap:14px;border:1px solid #3b4b61;background:#131b26;border-radius:14px;padding:20px;box-shadow:0 22px 70px #0009}.setup-operation-spinner{width:28px;height:28px;border:3px solid #4b607d;border-top-color:#dbeafe;border-radius:50%;animation:setup-operation-spin .8s linear infinite}.setup-operation-main>strong{display:block;font-size:17px}.setup-operation-copy{color:#aab8c9;margin-top:5px;line-height:1.45}.setup-operation-steps{display:grid;gap:7px;margin-top:14px}.setup-operation-step{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;align-items:start;padding:7px 8px;border:1px solid #2b394d;border-radius:8px;background:#0f1620}.setup-operation-step>span{display:grid;place-items:center;width:18px;height:18px;border:1px solid #526074;border-radius:50%;font-size:11px}.setup-operation-step strong,.setup-operation-step small{display:block}.setup-operation-step small{margin-top:2px;color:#8fa0b4}.setup-operation-step-ok{border-color:#2f6c48}.setup-operation-step-ok>span{background:#24633d;border-color:#2f8d55}.setup-operation-step-bad{border-color:#8c4945}.setup-operation-step-bad>span{background:#5f302d;border-color:#98514b}.setup-operation-step-checking{border-color:#365f8b}.setup-operation-step-checking>span{animation:setup-operation-spin 1s linear infinite}.setup-operation-step-waiting{opacity:.72}.setup-operation-elapsed{color:#718298;font-size:12px;margin-top:10px}@keyframes setup-operation-spin{to{transform:rotate(360deg)}}
+.setup-operation-overlay[hidden]{display:none}.setup-operation-card{width:min(560px,100%);display:grid;grid-template-columns:34px minmax(0,1fr);gap:14px;border:1px solid #3b4b61;background:#131b26;border-radius:14px;padding:20px;box-shadow:0 22px 70px #0009}.setup-operation-spinner{width:28px;height:28px;border:3px solid #4b607d;border-top-color:#dbeafe;border-radius:50%;animation:setup-operation-spin .8s linear infinite}.setup-operation-main>strong{display:block;font-size:17px}.setup-operation-copy{color:#aab8c9;margin-top:5px;line-height:1.45}.setup-operation-steps{display:grid;gap:7px;margin-top:14px}.setup-operation-step{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;align-items:start;padding:7px 8px;border:1px solid #2b394d;border-radius:8px;background:#0f1620}.setup-operation-step>span{display:grid;place-items:center;width:18px;height:18px;border:1px solid #526074;border-radius:50%;font-size:11px}.setup-operation-step strong,.setup-operation-step small{display:block}.setup-operation-step small{margin-top:2px;color:#8fa0b4}.setup-operation-step-ok{border-color:#2f6c48}.setup-operation-step-ok>span{background:#24633d;border-color:#2f8d55}.setup-operation-step-bad{border-color:#8c4945}.setup-operation-step-bad>span{background:#5f302d;border-color:#98514b}.setup-operation-step-checking{border-color:#365f8b}.setup-operation-step-checking>span{animation:setup-operation-spin 1s linear infinite}.setup-operation-step-waiting{opacity:.72}.setup-operation-step-checked{border-color:#3b4b61}.setup-operation-elapsed{color:#718298;font-size:12px;margin-top:10px}@keyframes setup-operation-spin{to{transform:rotate(360deg)}}
 .required-missing{border-color:#b74b4b!important;box-shadow:0 0 0 1px #b74b4b55}
 </style>`;
 
 export function enhanceSetupWizardWithShellFeedback(html) {
   const script = `<script data-setup-shell-feedback>${SETUP_SHELL_FEEDBACK_SCRIPT}</script>`;
   const payload = `${SETUP_SHELL_FEEDBACK_STYLE}${script}`;
-  return String(html).includes('</head>')
-    ? String(html).replace('</head>', `${payload}</head>`)
-    : `${payload}${html}`;
+  const cleaned = String(html)
+    .replaceAll('Not checked yet', '')
+    .replaceAll('Use Recheck after completing this page.', '');
+  return cleaned.includes('</head>')
+    ? cleaned.replace('</head>', `${payload}</head>`)
+    : `${payload}${cleaned}`;
 }
