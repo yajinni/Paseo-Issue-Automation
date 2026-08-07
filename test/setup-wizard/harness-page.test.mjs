@@ -88,6 +88,7 @@ test('harness page exposes ready providers and independent coding/review selecti
     catalogLoader: loader,
   });
   assert.deepEqual(result.catalog.providers.map((provider) => provider.id), ['alpha', 'beta']);
+  assert.equal(result.check.ok, false);
 
   result = await saveHarnessSetupPage({ harness: 'alpha' }, {
     rootDir,
@@ -111,8 +112,32 @@ test('harness page exposes ready providers and independent coding/review selecti
   assert.equal(result.check.ok, true);
   assert.equal(result.selection.codingThinking, 'high');
   assert.equal(result.selection.reviewThinking, '');
-  assert.match(result.reviewExplanation.quick, /Quick review/);
-  assert.match(result.reviewExplanation.full, /Full review/);
+  assert.match(result.reviewExplanation.quick, /light or same model/);
+  assert.match(result.reviewExplanation.full, /heavy PR review model/);
+});
+
+test('loading harness status automatically validates saved selections without requiring Recheck', async (t) => {
+  const rootDir = temporaryManager(t);
+  saveSetupPage('harness', {
+    selections: {
+      harness: 'alpha',
+      codingModel: 'alpha/fast',
+      codingThinking: 'high',
+      reviewModel: 'alpha/review',
+      reviewThinking: '',
+    },
+  }, { rootDir });
+  assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.harness.completed, false);
+
+  const result = await getHarnessSetupPageStatus({
+    rootDir,
+    credentialStore: credentialStore(),
+    contextFactory,
+    catalogLoader: async () => catalog([alpha]),
+  });
+
+  assert.equal(result.check.ok, true);
+  assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.harness.completed, true);
 });
 
 test('changing harness clears only model selections that belong to the prior harness', async (t) => {
