@@ -50,13 +50,14 @@ test('ordinary Paseo status load records a successful check without Recheck', as
   assert.ok(loadSetupSessionStore({ rootDir }).activeSession.pages.paseo.selections.host);
 });
 
-test('ordinary GitHub status load records valid account, repository, and branch state', (t) => {
+test('ordinary GitHub status load records valid repository state and automatic Paseo project readiness', async (t) => {
   const rootDir = manager(t);
+  saveSetupPage('paseo', { selections: { host: '127.0.0.1:6767' } }, { rootDir });
   saveSetupPage('repository', {
     selections: { host: 'github.com', account: 'example', repository: 'example/repo', baseBranch: 'main' },
   }, { rootDir });
 
-  const result = githubSetupPageApiRequest({ method: 'GET', pathname: '/api/setup/github/status' }, {
+  const result = await githubSetupPageApiRequest({ method: 'GET', pathname: '/api/setup/github/status' }, {
     rootDir,
     accountStatus: () => ({
       cli: { installed: true, path: '/test/gh', version: '2.0.0' },
@@ -74,11 +75,23 @@ test('ordinary GitHub status load records valid account, repository, and branch 
       }],
     }),
     branchLoader: () => ({ ok: true, branches: [{ name: 'main', recommended: true }], recommended: 'main' }),
+    contextFactory: () => ({}),
+    ensurePaseoProjectWorkspace: () => ({
+      ok: true,
+      project: { id: 'project-1', name: 'repo', checkoutPath: '/safe/repo' },
+      workspace: { id: 'workspace-1', name: 'Issue Coding Automation' },
+      createdProject: false,
+      createdWorkspace: false,
+      blocker: null,
+    }),
   });
 
   assert.equal(result.status, 200);
   assert.equal(result.body.check.ok, true);
+  assert.equal(result.body.paseoReady, true);
+  assert.equal(result.body.paseo.workspaceName, 'Issue Coding Automation');
   assert.equal(completed(rootDir, 'repository'), true);
+  assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.repository.selections.checkoutPath, '/safe/repo');
 });
 
 test('ordinary Issues status load validates safe defaults and preview without Recheck', (t) => {
