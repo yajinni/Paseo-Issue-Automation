@@ -12,6 +12,7 @@ export const MANAGER_ISSUES_PR_REVIEWS_STYLE = String.raw`
 export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
 (function managerIssuesAndPrReviews() {
   let built = false;
+  let issuePlanRequest = 0;
 
   function findCard(root, heading) {
     if (!root) return null;
@@ -71,6 +72,10 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
     return workflow || 'Not configured';
   }
 
+  function activeView() {
+    return document.querySelector('[data-manager-view-target][aria-current="page"]')?.dataset.managerViewTarget || 'overview';
+  }
+
   function renameNavigation() {
     const issuesButton = document.querySelector('[data-manager-view-target="automation"]');
     const reviewsButton = document.querySelector('[data-manager-view-target="reviews"]');
@@ -81,7 +86,7 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
   }
 
   function patchVisibleHeader() {
-    const active = document.querySelector('[data-manager-view-target][aria-current="page"]')?.dataset.managerViewTarget;
+    const active = activeView();
     const title = document.getElementById('manager-view-title');
     const description = document.getElementById('manager-view-description');
     if (active === 'automation') {
@@ -91,6 +96,19 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
       if (title) title.textContent = 'PR Reviews';
       if (description) description.textContent = 'Pull request review workflow, review worker state, and current review workload.';
     }
+  }
+
+  function patchOverviewTerminology() {
+    const replacements = new Map([
+      ['Active automation', 'Active issues'],
+      ['Claims', 'Issue processing'],
+      ['Coding worker', 'Issue-processing worker'],
+    ]);
+    document.querySelectorAll('.overview-summary-row span').forEach((label) => {
+      const replacement = replacements.get(label.textContent.trim()); if (replacement) label.textContent = replacement;
+    });
+    const latest = document.querySelector('#overview-latest-result div');
+    if (latest && latest.textContent.includes('Automation')) latest.textContent = latest.textContent.replace('Automation', 'Issues');
   }
 
   function relabelWorkerButtons(root) {
@@ -127,6 +145,7 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
     layout.append(workflow, worker, workload);
     view.replaceChildren(layout);
     relabelWorkerButtons(view);
+    renderIssuePlan({ loading: true });
   }
 
   function buildPrReviews() {
@@ -151,11 +170,26 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
     return '—';
   }
 
+  function setIssueBadge(plan) {
+    const badge = document.querySelector('[data-manager-badge="automation"]'); if (!badge) return;
+    if (!plan || plan.available === false) {
+      badge.classList.remove('visible', 'attention'); return;
+    }
+    const count = Number(plan.total || 0);
+    badge.textContent = String(count);
+    badge.classList.toggle('visible', count > 0);
+    badge.classList.remove('attention');
+  }
+
   function renderIssuePlan(plan) {
     const summary = document.getElementById('manager-issue-plan-summary');
     const list = document.getElementById('manager-issue-plan-list');
     if (!summary || !list) return;
     summary.textContent = '';
+    list.textContent = '';
+    if (plan?.loading) {
+      const loading = document.createElement('div'); loading.className = 'manager-issue-plan-empty'; loading.textContent = 'Loading open issues and dependency plan…'; list.append(loading); return;
+    }
     const entries = [
       ['Open', plan.total || 0], ['Active', plan.active || 0], ['Eligible', plan.eligible || 0],
       ['Blocked', plan.blocked || 0], ['Skipped', plan.skipped || 0],
@@ -164,15 +198,14 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
       const chip = document.createElement('span'); chip.textContent = label + ' ';
       const strong = document.createElement('strong'); strong.textContent = String(value); chip.append(strong); summary.append(chip);
     }
-    list.textContent = '';
     if (plan.available === false) {
-      const error = document.createElement('div'); error.className = 'manager-issue-plan-empty'; error.textContent = 'Issue plan unavailable: ' + (plan.error || 'Unknown error'); list.append(error); return;
+      const error = document.createElement('div'); error.className = 'manager-issue-plan-empty'; error.textContent = 'Issue plan unavailable: ' + (plan.error || 'Unknown error'); list.append(error); setIssueBadge(plan); return;
     }
     const head = document.createElement('div'); head.className = 'manager-issue-plan-head';
     for (const text of ['Order', 'Issue', 'Status', 'Why / dependencies']) { const cell = document.createElement('div'); cell.textContent = text; head.append(cell); }
     list.append(head);
     if (!(plan.items || []).length) {
-      const empty = document.createElement('div'); empty.className = 'manager-issue-plan-empty'; empty.textContent = 'No open GitHub issues.'; list.append(empty); return;
+      const empty = document.createElement('div'); empty.className = 'manager-issue-plan-empty'; empty.textContent = 'No open GitHub issues.'; list.append(empty); setIssueBadge(plan); return;
     }
     for (const item of plan.items || []) {
       const row = document.createElement('div'); row.className = 'manager-issue-plan-row';
@@ -186,6 +219,23 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
       const reason = document.createElement('div'); reason.className = 'manager-issue-plan-reason'; reason.textContent = item.reason || '';
       if ((item.dependencies || []).length) { const deps = document.createElement('div'); deps.className = 'manager-issue-plan-deps'; deps.textContent = 'Blocked by: ' + item.dependencies.map((number) => '#' + number).join(', '); reason.append(deps); }
       row.append(order, issue, status, reason); list.append(row);
+    }
+    setIssueBadge(plan);
+  }
+
+  async function loadIssuePlan() {
+    if (activeView() !== 'automation') return;
+    const repositoryId = document.getElementById('repository-select')?.value;
+    if (!repositoryId || typeof jsonRequest !== 'function' || typeof selectedPath !== 'function') return;
+    const request = ++issuePlanRequest;
+    renderIssuePlan({ loading: true });
+    try {
+      const body = await jsonRequest(selectedPath('issues-plan'));
+      if (request !== issuePlanRequest || repositoryId !== document.getElementById('repository-select')?.value) return;
+      renderIssuePlan(body.issuePlan || { available: false, error: 'No issue plan was returned.', items: [] });
+    } catch (error) {
+      if (request !== issuePlanRequest) return;
+      renderIssuePlan({ available: false, error: error.message || String(error), items: [] });
     }
   }
 
@@ -210,7 +260,6 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
       ['Capacity wait', worker.lastScheduleReason || 'None'],
       ['Last error', worker.lastError || worker.capacityError || 'None'],
     ]);
-    renderIssuePlan(data.issuePlan || { available: false, error: 'No issue plan was returned.', items: [] });
 
     const review = data.configuration?.review || {};
     renderFacts('manager-review-workflow-facts', [
@@ -230,22 +279,28 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
       reviewBadge.classList.toggle('visible', reviewItems.length > 0);
       reviewBadge.classList.toggle('attention', attention > 0);
     }
-    const issueBadge = document.querySelector('[data-manager-badge="automation"]');
-    if (issueBadge) {
-      const count = Number(data.issuePlan?.active || 0) + Number(data.issuePlan?.eligible || 0) + Number(data.issuePlan?.blocked || 0);
-      issueBadge.textContent = String(count);
-      issueBadge.classList.toggle('visible', count > 0);
-      issueBadge.classList.toggle('attention', Number(data.issuePlan?.blocked || 0) > 0);
-    }
-    renameNavigation(); patchVisibleHeader();
+    renameNavigation(); patchVisibleHeader(); patchOverviewTerminology();
+    if (activeView() === 'automation') queueMicrotask(loadIssuePlan);
+  }
+
+  function onViewChanged() {
+    patchVisibleHeader();
+    if (activeView() === 'automation') loadIssuePlan();
   }
 
   function build() {
     if (built) return; built = true;
-    renameNavigation(); buildIssues(); buildPrReviews(); patchVisibleHeader();
-    document.querySelectorAll('[data-manager-view-target]').forEach((button) => button.addEventListener('click', () => queueMicrotask(patchVisibleHeader)));
-    window.addEventListener('popstate', () => queueMicrotask(patchVisibleHeader));
+    renameNavigation(); buildIssues(); buildPrReviews(); patchVisibleHeader(); patchOverviewTerminology();
+    const nav = document.querySelector('.manager-sidebar-nav');
+    if (nav) {
+      const observer = new MutationObserver((mutations) => {
+        if (mutations.some((mutation) => mutation.type === 'attributes' && mutation.attributeName === 'aria-current')) queueMicrotask(onViewChanged);
+      });
+      observer.observe(nav, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
+    }
+    window.addEventListener('popstate', () => queueMicrotask(onViewChanged));
     try { if (typeof currentStatus !== 'undefined' && currentStatus) render(currentStatus); } catch {}
+    if (activeView() === 'automation') loadIssuePlan();
   }
 
   const previous = window.renderStatus;
