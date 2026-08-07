@@ -26,7 +26,7 @@ function authJson(active = 'alice') {
         { host: 'github.com', login: 'bob', active: active === 'bob', state: 'success', tokenSource: 'oauth_token' },
       ],
       'git.example.test': [
-        { host: 'git.example.test', login: 'enterprise-user', active: true, state: 'success', credential: 'must-not-leak' },
+        { host: 'git.example.test', login: 'enterprise-user', active: active === 'enterprise-user', state: 'success', credential: 'must-not-leak' },
       ],
     },
   });
