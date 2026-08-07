@@ -74,7 +74,12 @@ function normalizedModel(value, label) {
 }
 
 function normalizedThinking(value, label) {
-  return normalizedIdentifier(value, label, 100);
+  const selection = String(value || '').trim();
+  if (!selection) return '';
+  if (selection.length > 100 || /\s/.test(selection)) {
+    throw new Error(`${label} must be a valid Paseo thinking option ID.`);
+  }
+  return selection;
 }
 
 function normalizedBranch(value) {
