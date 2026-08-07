@@ -39,13 +39,28 @@ export const REPOSITORY_PASEO_SCRIPT = String.raw`
     if (summary) summary.textContent = 'Choose the GitHub repository and base branch. Paseo project and permanent workspace setup happens automatically.';
   }
 
+  function requestPaseoStatus() {
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open('GET', '/api/setup/github/paseo-status', true);
+      request.setRequestHeader('accept', 'application/json');
+      request.onload = () => {
+        let body = null;
+        try { body = JSON.parse(request.responseText || '{}'); }
+        catch { reject(new Error('Paseo project status returned invalid JSON.')); return; }
+        if (request.status >= 200 && request.status < 300) resolve(body);
+        else reject(new Error(body?.error?.message || 'Paseo project status request failed.'));
+      };
+      request.onerror = () => reject(new Error('Paseo project status request failed.'));
+      request.send();
+    });
+  }
+
   async function refresh() {
     if (!onPage() || loading || !content()?.querySelector('#github-repository')) return;
     loading = true;
     try {
-      const response = await fetch('/api/setup/github/paseo-status', { headers: { 'content-type': 'application/json' } });
-      const body = await response.json();
-      if (response.ok) render(body);
+      render(await requestPaseoStatus());
     } catch {
       // The main repository page owns request-error feedback.
     } finally {
@@ -59,13 +74,18 @@ export const REPOSITORY_PASEO_SCRIPT = String.raw`
     refreshTimer = setTimeout(refresh, 0);
   }
 
+  function mutationComesOnlyFromPaseoCard(mutation) {
+    const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
+    if (target?.closest?.('#github-paseo-project-card')) return true;
+    const changedElements = [...mutation.addedNodes, ...mutation.removedNodes]
+      .filter((node) => node instanceof Element);
+    return changedElements.length > 0 && changedElements.every((node) =>
+      node.id === 'github-paseo-project-card' || node.closest?.('#github-paseo-project-card'));
+  }
+
   const root = content();
   if (root) new MutationObserver((mutations) => {
-    const onlyOwnCardChanged = mutations.length > 0 && mutations.every((mutation) => {
-      const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
-      return target?.closest?.('#github-paseo-project-card');
-    });
-    if (!onlyOwnCardChanged) scheduleRefresh();
+    if (!mutations.length || !mutations.every(mutationComesOnlyFromPaseoCard)) scheduleRefresh();
   }).observe(root, { childList: true, subtree: true });
   addEventListener('popstate', scheduleRefresh);
   scheduleRefresh();
