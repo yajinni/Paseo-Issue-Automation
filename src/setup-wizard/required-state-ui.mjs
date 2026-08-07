@@ -12,7 +12,7 @@ export const REQUIRED_STATE_SCRIPT = String.raw`
     const root = document.getElementById('page-content');
     if (!root) return;
     applyRequiredState();
-    new MutationObserver(applyRequiredState).observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    new MutationObserver(applyRequiredState).observe(root, { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
