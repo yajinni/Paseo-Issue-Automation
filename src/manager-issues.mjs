@@ -64,6 +64,62 @@ function rejectionLabel(kind) {
   return labels[kind] || 'Not eligible';
 }
 
+export function buildManagerIssueFlow(items = []) {
+  const byNumber = new Map(items.map((item) => [Number(item.issueNumber), item]));
+  const automatic = new Set(items
+    .filter((item) => ['active', 'next', 'eligible', 'blocked', 'skipped'].includes(String(item.statusId || '')))
+    .map((item) => Number(item.issueNumber)));
+  const included = new Set(automatic);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const number of [...included]) {
+      for (const dependency of byNumber.get(number)?.dependencies || []) {
+        const dependencyNumber = Number(dependency);
+        if (byNumber.has(dependencyNumber) && !included.has(dependencyNumber)) {
+          included.add(dependencyNumber);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  const dependencies = {};
+  const unlocks = Object.fromEntries([...included].map((number) => [number, []]));
+  for (const number of included) {
+    const internal = (byNumber.get(number)?.dependencies || [])
+      .map(Number)
+      .filter((dependency) => included.has(dependency));
+    dependencies[number] = internal;
+    for (const dependency of internal) unlocks[dependency].push(number);
+  }
+  for (const values of Object.values(unlocks)) values.sort((left, right) => left - right);
+
+  const remaining = new Set(included);
+  const resolved = new Set();
+  const waves = [];
+  while (remaining.size) {
+    const wave = [...remaining]
+      .filter((number) => (dependencies[number] || []).every((dependency) => resolved.has(dependency) || !remaining.has(dependency)))
+      .sort((left, right) => left - right);
+    if (!wave.length) break;
+    waves.push(wave);
+    for (const number of wave) {
+      remaining.delete(number);
+      resolved.add(number);
+    }
+  }
+
+  return {
+    automaticIssueNumbers: [...automatic].sort((left, right) => left - right),
+    includedIssueNumbers: [...included].sort((left, right) => left - right),
+    dependencies,
+    unlocks,
+    waves: waves.map((issueNumbers, index) => ({ wave: index + 1, issueNumbers })),
+    unresolvedIssueNumbers: [...remaining].sort((left, right) => left - right),
+  };
+}
+
 export function managerIssuePlan(root, config, {
   jsonRunner = runJson,
   runtimeLoader = loadRuntime,
@@ -165,6 +221,7 @@ export function managerIssuePlan(root, config, {
     skipped: items.filter((item) => item.statusId === 'skipped').length,
     active: items.filter((item) => item.statusId === 'active').length,
     nextIssueNumber: orderedEligible[0] || null,
+    flow: buildManagerIssueFlow(items),
     items,
   };
 }
