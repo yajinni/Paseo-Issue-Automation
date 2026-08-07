@@ -11,6 +11,7 @@ import {
   listRuns,
   loadConfig,
   loadIntegration,
+  loadIssueLifecycle,
   loadRuntime,
   statePaths,
 } from './state.mjs';
@@ -53,7 +54,10 @@ export function managerRepositoryStatus(repository, {
   const migrationAdoption = controllerMode === CONTROLLER_MODES.embedded
     ? inspectExternalMigrationAdoption(inspected.path, { runner })
     : null;
-  const runs = listRuns(inspected.path);
+  const runs = listRuns(inspected.path).map((item) => ({
+    ...item,
+    lifecycle: loadIssueLifecycle(inspected.path, item.issueNumber, { limit: 250 }),
+  }));
   const workQueue = managerWorkQueue(runs, config);
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'closed'].includes(String(item?.status || '')),
