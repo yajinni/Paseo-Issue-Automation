@@ -2,13 +2,13 @@ import {
   installPlaywrightChromium,
   launchBrowserForLogin,
 } from '../browser-service.mjs';
+import { bringBrowserToForeground } from '../browser-foreground.mjs';
 import { installPlaywrightLibrary } from '../playwright-installer.mjs';
 import {
   CHATGPT_PROFILE_STATES,
   chatGptProfilePrerequisites,
   chatGptProfileUiModel,
   configureChatGptReviewChat,
-  verifyChatGptProfileReadiness,
 } from '../chatgpt-profile-readiness.mjs';
 import { REVIEW_WORKFLOWS } from './schema.mjs';
 import {
@@ -48,11 +48,6 @@ function selections(session) {
   };
 }
 
-function repositorySelection(session) {
-  const value = session.pages?.repository?.selections || {};
-  return String(value.repository || session.repository?.nameWithOwner || '').trim();
-}
-
 function needsWebChatGpt(selection) {
   return selection.workflow === 'quick-web-chatgpt';
 }
@@ -63,12 +58,17 @@ function baseValidation(selection, profileStatus) {
   if (!Number.isInteger(selection.quickMaxRounds) || selection.quickMaxRounds < 1 || selection.quickMaxRounds > 20) blockers.push({ code: 'quick-round-limit-invalid', message: 'Light-model review rounds must be from 1 through 20.' });
   if (!Number.isInteger(selection.fullMaxRounds) || selection.fullMaxRounds < 1 || selection.fullMaxRounds > 20) blockers.push({ code: 'full-round-limit-invalid', message: 'Full-review rounds must be from 1 through 20.' });
   if (needsWebChatGpt(selection)) {
-    if (!selection.conversationUrl) blockers.push({ code: 'review-chat-required', message: 'Enter the PR review chat URL before continuing with Web ChatGPT review.' });
-    if (profileStatus?.ready !== true) blockers.push({
-      code: 'chatgpt-profile-not-ready',
-      message: profileStatus?.message || 'ChatGPT Profile must be signed in and connected to the selected review chat.',
-      recoveryAction: profileStatus?.action || 'Recheck',
+    if (profileStatus?.libraryInstalled !== true) blockers.push({
+      code: 'playwright-required',
+      message: 'Install Playwright before continuing with Web ChatGPT review.',
+      recoveryAction: 'Install Playwright',
     });
+    if (profileStatus?.chromiumInstalled !== true) blockers.push({
+      code: 'chromium-required',
+      message: 'Install Chromium before continuing with Web ChatGPT review.',
+      recoveryAction: 'Install Chromium',
+    });
+    if (!selection.conversationUrl) blockers.push({ code: 'review-chat-required', message: 'Enter the PR review chat URL before continuing with Web ChatGPT review.' });
   }
   return { ok: blockers.length === 0, blockers };
 }
@@ -122,6 +122,7 @@ function response(session, profileStatus = null) {
       playwrightInstalled: profile?.libraryInstalled === true,
       chromiumInstalled: profile?.chromiumInstalled === true,
       profileState: profile?.state || null,
+      profileVerificationRequiredForSetup: false,
       passwordStored: false,
     },
   };
@@ -172,23 +173,30 @@ export async function saveReviewChat(input = {}, options = {}) {
       reviewChatMode: mode,
     },
   }, options);
+  const selection = selections(session);
+  const profile = profileSnapshot(selection, options);
+  const validation = baseValidation(selection, profile);
   session = recordSetupPageCheck('review', {
-    ok: false,
-    summary: 'Review chat saved. Recheck ChatGPT Profile readiness before continuing.',
-    blockers: [{ code: 'chatgpt-profile-recheck-required', message: 'Recheck ChatGPT Profile after choosing the review chat.' }],
+    ok: validation.ok,
+    summary: validation.ok ? 'Review chat saved. Review setup is ready.' : validation.blockers[0]?.message || 'Review setup needs attention.',
+    blockers: validation.blockers,
   }, options);
-  return response(session, profileSnapshot(selections(session), options));
+  return response(session, profile);
 }
 
 export async function openChatGptProfile(options = {}) {
   const selection = selections(activeSession(options));
   const open = options.openProfile || launchBrowserForLogin;
   const session = await open({ conversationUrl: selection.conversationUrl || 'https://chatgpt.com/' });
+  const focus = options.focusProfile || bringBrowserToForeground;
+  const foreground = await focus(session?.page, options.foregroundOptions || {});
   return {
     opened: true,
     profileName: 'ChatGPT Profile',
-    closeRequiredBeforeRecheck: true,
+    closeWhenDone: true,
+    closeRequiredBeforeRecheck: false,
     sessionId: session?.leaseId || null,
+    foreground,
   };
 }
 
@@ -205,22 +213,7 @@ export function installChatGptChromium(options = {}) {
 export async function recheckReviewSetupPage(options = {}) {
   let session = activeSession(options);
   const selection = selections(session);
-  let profile = profileSnapshot(selection, options);
-  if (needsWebChatGpt(selection) && selection.conversationUrl && profile?.state === 'verification-required') {
-    const prerequisites = profile;
-    const verified = await (options.verifyProfile || verifyChatGptProfileReadiness)({
-      repository: repositorySelection(session),
-      conversationUrl: selection.conversationUrl,
-      repositoryAccessProbe: options.repositoryAccessProbe,
-      prerequisiteStatus: options.prerequisiteStatus,
-    });
-    profile = {
-      ...verified,
-      libraryInstalled: prerequisites.libraryInstalled === true,
-      chromiumInstalled: prerequisites.chromiumInstalled === true,
-    };
-    profile = { ...profile, ui: chatGptProfileUiModel(profile) };
-  }
+  const profile = profileSnapshot(selection, options);
   const validation = baseValidation(selection, profile);
   session = recordSetupPageCheck('review', {
     ok: validation.ok,

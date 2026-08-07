@@ -26,10 +26,12 @@ function setup(t) {
   return rootDir;
 }
 
-const verificationRequired = () => ({
+const browserReady = () => ({
   state: 'verification-required',
   ready: false,
   action: 'recheck',
+  libraryInstalled: true,
+  chromiumInstalled: true,
   profileExists: true,
   conversationUrl: CHAT,
 });
@@ -73,77 +75,80 @@ test('manual and full-immediate workflows can save round limits through 20 witho
   assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.review.completed, true);
 });
 
-test('Web ChatGPT workflow remains blocked until a chat is saved and profile readiness is verified', async (t) => {
+test('Web ChatGPT setup requires Playwright Chromium and a saved chat URL but not profile recheck', async (t) => {
   const rootDir = setup(t);
-  const initial = saveReviewSetupPage({ workflow: 'quick-web-chatgpt', quickMaxRounds: 3, fullMaxRounds: 3 }, {
+  let result = saveReviewSetupPage({ workflow: 'quick-web-chatgpt', quickMaxRounds: 3, fullMaxRounds: 3 }, {
     rootDir,
-    prerequisiteStatus: () => ({ state: 'review-chat-required', ready: false, action: 'choose-review-chat', profileExists: true }),
+    prerequisiteStatus: () => ({ state: 'browser-install-required', ready: false, libraryInstalled: false, chromiumInstalled: false }),
   });
-  assert.equal(initial.check.ok, false);
-  assert.equal(initial.check.blockers[0].code, 'review-chat-required');
+  assert.equal(result.check.ok, false);
+  assert.equal(result.check.blockers[0].code, 'playwright-required');
 
-  const saved = await saveReviewChat({ mode: 'dedicated', conversationUrl: CHAT }, {
+  result = saveReviewSetupPage({ workflow: 'quick-web-chatgpt' }, {
     rootDir,
-    prerequisiteStatus: verificationRequired,
+    prerequisiteStatus: () => ({ state: 'browser-install-required', ready: false, libraryInstalled: true, chromiumInstalled: false }),
+  });
+  assert.equal(result.check.ok, false);
+  assert.equal(result.check.blockers[0].code, 'chromium-required');
+
+  result = saveReviewSetupPage({ workflow: 'quick-web-chatgpt' }, { rootDir, prerequisiteStatus: browserReady });
+  assert.equal(result.check.ok, false);
+  assert.equal(result.check.blockers[0].code, 'review-chat-required');
+
+  const saved = await saveReviewChat({ mode: 'existing', conversationUrl: CHAT }, {
+    rootDir,
+    prerequisiteStatus: browserReady,
     saveBrowserConfig: (patch) => patch,
   });
-  assert.equal(saved.selection.reviewChatMode, 'dedicated');
   assert.equal(saved.selection.conversationUrl, CHAT);
-  assert.equal(saved.check.ok, false);
-
-  const verified = await recheckReviewSetupPage({
-    rootDir,
-    prerequisiteStatus: verificationRequired,
-    verifyProfile: async ({ repository, conversationUrl }) => ({
-      state: 'ready',
-      ready: true,
-      repository,
-      conversationUrl,
-      githubAccessVerified: true,
-      sessionPersistenceVerified: true,
-    }),
-  });
-  assert.equal(verified.check.ok, true);
-  assert.equal(verified.profile.ready, true);
-  assert.equal(verified.profile.repository, 'octo/app');
+  assert.equal(saved.check.ok, true);
+  assert.equal(saved.profile.ready, false);
+  assert.equal(saved.technicalDetails.profileVerificationRequiredForSetup, false);
   assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.review.completed, true);
 });
 
-test('sign-in required blocks setup but preserves active PR state semantics', async (t) => {
+test('an unverified or signed-out profile does not block setup once browser prerequisites and chat URL are ready', async (t) => {
   const rootDir = setup(t);
-  saveReviewSetupPage({ workflow: 'quick-web-chatgpt' }, { rootDir, prerequisiteStatus: verificationRequired });
+  saveReviewSetupPage({ workflow: 'quick-web-chatgpt' }, { rootDir, prerequisiteStatus: browserReady });
   await saveReviewChat({ mode: 'existing', conversationUrl: CHAT }, {
     rootDir,
-    prerequisiteStatus: verificationRequired,
+    prerequisiteStatus: browserReady,
     saveBrowserConfig: (patch) => patch,
   });
   const result = await recheckReviewSetupPage({
     rootDir,
-    prerequisiteStatus: verificationRequired,
-    verifyProfile: async () => ({
+    prerequisiteStatus: () => ({
       state: 'sign-in-required',
       ready: false,
       action: 'open-chatgpt-profile',
+      libraryInstalled: true,
+      chromiumInstalled: true,
       pauseNewWebReviews: true,
       failActivePullRequests: false,
       message: 'ChatGPT Profile needs you to sign in again.',
     }),
   });
-  assert.equal(result.check.ok, false);
+  assert.equal(result.check.ok, true);
+  assert.equal(result.profile.ready, false);
   assert.equal(result.profile.pauseNewWebReviews, true);
-  assert.equal(result.profile.failActivePullRequests, false);
-  assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.review.completed, false);
+  assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.review.completed, true);
 });
 
-test('Open ChatGPT Profile is a manual-login operation and never accepts a password', async (t) => {
+test('Log into ChatGPT Profile focuses the browser and never accepts a password or requires recheck', async (t) => {
   const rootDir = setup(t);
   let called = null;
+  let focused = null;
+  const page = { id: 'page-1' };
   const result = await openChatGptProfile({
     rootDir,
-    openProfile: async (input) => { called = input; return { leaseId: 'lease-1' }; },
+    openProfile: async (input) => { called = input; return { leaseId: 'lease-1', page }; },
+    focusProfile: async (input) => { focused = input; return { tabFocused: true, windowFocusRequested: true, osActivated: true }; },
   });
   assert.deepEqual(called, { conversationUrl: 'https://chatgpt.com/' });
+  assert.equal(focused, page);
   assert.equal(result.profileName, 'ChatGPT Profile');
-  assert.equal(result.closeRequiredBeforeRecheck, true);
+  assert.equal(result.closeWhenDone, true);
+  assert.equal(result.closeRequiredBeforeRecheck, false);
+  assert.equal(result.foreground.osActivated, true);
   assert.equal(Object.hasOwn(called, 'password'), false);
 });

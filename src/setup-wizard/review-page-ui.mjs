@@ -14,29 +14,21 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
   function profileCard() {
     if (selectedWorkflow() !== 'quick-web-chatgpt') return '';
     const profile = state?.profile || {};
-    const ui = profile.ui || {};
-    const ready = profile.ready === true;
     const playwrightReady = profile.libraryInstalled === true;
     const chromiumReady = profile.chromiumInstalled === true;
     const browserReady = playwrightReady && chromiumReady;
     const conversation = state?.selection?.conversationUrl || '';
-    const missing = !ready || !conversation;
+    const missing = !browserReady || !conversation;
     const playwrightAction = playwrightReady ? '' : '<button class="action" id="review-install-playwright" type="button">Install Playwright</button>';
     const chromiumAction = chromiumReady ? '' : '<button class="action" id="review-install-chromium" type="button" ' + (playwrightReady ? '' : 'disabled') + '>Install Chromium</button>';
-    const profileDetail = !playwrightReady
-      ? 'Install Playwright before logging into ChatGPT.'
-      : !chromiumReady
-        ? 'Install Chromium before logging into ChatGPT.'
-        : profile.message || (ready ? 'Signed-in profile and review chat are ready.' : 'Log into ChatGPT Profile, then Recheck.');
     return '<section class="' + cardClass(missing) + '" id="chatgpt-profile-card"><h3>ChatGPT Profile</h3>'
       + '<p>The ChatGPT Profile is an isolated signed-in browser session used only for Web ChatGPT full review. Paseo never asks for or stores your ChatGPT password.</p>'
       + '<div class="checklist">'
       + prerequisiteRow('Playwright', playwrightReady, playwrightAction)
       + prerequisiteRow('Chromium', chromiumReady, chromiumAction)
-      + '<div class="check-row ' + (ready ? 'ok' : 'bad') + '"><span class="check-dot">' + (ready ? '✓' : '!') + '</span><div><strong>' + escape(ui.statusText || (ready ? 'Signed in and ready' : 'Not ready')) + '</strong><div class="check-detail">' + escape(profileDetail) + '</div></div></div>'
       + '</div>'
-      + '<div class="inline-actions"><button class="action" id="review-open-profile" type="button" ' + (browserReady ? '' : 'disabled') + '>Log into ChatGPT Profile</button><button class="action primary" id="review-profile-recheck" type="button">Recheck</button></div>'
-      + '<div class="notice">Log into ChatGPT Profile, open or create the chat you want Paseo to use for PR reviews, then paste that chat URL below. The URL saves automatically when changed.</div>'
+      + '<div class="inline-actions"><button class="action" id="review-open-profile" type="button" ' + (browserReady ? '' : 'disabled') + '>Log into ChatGPT Profile</button></div>'
+      + '<div class="notice">Log into ChatGPT Profile if needed. Open or create the chat you want Paseo to use for PR reviews, paste its URL below, and close Chromium when you are finished. The URL saves automatically.</div>'
       + '<div class="field"><label for="review-chat-url">PR review chat URL</label><div style="display:flex;align-items:center;gap:12px"><input id="review-chat-url" style="flex:1" type="text" autocomplete="off" value="' + escape(conversation) + '" placeholder="https://chatgpt.com/c/..."><span id="review-chat-saved" style="color:#65c987;font-weight:700;' + (conversation ? '' : 'display:none;') + '">Saved</span></div></div>'
       + '</section>';
   }
@@ -79,7 +71,6 @@ export const REVIEW_PAGE_SCRIPT = String.raw`
     document.getElementById('review-open-profile')?.addEventListener('click', openProfile);
     document.getElementById('review-install-playwright')?.addEventListener('click', installPlaywright);
     document.getElementById('review-install-chromium')?.addEventListener('click', installChromium);
-    document.getElementById('review-profile-recheck')?.addEventListener('click', () => refresh(true));
     if (typeof technical !== 'undefined') technical = state.technicalDetails || {};
     const details = document.getElementById('technical-details'); if (details) details.textContent = JSON.stringify(state.technicalDetails || {}, null, 2);
     const shellStatus = document.getElementById('status'); const check = state.check;
