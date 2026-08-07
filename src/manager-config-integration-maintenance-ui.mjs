@@ -141,7 +141,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     const body = document.createElement('div'); body.className = 'manager-detail-disclosure-body';
     if (repository) body.append(repository); if (setup) body.append(setup); details.append(detailSummary, body);
     view.prepend(summary);
-    if (integration) view.insertBefore(integration, details); view.append(details);
+    view.append(details);
   }
 
   function buildMaintenance() {
