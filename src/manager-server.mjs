@@ -18,6 +18,7 @@ import { createPaseoCredentialStore } from './setup-wizard/paseo-credentials.mjs
 import { paseoSetupPageApiRequest } from './setup-wizard/paseo-page-api.mjs';
 import { reviewSetupPageApiRequest } from './setup-wizard/review-page-api.mjs';
 import { enhanceSetupWizardWithReviewPage } from './setup-wizard/review-page-ui.mjs';
+import { enhanceSetupWizardWithShellFeedback } from './setup-wizard/shell-feedback-ui.mjs';
 import { setupPageIdFromPath, setupWizardHtml } from './setup-wizard/ui.mjs';
 import { workspaceSetupPageApiRequest } from './setup-wizard/workspace-page-api.mjs';
 import { enhanceSetupWizardWithWorkspacePage } from './setup-wizard/workspace-page-ui.mjs';
@@ -118,7 +119,8 @@ export async function startManagerServer({
           return;
         }
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        const harnessHtml = enhanceSetupWizardWithHarnessPage(setupWizardHtml({ requestedPage }));
+        const shellHtml = enhanceSetupWizardWithShellFeedback(setupWizardHtml({ requestedPage }));
+        const harnessHtml = enhanceSetupWizardWithHarnessPage(shellHtml);
         const githubHtml = enhanceSetupWizardWithGitHubPage(harnessHtml);
         const workspaceHtml = enhanceSetupWizardWithWorkspacePage(githubHtml);
         const issuesHtml = enhanceSetupWizardWithIssuesPage(workspaceHtml);
