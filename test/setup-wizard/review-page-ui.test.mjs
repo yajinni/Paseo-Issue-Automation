@@ -25,7 +25,7 @@ test('review setup supports dedicated or existing stable chat URLs and safe repo
   assert.match(REVIEW_PAGE_SCRIPT, /stable URL/);
   assert.match(REVIEW_PAGE_SCRIPT, /safe review-protocol capability check/);
   assert.match(REVIEW_PAGE_SCRIPT, /must not modify repository state/);
-  assert.match(REVIEW_PAGE_SCRIPT, /sendTestPrompt/ === '' ? /never/ : /Recheck/);
+  assert.match(REVIEW_PAGE_SCRIPT, /Recheck/);
 });
 
 test('review page enhancer injects the progressive page script once', () => {
