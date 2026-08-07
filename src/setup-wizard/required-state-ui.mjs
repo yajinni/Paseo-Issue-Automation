@@ -4,7 +4,8 @@ export const REQUIRED_STATE_SCRIPT = String.raw`
     const root = document.getElementById('page-content');
     if (!root) return;
     root.querySelectorAll('.setup-card').forEach((card) => {
-      card.classList.toggle('required-check-failed', Boolean(card.querySelector('.check-row.bad')));
+      const ignoreChecklistFailures = card.hasAttribute('data-ignore-required-checks');
+      card.classList.toggle('required-check-failed', !ignoreChecklistFailures && Boolean(card.querySelector('.check-row.bad')));
     });
   }
 
