@@ -2,6 +2,7 @@ import {
   installPlaywrightChromium,
   launchBrowserForLogin,
 } from '../browser-service.mjs';
+import { installPlaywrightLibrary } from '../playwright-installer.mjs';
 import {
   CHATGPT_PROFILE_STATES,
   chatGptProfilePrerequisites,
@@ -39,7 +40,7 @@ function selections(session) {
   const workflow = REVIEW_WORKFLOWS.includes(value.workflow) ? value.workflow : 'quick-manual';
   return {
     workflow,
-    quickMaxRounds: normalizedRound(value.quickMaxRounds, 3, 'Maximum quick-review rounds'),
+    quickMaxRounds: normalizedRound(value.quickMaxRounds, 3, 'Maximum light-model review rounds'),
     fullMaxRounds: normalizedRound(value.fullMaxRounds, 3, 'Maximum full-review rounds'),
     conversationUrl: String(value.conversationUrl || '').trim() || null,
     reviewChatMode: value.reviewChatMode === 'existing' ? 'existing' : value.reviewChatMode === 'dedicated' ? 'dedicated' : null,
@@ -59,13 +60,13 @@ function needsWebChatGpt(selection) {
 function baseValidation(selection, profileStatus) {
   const blockers = [];
   if (!REVIEW_WORKFLOWS.includes(selection.workflow)) blockers.push({ code: 'review-workflow-invalid', message: 'Choose a supported review workflow.' });
-  if (!Number.isInteger(selection.quickMaxRounds) || selection.quickMaxRounds < 1 || selection.quickMaxRounds > 20) blockers.push({ code: 'quick-round-limit-invalid', message: 'Quick-review rounds must be from 1 through 20.' });
+  if (!Number.isInteger(selection.quickMaxRounds) || selection.quickMaxRounds < 1 || selection.quickMaxRounds > 20) blockers.push({ code: 'quick-round-limit-invalid', message: 'Light-model review rounds must be from 1 through 20.' });
   if (!Number.isInteger(selection.fullMaxRounds) || selection.fullMaxRounds < 1 || selection.fullMaxRounds > 20) blockers.push({ code: 'full-round-limit-invalid', message: 'Full-review rounds must be from 1 through 20.' });
   if (needsWebChatGpt(selection)) {
-    if (!selection.conversationUrl) blockers.push({ code: 'review-chat-required', message: 'Choose a PR review chat before continuing with Web ChatGPT review.' });
+    if (!selection.conversationUrl) blockers.push({ code: 'review-chat-required', message: 'Enter the PR review chat URL before continuing with Web ChatGPT review.' });
     if (profileStatus?.ready !== true) blockers.push({
       code: 'chatgpt-profile-not-ready',
-      message: profileStatus?.message || 'ChatGPT Profile must be signed in, connected to the selected review chat, and verified for repository access.',
+      message: profileStatus?.message || 'ChatGPT Profile must be signed in and connected to the selected review chat.',
       recoveryAction: profileStatus?.action || 'Recheck',
     });
   }
@@ -94,7 +95,7 @@ function response(session, profileStatus = null) {
       defaultApproved: false,
       explanation: autoMergeAvailable(selection.workflow)
         ? 'Optional automatic merge is off by default and can run only after full exact-head approval, passing required checks, current-base verification, and repository policy all allow it.'
-        : 'Automatic merge is unavailable for Quick → Manual review. A person must merge manually after review.',
+        : 'Automatic merge is unavailable for Light model review → Manual review. A person must merge manually after review.',
     },
     check: session.pages?.review?.lastCheck || {
       ok: validation.ok,
@@ -106,10 +107,10 @@ function response(session, profileStatus = null) {
       full: { copyable: true, editable: false },
     },
     explanations: {
-      quick: 'Quick review checks issue compliance, acceptance criteria, required validation, obvious mistakes, and unrelated changes before the selected full-review stage.',
+      quick: 'Light model review checks issue compliance, acceptance criteria, required validation, obvious mistakes, and unrelated changes before the selected next review stage.',
       full: 'Full review examines the complete change and relevant surrounding code, regressions, security/privacy, compatibility, migrations, and test sufficiency.',
-      manual: 'After quick review, a person performs the full review. Automatic merge is not used in manual mode.',
-      web: 'After quick review, Web ChatGPT performs the full review using the isolated ChatGPT Profile and selected PR review chat.',
+      manual: 'After light model review, a person performs the full review. Automatic merge is not used in manual mode.',
+      web: 'After light model review, Web ChatGPT performs the full review using the isolated ChatGPT Profile and selected PR review chat.',
     },
     technicalDetails: {
       workflow: selection.workflow,
@@ -118,6 +119,8 @@ function response(session, profileStatus = null) {
       autoMergeAvailable: autoMergeAvailable(selection.workflow),
       autoMergeApproved: selection.autoMergeApproved,
       conversationUrlConfigured: Boolean(selection.conversationUrl),
+      playwrightInstalled: profile?.libraryInstalled === true,
+      chromiumInstalled: profile?.chromiumInstalled === true,
       profileState: profile?.state || null,
       passwordStored: false,
     },
@@ -134,7 +137,7 @@ export function saveReviewSetupPage(input = {}, options = {}) {
   const nextWorkflow = String(input.workflow ?? prior.workflow).trim();
   const next = {
     workflow: nextWorkflow,
-    quickMaxRounds: normalizedRound(input.quickMaxRounds, prior.quickMaxRounds, 'Maximum quick-review rounds'),
+    quickMaxRounds: normalizedRound(input.quickMaxRounds, prior.quickMaxRounds, 'Maximum light-model review rounds'),
     fullMaxRounds: normalizedRound(input.fullMaxRounds, prior.fullMaxRounds, 'Maximum full-review rounds'),
     conversationUrl: prior.conversationUrl,
     reviewChatMode: prior.reviewChatMode,
@@ -155,9 +158,6 @@ export function saveReviewSetupPage(input = {}, options = {}) {
 export async function saveReviewChat(input = {}, options = {}) {
   const prior = selections(activeSession(options));
   const mode = input.mode === 'dedicated' ? 'dedicated' : 'existing';
-  // A dedicated chat may be created manually inside ChatGPT Profile. In that
-  // case its stable URL is supplied here and normalized exactly like an existing
-  // chat while the setup selection still records that it is dedicated.
   const manuallyCreatedDedicated = mode === 'dedicated' && String(input.conversationUrl || '').trim();
   const configured = await configureChatGptReviewChat({
     mode: manuallyCreatedDedicated ? 'existing' : mode,
@@ -192,6 +192,11 @@ export async function openChatGptProfile(options = {}) {
   };
 }
 
+export function installChatGptPlaywright(options = {}) {
+  const install = options.installPlaywright || installPlaywrightLibrary;
+  return install(options.playwrightOptions || {});
+}
+
 export function installChatGptChromium(options = {}) {
   const install = options.installChromium || installPlaywrightChromium;
   return install(options.browserOptions || {});
@@ -202,12 +207,18 @@ export async function recheckReviewSetupPage(options = {}) {
   const selection = selections(session);
   let profile = profileSnapshot(selection, options);
   if (needsWebChatGpt(selection) && selection.conversationUrl && profile?.state === 'verification-required') {
-    profile = await (options.verifyProfile || verifyChatGptProfileReadiness)({
+    const prerequisites = profile;
+    const verified = await (options.verifyProfile || verifyChatGptProfileReadiness)({
       repository: repositorySelection(session),
       conversationUrl: selection.conversationUrl,
       repositoryAccessProbe: options.repositoryAccessProbe,
       prerequisiteStatus: options.prerequisiteStatus,
     });
+    profile = {
+      ...verified,
+      libraryInstalled: prerequisites.libraryInstalled === true,
+      chromiumInstalled: prerequisites.chromiumInstalled === true,
+    };
     profile = { ...profile, ui: chatGptProfileUiModel(profile) };
   }
   const validation = baseValidation(selection, profile);
