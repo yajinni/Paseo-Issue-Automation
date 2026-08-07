@@ -8,7 +8,7 @@ test('review setup UI offers all explicit workflows and independent round contro
   assert.match(REVIEW_PAGE_SCRIPT, /full-immediate/);
   assert.match(REVIEW_PAGE_SCRIPT, /review-quick-rounds/);
   assert.match(REVIEW_PAGE_SCRIPT, /review-full-rounds/);
-  assert.match(REVIEW_PAGE_SCRIPT, /max=\\"20\\"/);
+  assert.match(REVIEW_PAGE_SCRIPT, /max="20"/);
 });
 
 test('Web ChatGPT conditional section uses ChatGPT Profile as the normal user-facing name', () => {
