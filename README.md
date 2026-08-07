@@ -32,7 +32,7 @@ paseo-issue-automation
 
 The bare command starts the manager and opens `http://127.0.0.1:4318`. It can be run from outside a Git repository. On first run, when no repository has completed setup, the manager opens the setup walkthrough automatically.
 
-The walkthrough discovers/validates Paseo, Provider/Coding Harness models, GitHub account/repository/base branch, a safe checkout, the permanent Paseo workspace, issue policy, review workflow, and final readiness. It can clone the selected repository into the manager-owned repository area when no safe checkout exists. You do not need to pre-register or pre-clone a repository for the normal first-run path.
+The walkthrough discovers/validates Paseo, Provider/Coding Harness models, GitHub account/repository/base branch, the Paseo project and permanent `Issue Coding Automation` workspace, issue policy, review workflow, and final readiness. If Paseo does not already have the selected repository as a project, setup creates it automatically.
 
 For an already configured manager, use **Add repository via setup** to run the walkthrough for another repository. Manual `repo add` remains available as an operator/compatibility command, not the preferred onboarding path.
 
@@ -42,13 +42,13 @@ The walkthrough is server-backed and resumable. Ordinary setup state never store
 
 Paseo passwords use the secure credential abstraction when a supported persistent backend passes its probe, otherwise session-only memory is used. GitHub authentication is delegated to GitHub CLI. ChatGPT Profile uses a dedicated Playwright profile and manual sign-in; Paseo never asks for a ChatGPT password.
 
-Readiness does not create fake issues/reviews, change application code, or send paid model prompts. Temporary worktree probes must be removed and verified before readiness can pass. The manager binds to localhost by default.
+Readiness does not create fake issues/reviews, change application code, or send paid model prompts. The manager binds to localhost by default.
 
 See [Standalone setup walkthrough](docs/SETUP_WIZARD.md) for the full security and recovery contract.
 
 ## Issue execution architecture
 
-Planning happens before runtime. The runtime is a deterministic **Issue Execution Controller**. It:
+Planning happens before runtime. The runtime is a deterministic **Issue Execution Controller**. Any human or planning AI that creates an automation-ready issue must author it from `templates/automated-coding-task.md`; the controller validates that issue-body contract before the issue can run. It:
 
 - reads only native GitHub `blocked by` relationships for execution dependencies and refuses to infer dependencies from issue-body text;
 - validates the required issue-body contract before claiming work;
