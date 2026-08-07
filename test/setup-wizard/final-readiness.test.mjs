@@ -11,6 +11,7 @@ import {
   finishSetup,
   runFinalReadinessChecks,
 } from '../../src/setup-wizard/final-readiness-service.mjs';
+import { FINAL_READINESS_SCRIPT } from '../../src/setup-wizard/final-readiness-ui.mjs';
 import {
   loadSetupSessionStore,
   recordSetupPageCheck,
@@ -19,6 +20,15 @@ import {
 } from '../../src/setup-wizard/store.mjs';
 
 const PRIOR_PAGES = ['paseo', 'harness', 'repository', 'issues', 'review'];
+const TEMPLATE_PATH = '.github/ISSUE_TEMPLATE/automated-coding-task.md';
+
+function readySetupPreview() {
+  return {
+    setupPullRequestChanges: [],
+    template: { path: TEMPLATE_PATH, status: 'current', setupPrChangeRequired: false },
+    previewErrors: { template: null },
+  };
+}
 
 function fixture(t, { eligibleIssueCount = 0 } = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'paseo-readiness-manager-'));
@@ -79,6 +89,7 @@ test('readiness is fail-closed and safe probes cannot silently pass a failed pre
   const result = await runFinalReadinessChecks({
     rootDir,
     setupPrReconciler: () => null,
+    setupInstallationPreviewBuilder: readySetupPreview,
     safeProbes: [async () => ({ id: 'temporary-worktree', ok: true, summary: 'Created and removed temporary probe.' })],
   });
   assert.equal(result.check.ok, true);
@@ -91,9 +102,44 @@ test('readiness is fail-closed and safe probes cannot silently pass a failed pre
   assert.equal(result.checks.find((item) => item.id === 'temporary-worktree').ok, true);
 });
 
+test('a closed historical setup PR does not block when repository setup files are already installed', async (t) => {
+  const { rootDir } = fixture(t);
+  const result = await runFinalReadinessChecks({
+    rootDir,
+    setupPrReconciler: () => ({ number: 17, state: 'closed', syncedAt: null, installationVerifiedAt: null }),
+    setupInstallationPreviewBuilder: readySetupPreview,
+  });
+  const setup = result.checks.find((item) => item.id === 'setup-pull-request');
+  assert.equal(setup.ok, true);
+  assert.equal(setup.state, 'installed');
+  assert.equal(setup.historicalPullRequestState, 'closed');
+  assert.equal(setup.summary, 'Repository setup files are installed.');
+  assert.equal(result.check.ok, true);
+});
+
+test('setup PR readiness blocks only when a repository setup file is missing or outdated', async (t) => {
+  const { rootDir } = fixture(t);
+  const result = await runFinalReadinessChecks({
+    rootDir,
+    setupPrReconciler: () => ({ number: 17, state: 'closed' }),
+    setupInstallationPreviewBuilder: () => ({
+      setupPullRequestChanges: [TEMPLATE_PATH],
+      template: { path: TEMPLATE_PATH, status: 'update', setupPrChangeRequired: true },
+      previewErrors: { template: null },
+    }),
+  });
+  const setup = result.checks.find((item) => item.id === 'setup-pull-request');
+  assert.equal(setup.ok, false);
+  assert.equal(setup.state, 'repository-changes-required');
+  assert.match(setup.summary, /does not match the current Paseo template/);
+  assert.deepEqual(setup.pendingFiles, [TEMPLATE_PATH]);
+  assert.equal(result.check.ok, false);
+  assert.equal(result.check.blockers.some((item) => item.code === 'readiness-repository-setup-incomplete'), true);
+});
+
 test('Finish setup commits durable state before workers and only then enables claims', async (t) => {
   const { rootDir, repo } = fixture(t, { eligibleIssueCount: 1 });
-  await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null });
+  await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null, setupInstallationPreviewBuilder: readySetupPreview });
   const observed = [];
   const workerManager = { start(repository) { observed.push({ type: 'coding', setup: loadConfig(repo).setupComplete, claims: loadRuntime(repo).claimsEnabled, repository }); return { running: true }; } };
   const reviewWorkerManager = { start(repository) { observed.push({ type: 'review', setup: loadConfig(repo).setupComplete, claims: loadRuntime(repo).claimsEnabled, repository }); return { running: true }; } };
@@ -109,7 +155,7 @@ test('Finish setup commits durable state before workers and only then enables cl
 
 test('worker startup failure is recoverable and returns automation to paused state', async (t) => {
   const { rootDir, repo } = fixture(t);
-  await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null });
+  await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null, setupInstallationPreviewBuilder: readySetupPreview });
   const result = await finishSetup({ startAutomation: true }, {
     rootDir,
     workerManager: { start() { throw new Error('worker unavailable'); } },
@@ -124,10 +170,19 @@ test('worker startup failure is recoverable and returns automation to paused sta
 
 test('unchecked Finish setup completes configuration but leaves claims paused', async (t) => {
   const { rootDir, repo } = fixture(t);
-  await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null });
+  await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null, setupInstallationPreviewBuilder: readySetupPreview });
   const result = await finishSetup({ startAutomation: false }, { rootDir });
   assert.equal(result.setupComplete, true);
   assert.equal(result.claimsEnabled, false);
   assert.equal(result.workersStarted, false);
   assert.equal(loadRuntime(repo).claimsEnabled, false);
+});
+
+test('Finish setup card contains only the larger start-automation choice and Finish button', () => {
+  assert.match(FINAL_READINESS_SCRIPT, /font-size:16px;font-weight:650/);
+  assert.match(FINAL_READINESS_SCRIPT, /> Start automation after setup<\/label>/);
+  assert.match(FINAL_READINESS_SCRIPT, /id="readiness-finish"/);
+  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /<h3>Finish setup<\/h3>/);
+  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /eligible issue\(s\) are currently available/);
+  assert.doesNotMatch(FINAL_READINESS_SCRIPT, /No eligible issue is currently available/);
 });
