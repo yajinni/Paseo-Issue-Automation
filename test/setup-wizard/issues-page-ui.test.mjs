@@ -11,7 +11,7 @@ test('issues page UI exposes approved selection, advanced options, and resource 
   assert.match(ISSUES_PAGE_SCRIPT, /Excluded labels/);
   assert.match(ISSUES_PAGE_SCRIPT, /Managed lifecycle labels/);
   assert.match(ISSUES_PAGE_SCRIPT, /Automation issue template/);
-  assert.match(ISSUES_PAGE_SCRIPT, /template\.content/);
+  assert.match(ISSUES_PAGE_SCRIPT, /template\?\.content/);
   assert.match(ISSUES_PAGE_SCRIPT, /issues-template-preview/);
   assert.match(ISSUES_PAGE_SCRIPT, /api\/setup\/issues\/save/);
   assert.match(ISSUES_PAGE_SCRIPT, /api\/setup\/issues\/recheck/);
