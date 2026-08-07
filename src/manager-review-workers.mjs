@@ -1,8 +1,11 @@
 import path from 'node:path';
-import { reconcileManagedPullRequests, recoverPrReviewState } from './pr-review-reconcile.mjs';
 import { tickReviewScheduler } from './pr-review-scheduler.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { reconciliationDelay } from './reconciliation-timing.mjs';
+import {
+  reconcileManagedPullRequestsWithWebFullReview,
+  recoverPrReviewStateWithWebFullReview,
+} from './web-chatgpt-full-review-reconcile.mjs';
 
 const REVIEW_TICK_MS = 5_000;
 const FALLBACK_RECONCILIATION_DELAY_MS = 300_000;
@@ -32,8 +35,8 @@ function snapshot(worker) {
 
 export function createManagerReviewWorkerPool({
   reviewTick = tickReviewScheduler,
-  reconcile = reconcileManagedPullRequests,
-  recover = recoverPrReviewState,
+  reconcile = reconcileManagedPullRequestsWithWebFullReview,
+  recover = recoverPrReviewStateWithWebFullReview,
   loadStore = loadPrReviewStore,
   reconciliationDelayForStore = reconciliationDelay,
   setIntervalFn = setInterval,

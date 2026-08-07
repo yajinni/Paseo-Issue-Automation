@@ -22,6 +22,8 @@ export function parsePaseoReviewMarker(body) {
         issueNumber: Number(metadata.issueNumber),
         headSha: String(metadata.headSha || '').toLowerCase(),
         reviewRound: Number(metadata.reviewRound),
+        stage: metadata.stage == null ? null : String(metadata.stage),
+        round: metadata.round == null ? null : Number(metadata.round),
         promptVersion: Number(metadata.promptVersion),
         result: normalizedResult(metadata.result),
         marker: match[0],
@@ -30,6 +32,8 @@ export function parsePaseoReviewMarker(body) {
       if (!parsed.reviewRequestId || !parsed.repository || !Number.isInteger(parsed.pullRequestNumber)
           || !Number.isInteger(parsed.issueNumber) || !/^[0-9a-f]{7,64}$/.test(parsed.headSha)
           || !Number.isInteger(parsed.reviewRound) || !Number.isInteger(parsed.promptVersion)) continue;
+      if (parsed.stage !== null && !['quick', 'full'].includes(parsed.stage)) continue;
+      if (parsed.round !== null && (!Number.isInteger(parsed.round) || parsed.round < 1 || parsed.round > 20)) continue;
       results.push(parsed);
     } catch {}
   }
@@ -38,6 +42,8 @@ export function parsePaseoReviewMarker(body) {
 
 export function matchingReviewResult({ comments = [], reviews = [] }, expected) {
   const reviewIds = new Set(reviews.map((item) => item.id || item.databaseId));
+  const expectedStage = expected.stage == null ? null : String(expected.stage);
+  const expectedRound = expected.round == null ? null : Number(expected.round);
   const candidates = [...comments, ...reviews]
     .flatMap((item) => parsePaseoReviewMarker(item.body || item.bodyText || '').map((marker) => ({
       ...marker,
@@ -50,6 +56,8 @@ export function matchingReviewResult({ comments = [], reviews = [] }, expected) 
       && result.pullRequestNumber === Number(expected.pullRequestNumber)
       && result.issueNumber === Number(expected.issueNumber)
       && result.headSha === String(expected.headSha).toLowerCase()
-      && result.promptVersion === Number(expected.promptVersion));
+      && result.promptVersion === Number(expected.promptVersion)
+      && (expectedStage === null || result.stage === expectedStage)
+      && (expectedRound === null || result.round === expectedRound));
   return candidates.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))).at(-1) || null;
 }
