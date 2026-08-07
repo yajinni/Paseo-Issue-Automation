@@ -18,9 +18,14 @@ function setup(t) {
   saveSetupPage('repository', {
     repository: { owner: 'octo', name: 'app', id: 'R1', url: 'https://github.com/octo/app' },
     baseBranch: 'main',
-    selections: { host: 'github.com', account: 'octo', repository: 'octo/app', baseBranch: 'main' },
+    selections: {
+      host: 'github.com',
+      account: 'octo',
+      repository: 'octo/app',
+      baseBranch: 'main',
+      checkoutPath: '/managed/octo--app',
+    },
   }, { rootDir });
-  saveSetupPage('checkout', { selections: { checkoutPath: '/managed/octo--app', checkoutManaged: true } }, { rootDir });
   return rootDir;
 }
 
@@ -30,14 +35,33 @@ function preview() {
       { name: 'paseo:ready', status: 'reused', existingColor: 'abcdef', existingDescription: 'custom', willOverwriteExistingMetadata: false, action: 'Reuse.' },
       { name: 'paseo:queued', status: 'missing', existingColor: null, existingDescription: null, willOverwriteExistingMetadata: false, action: 'Create.' },
     ],
-    labelSummary: { missing: 1, reused: 1 },
-    template: { path: '.github/ISSUE_TEMPLATE/automated-coding-task.md', status: 'update', setupPrChangeRequired: true, message: 'Update through setup PR.' },
-    directGitHubChanges: ['Create missing managed lifecycle labels after final confirmation.'],
+    labelSummary: { missing: 1, reused: 1, pending: 0 },
+    template: {
+      path: '.github/ISSUE_TEMPLATE/automated-coding-task.md',
+      status: 'update',
+      setupPrChangeRequired: true,
+      message: 'Update through setup PR.',
+      content: '## Objective\n\nDescribe the outcome.\n',
+    },
+    directGitHubChanges: ['Ensure managed lifecycle labels exist after final confirmation.'],
     setupPullRequestChanges: ['.github/ISSUE_TEMPLATE/automated-coding-task.md'],
+    previewErrors: { labels: null, template: null },
   };
 }
 
-test('issues page defaults are safe and installation preview is read-only', (t) => {
+test('issues page uses the checkout recorded by GitHub repository setup and needs no checkout page', (t) => {
+  const rootDir = setup(t);
+  let received = null;
+  const status = getIssuesSetupPageStatus({
+    rootDir,
+    previewLoader(input) { received = input; return preview(); },
+  });
+  assert.equal(received.checkoutPath, '/managed/octo--app');
+  assert.equal(status.technicalDetails.checkoutPath, '/managed/octo--app');
+  assert.doesNotMatch(status.check.summary, /local checkout/i);
+});
+
+test('issues page defaults are safe and resource preview is read-only', (t) => {
   const rootDir = setup(t);
   let calls = 0;
   const status = getIssuesSetupPageStatus({ rootDir, previewLoader() { calls += 1; return preview(); } });
@@ -47,6 +71,7 @@ test('issues page defaults are safe and installation preview is read-only', (t) 
   assert.equal(status.preview.labelSummary.reused, 1);
   assert.equal(status.preview.labels[0].willOverwriteExistingMetadata, false);
   assert.equal(status.preview.template.setupPrChangeRequired, true);
+  assert.match(status.preview.template.content, /## Objective/);
   assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.issues.completed, false);
 });
 
@@ -72,13 +97,24 @@ test('saving issue settings validates ranges and completes only the issues page'
   assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.issues.completed, false);
 });
 
-test('recheck blocks when installation preview cannot be proven', (t) => {
+test('label or template preview failure is informational and does not block Issues setup', (t) => {
   const rootDir = setup(t);
   saveIssuesSetupPage({}, { rootDir, previewLoader: preview });
   const result = recheckIssuesSetupPage({ rootDir, previewLoader() { throw new Error('GitHub unavailable'); } });
-  assert.equal(result.check.ok, false);
-  assert.equal(result.check.blockers[0].code, 'issues-installation-preview-unavailable');
+  assert.equal(result.check.ok, true);
+  assert.equal(result.check.blockers.length, 0);
   assert.match(result.technicalDetails.previewError, /GitHub unavailable/);
+  assert.equal(loadSetupSessionStore({ rootDir }).activeSession.pages.issues.completed, true);
+});
+
+test('bundled automation template is previewable even without a checkout', () => {
+  const result = buildIssueInstallationPreview({ repository: 'octo/app', checkoutPath: '' }, {
+    labelLoader: () => [],
+  });
+  assert.match(result.template.content, /<!-- paseo-issue-template:v2 -->/);
+  assert.match(result.template.content, /## Objective/);
+  assert.match(result.template.content, /## Acceptance criteria/);
+  assert.equal(result.template.status, 'bundled');
 });
 
 test('label preview distinguishes reused and missing labels without overwriting custom metadata', () => {
@@ -94,4 +130,11 @@ test('label preview distinguishes reused and missing labels without overwriting 
   assert.equal(ready.willOverwriteExistingMetadata, false);
   assert.equal(queued.status, 'missing');
   assert.equal(result.setupPullRequestChanges.length, 0);
+});
+
+test('issue template copy is concise and no longer describes setup mechanics', (t) => {
+  const rootDir = setup(t);
+  const status = getIssuesSetupPageStatus({ rootDir, previewLoader: preview });
+  assert.equal(status.explanations.template, 'This is the template that issues need to follow to be automatically processed.');
+  assert.equal('installation' in status.explanations, false);
 });

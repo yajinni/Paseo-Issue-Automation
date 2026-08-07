@@ -8,12 +8,18 @@ export const ISSUES_PAGE_SCRIPT = String.raw`
   function cardClass(missing) { return 'setup-card' + (missing ? ' required-missing' : ''); }
   function labelRows() {
     const labels = state?.preview?.labels || state?.lifecycleLabels || [];
-    if (!labels.length) return '<div class="notice">Label preview is not available yet.</div>';
+    if (!labels.length) return '<div class="notice">Paseo will ensure the managed lifecycle labels exist after final confirmation.</div>';
     return '<div class="checklist">' + labels.map((label) => {
-      const status = label.status || 'managed';
-      const detail = label.action || label.description || '';
-      return '<div class="check-row ok"><span class="check-dot">✓</span><div><strong>' + escape(label.name) + '</strong><div class="check-detail">' + escape(status + ' · ' + detail) + '</div></div></div>';
+      const detail = label.status === 'reused'
+        ? 'Already exists · will be reused.'
+        : 'Will be ensured after final confirmation.';
+      return '<div class="check-row"><span class="check-dot">·</span><div><strong>' + escape(label.name) + '</strong><div class="check-detail">' + escape(detail) + '</div></div></div>';
     }).join('') + '</div>';
+  }
+  function templatePreview(template) {
+    const source = String(template?.content || '');
+    if (!source) return '<div class="notice">Bundled template preview is unavailable.</div>';
+    return '<pre class="issues-template-preview">' + escape(source) + '</pre>';
   }
   function render() {
     if (!onPage() || !state || !content()) return;
@@ -22,7 +28,6 @@ export const ISSUES_PAGE_SCRIPT = String.raw`
     const template = preview.template || {};
     const blockerCodes = (state.check?.blockers || []).map((item) => String(item.code || ''));
     const settingsMissing = blockerCodes.some((code) => /selection-mode|max-active|retries|excluded-label/.test(code));
-    const previewMissing = !state.preview || blockerCodes.some((code) => /repository-required|checkout-required|preview-unavailable/.test(code));
     content().className = '';
     content().innerHTML = '<div class="paseo-grid">'
       + '<section class="' + cardClass(settingsMissing) + '"><h3>Issue selection</h3><p>Choose which open issues Paseo may consider. Invalid issues are still rejected by the installed issue contract.</p>'
@@ -34,10 +39,10 @@ export const ISSUES_PAGE_SCRIPT = String.raw`
       + '<div class="field"><label for="issues-retries">Temporary failure retries</label><input id="issues-retries" type="number" min="0" max="20" value="' + escape(s.temporaryFailureRetries ?? 3) + '"></div>'
       + '<div class="field"><label for="issues-excluded">Excluded labels</label><input id="issues-excluded" type="text" value="' + escape((s.excludedLabels || []).join(', ')) + '" placeholder="comma-separated label names"></div>'
       + '<p class="muted">Issue settings save automatically when changed.</p></section>'
-      + '<section class="' + cardClass(previewMissing) + '"><h3>Managed lifecycle labels</h3><p>Missing labels are created directly through GitHub only after final confirmation. Existing matching labels are reused without silently overwriting custom metadata.</p>' + labelRows() + '</section>'
-      + '<section class="' + cardClass(previewMissing) + '"><h3>Automation issue template</h3><p>' + escape(state.explanations?.template || '') + '</p><div class="notice">' + escape(template.message || 'Template preview is not available yet.') + '</div>'
+      + '<section class="setup-card"><h3>Managed lifecycle labels</h3><p>Paseo will ensure these lifecycle labels exist after final confirmation. Existing matching labels are reused.</p>' + labelRows() + '</section>'
+      + '<section class="setup-card"><h3>Automation issue template</h3><p>' + escape(state.explanations?.template || 'This is the template that issues need to follow to be automatically processed.') + '</p>'
       + '<p>Template path: <code>' + escape(template.path || '.github/ISSUE_TEMPLATE/automated-coding-task.md') + '</code></p>'
-      + '<p>' + escape(state.explanations?.installation || '') + '</p></section></div>';
+      + templatePreview(template) + '</section></div>';
     document.querySelectorAll('input[name="issue-mode"]').forEach((input) => input.addEventListener('change', save));
     document.getElementById('issues-max-active')?.addEventListener('change', save);
     document.getElementById('issues-retries')?.addEventListener('change', save);
@@ -75,7 +80,14 @@ export const ISSUES_PAGE_SCRIPT = String.raw`
 })();
 `;
 
+const ISSUES_PAGE_STYLE = String.raw`
+<style data-setup-issues-page-style>
+.issues-template-preview{margin:12px 0 0;max-height:460px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #2d394b;border-radius:10px;background:#0f1620;padding:14px;color:#c9d5e5;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+</style>`;
+
 export function enhanceSetupWizardWithIssuesPage(html) {
   const script = `<script data-setup-issues-page>${ISSUES_PAGE_SCRIPT}</script>`;
-  return String(html).includes('</body>') ? String(html).replace('</body>', `${script}</body>`) : `${html}${script}`;
+  let output = String(html);
+  output = output.includes('</head>') ? output.replace('</head>', `${ISSUES_PAGE_STYLE}</head>`) : `${ISSUES_PAGE_STYLE}${output}`;
+  return output.includes('</body>') ? output.replace('</body>', `${script}</body>`) : `${output}${script}`;
 }
