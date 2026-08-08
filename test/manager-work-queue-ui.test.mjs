@@ -76,6 +76,18 @@ test('drawer focus restoration survives live queue-row replacement', () => {
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /data-work-details=\"true\"/);
 });
 
+test('live status refresh preserves drawer focus branch choice and scroll position', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /\{ preserveInteraction = false \} = \{\}/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /const branchAction = preserveInteraction \? document\.getElementById\('work-detail-branch-action'\)\?\.value \|\| null : null/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /const scrollTop = preserveInteraction \? drawer\.scrollTop : 0/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /if \(branchAction && currentBranch\) currentBranch\.value = branchAction/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /drawer\.scrollTop = scrollTop/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /activeIssueAction/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /activeWasBranch/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /activeWasClose/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /openDrawer\(selected, null, \{ preserveInteraction: true \}\)/);
+});
+
 test('queue badge derives from server queue counts and highlights attention', () => {
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /data-manager-badge="work-queue"/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Number\(queueData\.active \|\| 0\) \+ Number\(queueData\.attention \|\| 0\)/);
