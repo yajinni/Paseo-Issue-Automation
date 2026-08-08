@@ -31,8 +31,9 @@ test('manager status hub captures each status-consuming enhancer before the next
 test('interaction polish remains final and does not need a status-renderer capture', () => {
   const html = managerDashboardHtml();
   const lastCapture = html.lastIndexOf('data-manager-status-capture');
-  const interaction = html.indexOf('data-manager-interaction');
+  const interaction = html.indexOf('<script data-manager-interaction>');
+  const issueFlow = html.indexOf('<script data-manager-issue-processing-flow>');
   assert.ok(interaction > lastCapture);
-  assert.ok(interaction > html.indexOf('data-manager-issue-processing-flow'));
+  assert.ok(interaction > issueFlow);
   assert.ok(interaction < html.indexOf('</body>'));
 });
