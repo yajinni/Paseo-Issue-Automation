@@ -13,6 +13,10 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
 (function managerIssuesAndPrReviews() {
   let built = false;
   let issuePlanRequest = 0;
+  let issuePlanInFlight = null;
+  let issuePlanRepositoryId = null;
+  let issuePlanLoadedAt = 0;
+  const ISSUE_PLAN_CACHE_MS = 15000;
 
   function findCard(root, heading) {
     if (!root) return null;
@@ -223,20 +227,33 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
     setIssueBadge(plan);
   }
 
-  async function loadIssuePlan() {
+  async function loadIssuePlan({ force = false } = {}) {
     if (activeView() !== 'automation') return;
     const repositoryId = document.getElementById('repository-select')?.value;
     if (!repositoryId || typeof jsonRequest !== 'function' || typeof selectedPath !== 'function') return;
+    const sameRepository = issuePlanRepositoryId === repositoryId;
+    if (sameRepository && issuePlanInFlight) return issuePlanInFlight;
+    if (!force && sameRepository && issuePlanLoadedAt && Date.now() - issuePlanLoadedAt < ISSUE_PLAN_CACHE_MS) return;
+
     const request = ++issuePlanRequest;
-    renderIssuePlan({ loading: true });
-    try {
-      const body = await jsonRequest(selectedPath('issues-plan'));
-      if (request !== issuePlanRequest || repositoryId !== document.getElementById('repository-select')?.value) return;
-      renderIssuePlan(body.issuePlan || { available: false, error: 'No issue plan was returned.', items: [] });
-    } catch (error) {
-      if (request !== issuePlanRequest) return;
-      renderIssuePlan({ available: false, error: error.message || String(error), items: [] });
-    }
+    if (!sameRepository || !issuePlanLoadedAt) renderIssuePlan({ loading: true });
+    issuePlanRepositoryId = repositoryId;
+    const promise = (async () => {
+      try {
+        const body = await jsonRequest(selectedPath('issues-plan'));
+        if (request !== issuePlanRequest || repositoryId !== document.getElementById('repository-select')?.value) return;
+        issuePlanLoadedAt = Date.now();
+        renderIssuePlan(body.issuePlan || { available: false, error: 'No issue plan was returned.', items: [] });
+      } catch (error) {
+        if (request !== issuePlanRequest) return;
+        issuePlanLoadedAt = Date.now();
+        renderIssuePlan({ available: false, error: error.message || String(error), items: [] });
+      } finally {
+        if (issuePlanInFlight === promise) issuePlanInFlight = null;
+      }
+    })();
+    issuePlanInFlight = promise;
+    return promise;
   }
 
   function render(data) {
@@ -280,12 +297,12 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
       reviewBadge.classList.toggle('attention', attention > 0);
     }
     renameNavigation(); patchVisibleHeader(); patchOverviewTerminology();
-    if (activeView() === 'automation') queueMicrotask(loadIssuePlan);
+    if (activeView() === 'automation') queueMicrotask(() => loadIssuePlan());
   }
 
   function onViewChanged() {
     patchVisibleHeader();
-    if (activeView() === 'automation') loadIssuePlan();
+    if (activeView() === 'automation') loadIssuePlan({ force: true });
   }
 
   function build() {
@@ -300,7 +317,7 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
     }
     window.addEventListener('popstate', () => queueMicrotask(onViewChanged));
     try { if (typeof currentStatus !== 'undefined' && currentStatus) render(currentStatus); } catch {}
-    if (activeView() === 'automation') loadIssuePlan();
+    if (activeView() === 'automation') loadIssuePlan({ force: true });
   }
 
   const previous = window.renderStatus;
