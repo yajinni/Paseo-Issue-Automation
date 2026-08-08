@@ -142,11 +142,16 @@ export function inspectBaseFreshness(root, state, baseBranch, {
     githubCompareReason: remote.available ? null : remote.reason || null,
   });
 
-  if (remote.available && remote.behind === 0) {
+  const localContradiction = counts.behind === 0
+    || Boolean(base.value && mergeBase.value && base.value === mergeBase.value);
+  if (localContradiction || (remote.available && remote.behind === 0)) {
+    const corroboration = remote.available && remote.behind === 0
+      ? ' GitHub also reports the branch is 0 commits behind.'
+      : '';
     return {
       ok: false,
       status: 'inconsistent',
-      reason: `Local Git reported that the issue branch does not contain the latest ${baseBranch}, but GitHub reports it is 0 commits behind. The coder was not asked to rewrite its branch.`,
+      reason: `Git ancestry checks disagreed about whether the issue branch contains the latest ${baseBranch}.${corroboration} The coder was not asked to rewrite its branch.`,
       evidence,
     };
   }
