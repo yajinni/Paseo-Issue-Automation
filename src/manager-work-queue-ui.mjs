@@ -218,17 +218,25 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     section.append(heading, actions); return section;
   }
 
-  function openDrawer(item, returnFocus = null) {
+  function openDrawer(item, returnFocus = null, { preserveInteraction = false } = {}) {
     selectedIssue = item.issueNumber;
     if (returnFocus) drawerReturnFocus = returnFocus;
     const drawer = document.getElementById('work-detail-drawer');
     const scrim = document.getElementById('work-detail-scrim');
     if (!drawer || !scrim) return;
+    const activeElement = preserveInteraction ? document.activeElement : null;
+    const hadDrawerFocus = Boolean(activeElement && drawer.contains(activeElement));
+    const activeIssueAction = hadDrawerFocus ? activeElement?.dataset?.issueAction || null : null;
+    const activeHref = hadDrawerFocus && activeElement?.tagName === 'A' ? activeElement.href : null;
+    const activeWasBranch = hadDrawerFocus && activeElement?.id === 'work-detail-branch-action';
+    const activeWasClose = hadDrawerFocus && activeElement?.dataset?.workDetailClose === 'true';
+    const branchAction = preserveInteraction ? document.getElementById('work-detail-branch-action')?.value || null : null;
+    const scrollTop = preserveInteraction ? drawer.scrollTop : 0;
     drawer.textContent = '';
     const head = document.createElement('header'); head.className = 'work-detail-head';
     const title = document.createElement('div'); title.innerHTML = '<div class="eyebrow">Work item</div>';
     const h2 = document.createElement('h2'); h2.id = 'work-detail-title'; h2.textContent = '#' + item.issueNumber + ' ' + item.title; title.append(h2);
-    const close = document.createElement('button'); close.type = 'button'; close.className = 'secondary'; close.textContent = 'Close'; close.addEventListener('click', closeDrawer);
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'secondary'; close.textContent = 'Close'; close.dataset.workDetailClose = 'true'; close.addEventListener('click', closeDrawer);
     head.append(title, close); drawer.append(head);
     const state = document.createElement('section'); state.className = 'work-detail-section';
     const stateHeading = document.createElement('h3'); stateHeading.textContent = 'Current state';
@@ -245,7 +253,18 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     drawer.append(state);
     const review = reviewFacts(item); if (review) drawer.append(review);
     drawer.append(timelineSection(item), drawerActions(item));
-    drawer.hidden = false; scrim.hidden = false; close.focus();
+    const currentBranch = document.getElementById('work-detail-branch-action');
+    if (branchAction && currentBranch) currentBranch.value = branchAction;
+    drawer.hidden = false; scrim.hidden = false;
+    drawer.scrollTop = scrollTop;
+    if (!preserveInteraction) { close.focus(); return; }
+    if (!hadDrawerFocus) return;
+    let focusTarget = null;
+    if (activeWasBranch) focusTarget = currentBranch;
+    else if (activeWasClose) focusTarget = close;
+    else if (activeIssueAction) focusTarget = drawer.querySelector('[data-issue-action="' + activeIssueAction + '"]');
+    else if (activeHref) focusTarget = [...drawer.querySelectorAll('a[href]')].find((link) => link.href === activeHref) || null;
+    try { (focusTarget || close).focus(); } catch {}
   }
 
   function closeDrawer() {
@@ -287,7 +306,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     await postRepositoryAction(action, payload);
     if (selectedIssue === item.issueNumber) {
       const refreshed = queueData.items?.find((candidate) => candidate.issueNumber === item.issueNumber);
-      if (refreshed) openDrawer(refreshed); else closeDrawer();
+      if (refreshed) openDrawer(refreshed, null, { preserveInteraction: true }); else closeDrawer();
     }
   }
 
@@ -302,7 +321,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     render();
     if (selectedIssue) {
       const selected = queueData.items?.find((item) => item.issueNumber === selectedIssue);
-      if (selected) openDrawer(selected); else closeDrawer();
+      if (selected) openDrawer(selected, null, { preserveInteraction: true }); else closeDrawer();
     }
     const badge = document.querySelector('[data-manager-badge="work-queue"]');
     if (badge) {
