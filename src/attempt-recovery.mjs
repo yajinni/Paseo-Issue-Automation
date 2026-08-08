@@ -172,6 +172,14 @@ export function recoverFailedAttempt(root, number, {
     throw error;
   }
 
+  const controllerStartedAt = now();
+  recoveredState = writeRun(root, issueNumber, {
+    ...recoveredState,
+    controllerPid: child.pid,
+    updatedAt: controllerStartedAt,
+    activity: appendActivity(recoveredState, 'controller-restarted-for-recovery', `Issue Execution Controller PID ${child.pid} resumed attempt ${state.attempt || 1}.`, controllerStartedAt),
+  });
+
   return {
     recovered: true,
     claimed: true,
@@ -181,6 +189,6 @@ export function recoverFailedAttempt(root, number, {
     workspaceId: state.workspaceId,
     coderAgentId: coderId,
     controllerPid: child.pid,
-    state: { ...recoveredState, controllerPid: child.pid },
+    state: recoveredState,
   };
 }
