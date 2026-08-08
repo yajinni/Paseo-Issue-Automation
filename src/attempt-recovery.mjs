@@ -9,7 +9,7 @@ import { LABELS, loadConfig, loadRun, saveRun } from './state.mjs';
 
 export const FAILED_ATTEMPT_RECOVERY_MAX = 1;
 
-const controllerWorkerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'controller-worker.mjs');
+const controllerWorkerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'recovery-controller-worker.mjs');
 const now = () => new Date().toISOString();
 
 function appendActivity(state, type, details, at = now()) {
