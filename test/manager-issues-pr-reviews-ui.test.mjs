@@ -29,10 +29,24 @@ test('issue-plan refreshes deduplicate in-flight work and avoid loading churn du
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /let issuePlanInFlight = null/);
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /const ISSUE_PLAN_CACHE_MS = 15000/);
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /sameRepository && issuePlanInFlight/);
-  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /Date\.now\(\) - issuePlanLoadedAt < ISSUE_PLAN_CACHE_MS/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /const cacheAge = sameRepository && issuePlanLoadedAt \? Date\.now\(\) - issuePlanLoadedAt : null/);
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /if \(!sameRepository \|\| !issuePlanLoadedAt\) renderIssuePlan\(\{ loading: true \}\)/);
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /loadIssuePlan\(\{ force: true \}\)/);
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /queueMicrotask\(\(\) => loadIssuePlan\(\)\)/);
+});
+
+test('a cache hit schedules one deferred refresh instead of leaving the issue plan stale indefinitely', () => {
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /let issuePlanRefreshTimer = null/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /function scheduleIssuePlanRefresh\(delayMs\)/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /if \(issuePlanRefreshTimer !== null\) return/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /scheduleIssuePlanRefresh\(ISSUE_PLAN_CACHE_MS - cacheAge\)/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /issuePlanRefreshTimer = setTimeout/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /if \(activeView\(\) === 'automation'\) loadIssuePlan\(\)/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /clearIssuePlanRefreshTimer\(\);\s*const request = \+\+issuePlanRequest/);
+});
+
+test('leaving Issues cancels a deferred issue-plan refresh', () => {
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /if \(activeView\(\) === 'automation'\) loadIssuePlan\(\{ force: true \}\);\s*else clearIssuePlanRefreshTimer\(\)/);
 });
 
 test('PR Reviews removes ChatGPT Profile and orders workflow worker workload', () => {
