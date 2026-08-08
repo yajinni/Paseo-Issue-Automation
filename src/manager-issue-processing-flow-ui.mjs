@@ -229,11 +229,8 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
     try { if (typeof currentStatus !== 'undefined' && currentStatus) renderProcessing(currentStatus); } catch {}
   }
 
-  const previousRenderStatus = window.renderStatus;
-  if (typeof previousRenderStatus === 'function') {
-    window.renderStatus = function unifiedIssueProcessingRenderStatus(data) {
-      const result = previousRenderStatus(data); renderProcessing(data); return result;
-    };
+  if (typeof window.addManagerStatusListener === 'function') {
+    window.addManagerStatusListener(renderProcessing);
   }
   const previousJsonRequest = window.jsonRequest;
   if (typeof previousJsonRequest === 'function') {
