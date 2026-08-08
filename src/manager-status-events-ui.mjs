@@ -10,16 +10,21 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
   const listeners = new Set();
   let dispatching = false;
   let activeResult;
+  let lastAcceptedStatus = null;
 
   function reportFailure(kind, error) {
     try { console.error('Manager status ' + kind + ' failed.', error); } catch {}
   }
 
+  function selectedRepositoryId() {
+    return document.getElementById?.('repository-select')?.value || null;
+  }
+
   function statusMatchesSelectedRepository(data) {
-    const selectedRepositoryId = document.getElementById?.('repository-select')?.value;
+    const selectedId = selectedRepositoryId();
     const statusRepositoryId = data?.repository?.id;
-    if (!selectedRepositoryId || statusRepositoryId == null || statusRepositoryId === '') return true;
-    return String(statusRepositoryId) === String(selectedRepositoryId);
+    if (!selectedId || statusRepositoryId == null || statusRepositoryId === '') return true;
+    return String(statusRepositoryId) === String(selectedId);
   }
 
   function dispatchManagerStatus(data) {
@@ -28,6 +33,7 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
     dispatching = true;
     try {
       activeResult = baseRenderStatus(data);
+      lastAcceptedStatus = data;
       for (const renderer of [...capturedRenderers]) {
         try { renderer(data); } catch (error) { reportFailure('renderer', error); }
       }
@@ -45,6 +51,22 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
   }
 
   window.renderStatus = dispatchManagerStatus;
+
+  const basePostRepositoryAction = window.postRepositoryAction;
+  if (typeof basePostRepositoryAction === 'function') {
+    window.postRepositoryAction = async function managerRepositoryScopedPostAction(...args) {
+      const actionRepositoryId = selectedRepositoryId();
+      const body = await basePostRepositoryAction(...args);
+      const currentRepositoryId = selectedRepositoryId();
+      if (actionRepositoryId && currentRepositoryId && String(actionRepositoryId) !== String(currentRepositoryId)) {
+        const acceptedRepositoryId = lastAcceptedStatus?.repository?.id;
+        if (acceptedRepositoryId != null && String(acceptedRepositoryId) === String(currentRepositoryId)) {
+          dispatchManagerStatus(lastAcceptedStatus);
+        }
+      }
+      return body;
+    };
+  }
 
   window.captureManagerStatusRenderer = function captureManagerStatusRenderer() {
     const renderer = window.renderStatus;
