@@ -88,6 +88,12 @@ test('live status refresh preserves drawer focus branch choice and scroll positi
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /openDrawer\(selected, null, \{ preserveInteraction: true \}\)/);
 });
 
+test('Work Queue subscribes directly to the manager status hub', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /window\.addManagerStatusListener\(renderStatusQueue\)/);
+  assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /window\.renderStatus\s*=/);
+  assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /baseRenderStatus/);
+});
+
 test('queue badge derives from server queue counts and highlights attention', () => {
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /data-manager-badge="work-queue"/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Number\(queueData\.active \|\| 0\) \+ Number\(queueData\.attention \|\| 0\)/);
