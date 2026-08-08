@@ -34,6 +34,12 @@ test('Reviews sidebar badge is derived from current work-queue review stages', (
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /data-manager-badge="reviews"/);
 });
 
+test('Automation and Reviews subscribe directly to the manager status hub', () => {
+  assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /window\.addManagerStatusListener\(render\)/);
+  assert.doesNotMatch(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /window\.renderStatus\s*=/);
+  assert.doesNotMatch(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /const previous = window\.renderStatus/);
+});
+
 test('old mixed automation diagnostics are retained only as technical details', () => {
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /Technical automation status/);
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /manager-technical-details/);
