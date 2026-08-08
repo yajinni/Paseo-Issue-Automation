@@ -7,10 +7,11 @@ import {
   buildReviewerPrompt,
 } from './controller-prompts.mjs';
 import { markHumanReview, recordEvent, terminalState } from './automation.mjs';
+import { inspectBaseFreshness } from './base-freshness.mjs';
 import { currentPr, ensureDraftPr } from './controller-draft-pr.mjs';
 import { postReviewerAuditComment } from './reviewer-audit.mjs';
 import { handoffValidatedPullRequest, prReviewAutomationEnabled } from './pr-review-handoff.mjs';
-import { loadConfig, loadRun, saveRun } from './state.mjs';
+import { appendIssueLifecycle, loadConfig, loadRun, saveRun } from './state.mjs';
 import { agentCommandTimeoutMs, run, runJson } from './process.mjs';
 
 const CHECK_POLL_MS = 15_000;
@@ -205,18 +206,22 @@ function runReviewer(root, issueNumber, snapshot, reviewRound) {
   return verdict;
 }
 
-function branchContainsLatestBase(root, state, baseBranch) {
-  const cwd = state.worktreePath || root;
-  const remoteRef = `refs/remotes/origin/${baseBranch}`;
-  const fetch = run('git', ['fetch', '--prune', 'origin', `${baseBranch}:${remoteRef}`], {
-    cwd,
-    allowFailure: true,
+function branchContainsLatestBase(root, issueNumber, state, baseBranch) {
+  const freshness = inspectBaseFreshness(root, state, baseBranch);
+  appendIssueLifecycle(root, issueNumber, {
+    attempt: state?.attempt,
+    type: 'base-freshness-check',
+    status: freshness.status === 'current' ? 'success' : freshness.status === 'stale' ? 'warning' : 'error',
+    source: 'controller',
+    message: freshness.reason,
+    evidence: freshness.evidence,
   });
-  if (!fetch.ok) return { ok: false, reason: fetch.stderr || fetch.stdout || `Could not fetch ${baseBranch}.` };
-  const contains = run('git', ['merge-base', '--is-ancestor', remoteRef, 'HEAD'], { cwd, allowFailure: true }).ok;
-  return contains
-    ? { ok: true }
-    : { ok: false, reason: `The issue branch does not contain the latest ${baseBranch}.` };
+  if (freshness.status === 'indeterminate' || freshness.status === 'inconsistent') {
+    const error = new Error(freshness.reason);
+    error.code = 'BASE_FRESHNESS_CONTROLLER_ERROR';
+    throw error;
+  }
+  return freshness;
 }
 
 function checksState(pr) {
@@ -275,7 +280,7 @@ async function execute(root, issueNumber) {
     const snapshot = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
     if (snapshot.terminal) return;
 
-    const freshness = branchContainsLatestBase(root, snapshot.state, config.baseBranch);
+    const freshness = branchContainsLatestBase(root, issueNumber, snapshot.state, config.baseBranch);
     const conflicting = snapshot.pr.mergeable === 'CONFLICTING' || snapshot.pr.mergeStateStatus === 'DIRTY';
     if (!freshness.ok || conflicting) {
       const reason = conflicting ? 'GitHub reports merge conflicts with the current base branch.' : freshness.reason;
@@ -304,7 +309,7 @@ async function execute(root, issueNumber) {
 
     const afterReview = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
     if (afterReview.head !== snapshot.head) continue;
-    const postReviewFreshness = branchContainsLatestBase(root, afterReview.state, config.baseBranch);
+    const postReviewFreshness = branchContainsLatestBase(root, issueNumber, afterReview.state, config.baseBranch);
     if (!postReviewFreshness.ok) {
       sendCoder(root, afterReview.state, buildBaseUpdatePrompt({
         issueNumber,
@@ -331,7 +336,7 @@ async function execute(root, issueNumber) {
     const finalSnapshot = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
     if (finalSnapshot.terminal) return;
     if (finalSnapshot.head !== afterReview.head) continue;
-    const finalFreshness = branchContainsLatestBase(root, finalSnapshot.state, config.baseBranch);
+    const finalFreshness = branchContainsLatestBase(root, issueNumber, finalSnapshot.state, config.baseBranch);
     const finalConflict = finalSnapshot.pr.mergeable === 'CONFLICTING' || finalSnapshot.pr.mergeStateStatus === 'DIRTY';
     if (!finalFreshness.ok || finalConflict) {
       const reason = finalConflict

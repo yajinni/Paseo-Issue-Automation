@@ -36,3 +36,19 @@ test('work queue prefers durable lifecycle records and exposes structured eviden
   assert.match(item.timeline[0].detail, /behind=0/);
   assert.deepEqual(item.lifecycle, item.lifecycle);
 });
+
+test('review queued work exposes the managed lifecycle label without a stale blocker', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 274,
+    status: 'paseo:review-queued',
+    phase: 'review-queued',
+    reason: null,
+    prNumber: 383,
+    prUrl: 'https://github.com/example/repo/pull/383',
+  });
+
+  assert.equal(item.stage, 'review-queued');
+  assert.equal(item.lifecycleLabel, 'paseo:review-queued');
+  assert.equal(item.reason, null);
+  assert.equal(item.nextAction, 'Waiting for PR review capacity.');
+});
