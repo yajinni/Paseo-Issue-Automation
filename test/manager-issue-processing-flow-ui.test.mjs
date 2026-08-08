@@ -18,6 +18,15 @@ test('Issues view collapses workflow and worker into one Issue processing card',
   assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /layout\.replaceChildren\(card, workload\)/);
 });
 
+test('issue-processing actions leave busy and final disabled state to shared manager feedback', () => {
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /await window\.postRepositoryAction\(action\)/);
+  assert.doesNotMatch(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /const original = button\.disabled/);
+  assert.doesNotMatch(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /button\.disabled = true/);
+  assert.doesNotMatch(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /button\.disabled = original/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /start\.disabled = state\.className === 'running'/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /pause\.disabled = state\.className === 'paused'/);
+});
+
 test('issue workload presents dependency waves before detailed rows', () => {
   for (const text of [
     'Automatic processing flow',

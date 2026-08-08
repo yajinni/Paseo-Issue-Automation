@@ -82,9 +82,7 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
 
   async function runAction(button, action) {
     if (typeof window.postRepositoryAction !== 'function') return;
-    const original = button.disabled; button.disabled = true;
-    try { await window.postRepositoryAction(action); }
-    finally { if (button.isConnected) button.disabled = original; }
+    await window.postRepositoryAction(action);
   }
 
   function actionButton(id, text, action, className = '') {
