@@ -27,6 +27,12 @@ test('issue-processing actions leave busy and final disabled state to shared man
   assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /pause\.disabled = state\.className === 'paused'/);
 });
 
+test('issue processing subscribes directly to the manager status hub', () => {
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /window\.addManagerStatusListener\(renderProcessing\)/);
+  assert.doesNotMatch(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /window\.renderStatus\s*=/);
+  assert.doesNotMatch(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /previousRenderStatus/);
+});
+
 test('issue workload presents dependency waves before detailed rows', () => {
   for (const text of [
     'Automatic processing flow',
