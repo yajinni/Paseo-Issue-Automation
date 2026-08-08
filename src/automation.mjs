@@ -33,6 +33,29 @@ function editLabels(root, issueNumber, { add = [], remove = [] }) {
   run('gh', args, { cwd: root });
 }
 
+function notifyTerminalState(root, issueNumber, { add = [], remove = [], comment }) {
+  const failures = [];
+  try {
+    editLabels(root, issueNumber, { add, remove });
+  } catch (error) {
+    failures.push(`labels: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    run('gh', ['issue', 'comment', String(issueNumber), '--body', comment], { cwd: root });
+  } catch (error) {
+    failures.push(`comment: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (failures.length) {
+    safeIssueLog(root, {
+      level: 'warn',
+      action: 'issue-terminal-notification-failed',
+      status: 'warning',
+      message: `Issue #${Number(issueNumber)} reached terminal local state, but one or more GitHub notifications failed.`,
+      details: { issueNumber: Number(issueNumber), failures },
+    });
+  }
+}
+
 function issueList(root, label) {
   return runJson('gh', [
     'issue', 'list', '--state', 'open', '--limit', '100', '--label', label,
@@ -201,12 +224,7 @@ export function terminalState(root, issueNumber, status, reason) {
       return saved;
     }
     if (retry.transient && retry.exhausted) {
-      editLabels(root, issueNumber, {
-        add: [PASEO_LABELS.failed, PASEO_LABELS.needsAttention],
-        remove: [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview, PASEO_LABELS.ready],
-      });
       const exhaustedReason = `Temporary ${retry.type} failure exhausted ${retry.maximum} configured retries: ${retry.reason}`;
-      run('gh', ['issue', 'comment', String(issueNumber), '--body', `Automation failed and needs attention: ${exhaustedReason}`], { cwd: root });
       const at = new Date().toISOString();
       const saved = saveRun(root, issueNumber, {
         ...state,
@@ -224,6 +242,11 @@ export function terminalState(root, issueNumber, status, reason) {
           { type: 'temporary-failure-retries-exhausted', at, details: exhaustedReason },
         ],
       });
+      notifyTerminalState(root, issueNumber, {
+        add: [PASEO_LABELS.failed, PASEO_LABELS.needsAttention],
+        remove: [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview, PASEO_LABELS.ready],
+        comment: `Automation failed and needs attention: ${exhaustedReason}`,
+      });
       safeIssueLog(root, {
         level: 'error',
         action: 'issue-temporary-failure-retries-exhausted',
@@ -236,17 +259,20 @@ export function terminalState(root, issueNumber, status, reason) {
   }
 
   const label = status === 'blocked' ? LABELS.blocked : LABELS.failed;
-  editLabels(root, issueNumber, {
-    add: [label],
-    remove: [LABELS.running, LABELS.ready, LABELS.humanReview, status === 'blocked' ? LABELS.failed : LABELS.blocked],
-  });
-  run('gh', ['issue', 'comment', String(issueNumber), '--body', `Automation ${status}: ${reason}`], { cwd: root });
+  const at = new Date().toISOString();
   const saved = saveRun(root, issueNumber, {
     ...state,
     status: label,
     phase: status,
     reason,
-    completedAt: new Date().toISOString(),
+    controllerPid: null,
+    completedAt: at,
+    updatedAt: at,
+  });
+  notifyTerminalState(root, issueNumber, {
+    add: [label],
+    remove: [LABELS.running, LABELS.ready, LABELS.humanReview, status === 'blocked' ? LABELS.failed : LABELS.blocked],
+    comment: `Automation ${status}: ${reason}`,
   });
   safeIssueLog(root, {
     level: status === 'failed' ? 'error' : 'warn',
