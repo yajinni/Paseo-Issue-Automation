@@ -16,7 +16,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
         node: [20, 22, 24]
     steps:
@@ -24,17 +23,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - name: Run tests
-        shell: bash
-        run: |
-          set -o pipefail
-          npm test 2>&1 | tee "node-${{ matrix.node }}-test.log"
-      - name: Upload failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: node-${{ matrix.node }}-test-diagnostic
-          path: node-${{ matrix.node }}-test.log
+      - run: npm test
       - run: npm run check
       - run: npm pack --dry-run
 
