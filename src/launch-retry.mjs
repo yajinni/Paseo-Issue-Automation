@@ -63,11 +63,11 @@ export function workspaceCreateArgs({ root, title, branch, baseBranch }) {
   ];
 }
 
-export function agentRunArgs({ provider, title, workspaceId, prompt }) {
-  return [
-    'run', '--background', '--json', '--provider', String(provider),
-    '--title', String(title), '--workspace', String(workspaceId), String(prompt),
-  ];
+export function agentRunArgs({ provider, thinking, title, workspaceId, prompt }) {
+  const args = ['run', '--background', '--json', '--provider', String(provider)];
+  if (thinking) args.push('--thinking', String(thinking));
+  args.push('--title', String(title), '--workspace', String(workspaceId), String(prompt));
+  return args;
 }
 
 export function workspaceFromPayload(payload) {
