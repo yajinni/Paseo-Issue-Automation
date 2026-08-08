@@ -17,6 +17,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
   let filter = 'all';
   let query = '';
   let selectedIssue = null;
+  let drawerReturnFocus = null;
 
   function escapeText(value) { return value == null ? '' : String(value); }
   function onWorkQueue() { return document.querySelector('[data-manager-view="work-queue"]'); }
@@ -59,7 +60,10 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     drawer.id = 'work-detail-drawer';
     drawer.className = 'work-detail-drawer';
     drawer.hidden = true;
-    drawer.setAttribute('aria-label', 'Work item details');
+    drawer.tabIndex = -1;
+    drawer.setAttribute('role', 'dialog');
+    drawer.setAttribute('aria-modal', 'true');
+    drawer.setAttribute('aria-labelledby', 'work-detail-title');
     document.body.append(scrim, drawer);
   }
 
@@ -107,6 +111,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     const button = document.createElement('button');
     button.type = 'button';
     button.className = className;
+    button.dataset.issueAction = action;
     button.textContent = label;
     button.addEventListener('click', (event) => { event.stopPropagation(); runItemAction(action, item).catch(showQueueError); });
     return button;
@@ -117,7 +122,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     actions.className = 'work-queue-actions';
     const details = document.createElement('button');
     details.type = 'button'; details.className = 'secondary'; details.textContent = 'Details';
-    details.addEventListener('click', () => openDrawer(item));
+    details.addEventListener('click', (event) => openDrawer(item, event.currentTarget));
     actions.append(details);
     const skipped = (statusData?.automation?.skippedIssueNumbers || []).includes(Number(item.issueNumber));
     if (skipped) actions.append(actionButton('Unskip', 'unskip-issue', item));
@@ -214,15 +219,16 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     section.append(heading, actions); return section;
   }
 
-  function openDrawer(item) {
+  function openDrawer(item, returnFocus = null) {
     selectedIssue = item.issueNumber;
+    if (returnFocus) drawerReturnFocus = returnFocus;
     const drawer = document.getElementById('work-detail-drawer');
     const scrim = document.getElementById('work-detail-scrim');
     if (!drawer || !scrim) return;
     drawer.textContent = '';
     const head = document.createElement('header'); head.className = 'work-detail-head';
     const title = document.createElement('div'); title.innerHTML = '<div class="eyebrow">Work item</div>';
-    const h2 = document.createElement('h2'); h2.textContent = '#' + item.issueNumber + ' ' + item.title; title.append(h2);
+    const h2 = document.createElement('h2'); h2.id = 'work-detail-title'; h2.textContent = '#' + item.issueNumber + ' ' + item.title; title.append(h2);
     const close = document.createElement('button'); close.type = 'button'; close.className = 'secondary'; close.textContent = 'Close'; close.addEventListener('click', closeDrawer);
     head.append(title, close); drawer.append(head);
     const state = document.createElement('section'); state.className = 'work-detail-section';
@@ -247,23 +253,35 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     selectedIssue = null;
     const drawer = document.getElementById('work-detail-drawer'); const scrim = document.getElementById('work-detail-scrim');
     if (drawer) drawer.hidden = true; if (scrim) scrim.hidden = true;
+    const returnFocus = drawerReturnFocus;
+    drawerReturnFocus = null;
+    try { returnFocus?.focus?.(); } catch {}
+  }
+
+  function drawerFocusables() {
+    const drawer = document.getElementById('work-detail-drawer');
+    if (!drawer || drawer.hidden) return [];
+    return [...drawer.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+      .filter((element) => !element.disabled && !element.hidden);
+  }
+
+  function handleDrawerKeydown(event) {
+    if (!selectedIssue) return;
+    if (event.key === 'Escape') { event.preventDefault(); closeDrawer(); return; }
+    if (event.key !== 'Tab') return;
+    const items = drawerFocusables();
+    if (!items.length) { event.preventDefault(); document.getElementById('work-detail-drawer')?.focus(); return; }
+    const first = items[0]; const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   }
 
   async function runItemAction(action, item) {
     if (typeof postRepositoryAction !== 'function') throw new Error('Repository actions are unavailable.');
+    if (action === 'restart-issue' || action === 'abandon-issue') {
+      throw new Error('Dangerous issue actions require the manager confirmation layer.');
+    }
     const payload = { issueNumber: Number(item.issueNumber), branchAction: document.getElementById('work-detail-branch-action')?.value || 'keep' };
-    if (action === 'abandon-issue') {
-      const reason = prompt('Why should this attempt be abandoned?', 'Abandoned by user');
-      if (reason === null) return;
-      payload.reason = reason;
-    }
-    if (action === 'restart-issue') {
-      const fresh = payload.branchAction === 'delete';
-      const message = fresh
-        ? 'Start issue #' + item.issueNumber + ' fresh and delete the recorded old branch?'
-        : 'Recover issue #' + item.issueNumber + ' using its existing branch, workspace, and coder when they can be verified safely? A fresh attempt will be used only if recovery is unavailable or already exhausted.';
-      if (!confirm(message)) return;
-    }
     await postRepositoryAction(action, payload);
     if (selectedIssue === item.issueNumber) {
       const refreshed = queueData.items?.find((candidate) => candidate.issueNumber === item.issueNumber);
@@ -301,7 +319,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
       return result;
     };
   }
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && selectedIssue) closeDrawer(); });
+  document.addEventListener('keydown', handleDrawerKeydown);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true }); else build();
   try { if (typeof currentStatus !== 'undefined' && currentStatus) renderStatusQueue(currentStatus); } catch {}
 })();
