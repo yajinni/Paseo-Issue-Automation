@@ -122,7 +122,7 @@ if (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'comment')) proces
 if (args[0] === 'pr' && args[1] === 'list') {
   const hasOpenPr = existsSync(path.join(fixture, 'open-pr'));
   const head = arg('--head');
-  output(hasOpenPr && head === ${JSON.stringify(oldBranch)}
+  output(hasOpenPr && head === ${JSON.stringify('ai/issue-202-operator-branch-handling')}
     ? [{ number: 17, url: 'https://example.invalid/owner/repo/pull/17' }]
     : []);
   process.exit(0);
@@ -223,7 +223,8 @@ test('functional acceptance: abandon stops and archives the recorded attempt whi
   const commands = commandLog(fixture);
   assert.ok(commands.some((entry) => entry.command === 'paseo' && entry.args[0] === 'stop' && entry.args[1] === 'coder-202'));
   assert.ok(commands.some((entry) => entry.command === 'paseo' && entry.args[0] === 'workspace' && entry.args[1] === 'archive' && entry.args[2] === 'workspace-202'));
-  assert.ok(commands.some((entry) => entry.command === 'gh' && entry.args[0] === 'issue' && entry.args[1] === 'comment' && entry.args.includes('operator requested stop')));
+  assert.ok(commands.some((entry) => entry.command === 'gh' && entry.args[0] === 'issue' && entry.args[1] === 'comment'
+    && entry.args.some((value) => String(value).includes('operator requested stop'))));
   assert.equal(commands.some((entry) => entry.command === 'paseo' && entry.args[0] === 'workspace' && entry.args[1] === 'create'), false);
 });
 
