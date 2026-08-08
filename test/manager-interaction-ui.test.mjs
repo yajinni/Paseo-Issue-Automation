@@ -40,6 +40,16 @@ test('styled confirmation modal replaces primary destructive native-confirm path
   assert.doesNotMatch(MANAGER_INTERACTION_SCRIPT, /\bprompt\s*\(/);
 });
 
+test('recover-first and fresh restart confirmations reflect the selected branch action', () => {
+  assert.match(MANAGER_INTERACTION_SCRIPT, /payload\.branchAction === 'delete'/);
+  assert.match(MANAGER_INTERACTION_SCRIPT, /Recover issue #/);
+  assert.match(MANAGER_INTERACTION_SCRIPT, /using its existing branch, workspace, and coder/);
+  assert.match(MANAGER_INTERACTION_SCRIPT, /fresh attempt will be used only if recovery is unavailable or already exhausted/i);
+  assert.match(MANAGER_INTERACTION_SCRIPT, /Start fresh/);
+  assert.match(MANAGER_INTERACTION_SCRIPT, /delete the recorded old branch/);
+  assert.match(MANAGER_INTERACTION_SCRIPT, /\['Restart', 'Recover', 'Abandon'\]/);
+});
+
 test('confirmation modal provides accessible focus management and reason input', () => {
   assert.match(MANAGER_INTERACTION_SCRIPT, /role="dialog"/);
   assert.match(MANAGER_INTERACTION_SCRIPT, /aria-modal="true"/);

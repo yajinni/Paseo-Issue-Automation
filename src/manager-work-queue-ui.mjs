@@ -17,6 +17,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
   let filter = 'all';
   let query = '';
   let selectedIssue = null;
+  let drawerReturnFocus = null;
 
   function escapeText(value) { return value == null ? '' : String(value); }
   function onWorkQueue() { return document.querySelector('[data-manager-view="work-queue"]'); }
@@ -48,18 +49,20 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
 
   function createDrawer() {
     if (document.getElementById('work-detail-drawer')) return;
-    const scrim = document.createElement('button');
-    scrim.type = 'button';
+    const scrim = document.createElement('div');
     scrim.id = 'work-detail-scrim';
     scrim.className = 'work-detail-scrim';
     scrim.hidden = true;
-    scrim.setAttribute('aria-label', 'Close work details');
+    scrim.setAttribute('aria-hidden', 'true');
     scrim.addEventListener('click', closeDrawer);
     const drawer = document.createElement('aside');
     drawer.id = 'work-detail-drawer';
     drawer.className = 'work-detail-drawer';
     drawer.hidden = true;
-    drawer.setAttribute('aria-label', 'Work item details');
+    drawer.tabIndex = -1;
+    drawer.setAttribute('role', 'dialog');
+    drawer.setAttribute('aria-modal', 'true');
+    drawer.setAttribute('aria-labelledby', 'work-detail-title');
     document.body.append(scrim, drawer);
   }
 
@@ -107,6 +110,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     const button = document.createElement('button');
     button.type = 'button';
     button.className = className;
+    button.dataset.issueAction = action;
     button.textContent = label;
     button.addEventListener('click', (event) => { event.stopPropagation(); runItemAction(action, item).catch(showQueueError); });
     return button;
@@ -116,8 +120,8 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     const actions = document.createElement('div');
     actions.className = 'work-queue-actions';
     const details = document.createElement('button');
-    details.type = 'button'; details.className = 'secondary'; details.textContent = 'Details';
-    details.addEventListener('click', () => openDrawer(item));
+    details.type = 'button'; details.className = 'secondary'; details.textContent = 'Details'; details.dataset.workDetails = 'true';
+    details.addEventListener('click', (event) => openDrawer(item, event.currentTarget));
     actions.append(details);
     const skipped = (statusData?.automation?.skippedIssueNumbers || []).includes(Number(item.issueNumber));
     if (skipped) actions.append(actionButton('Unskip', 'unskip-issue', item));
@@ -214,16 +218,25 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     section.append(heading, actions); return section;
   }
 
-  function openDrawer(item) {
+  function openDrawer(item, returnFocus = null, { preserveInteraction = false } = {}) {
     selectedIssue = item.issueNumber;
+    if (returnFocus) drawerReturnFocus = returnFocus;
     const drawer = document.getElementById('work-detail-drawer');
     const scrim = document.getElementById('work-detail-scrim');
     if (!drawer || !scrim) return;
+    const activeElement = preserveInteraction ? document.activeElement : null;
+    const hadDrawerFocus = Boolean(activeElement && drawer.contains(activeElement));
+    const activeIssueAction = hadDrawerFocus ? activeElement?.dataset?.issueAction || null : null;
+    const activeHref = hadDrawerFocus && activeElement?.tagName === 'A' ? activeElement.href : null;
+    const activeWasBranch = hadDrawerFocus && activeElement?.id === 'work-detail-branch-action';
+    const activeWasClose = hadDrawerFocus && activeElement?.dataset?.workDetailClose === 'true';
+    const branchAction = preserveInteraction ? document.getElementById('work-detail-branch-action')?.value || null : null;
+    const scrollTop = preserveInteraction ? drawer.scrollTop : 0;
     drawer.textContent = '';
     const head = document.createElement('header'); head.className = 'work-detail-head';
     const title = document.createElement('div'); title.innerHTML = '<div class="eyebrow">Work item</div>';
-    const h2 = document.createElement('h2'); h2.textContent = '#' + item.issueNumber + ' ' + item.title; title.append(h2);
-    const close = document.createElement('button'); close.type = 'button'; close.className = 'secondary'; close.textContent = 'Close'; close.addEventListener('click', closeDrawer);
+    const h2 = document.createElement('h2'); h2.id = 'work-detail-title'; h2.textContent = '#' + item.issueNumber + ' ' + item.title; title.append(h2);
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'secondary'; close.textContent = 'Close'; close.dataset.workDetailClose = 'true'; close.addEventListener('click', closeDrawer);
     head.append(title, close); drawer.append(head);
     const state = document.createElement('section'); state.className = 'work-detail-section';
     const stateHeading = document.createElement('h3'); stateHeading.textContent = 'Current state';
@@ -240,34 +253,60 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     drawer.append(state);
     const review = reviewFacts(item); if (review) drawer.append(review);
     drawer.append(timelineSection(item), drawerActions(item));
-    drawer.hidden = false; scrim.hidden = false; close.focus();
+    const currentBranch = document.getElementById('work-detail-branch-action');
+    if (branchAction && currentBranch) currentBranch.value = branchAction;
+    drawer.hidden = false; scrim.hidden = false;
+    drawer.scrollTop = scrollTop;
+    if (!preserveInteraction) { close.focus(); return; }
+    if (!hadDrawerFocus) return;
+    let focusTarget = null;
+    if (activeWasBranch) focusTarget = currentBranch;
+    else if (activeWasClose) focusTarget = close;
+    else if (activeIssueAction) focusTarget = drawer.querySelector('[data-issue-action="' + activeIssueAction + '"]');
+    else if (activeHref) focusTarget = [...drawer.querySelectorAll('a[href]')].find((link) => link.href === activeHref) || null;
+    try { (focusTarget || close).focus(); } catch {}
   }
 
   function closeDrawer() {
+    const closingIssue = selectedIssue;
     selectedIssue = null;
     const drawer = document.getElementById('work-detail-drawer'); const scrim = document.getElementById('work-detail-scrim');
     if (drawer) drawer.hidden = true; if (scrim) scrim.hidden = true;
+    const returnFocus = drawerReturnFocus;
+    drawerReturnFocus = null;
+    const currentDetails = closingIssue == null ? null : document.querySelector('.work-queue-item[data-issue-number="' + String(closingIssue) + '"] [data-work-details="true"]');
+    const focusTarget = returnFocus?.isConnected ? returnFocus : currentDetails || document.getElementById('work-queue-search');
+    try { focusTarget?.focus?.(); } catch {}
+  }
+
+  function drawerFocusables() {
+    const drawer = document.getElementById('work-detail-drawer');
+    if (!drawer || drawer.hidden) return [];
+    return [...drawer.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+      .filter((element) => !element.disabled && !element.hidden);
+  }
+
+  function handleDrawerKeydown(event) {
+    if (!selectedIssue) return;
+    if (event.key === 'Escape') { event.preventDefault(); closeDrawer(); return; }
+    if (event.key !== 'Tab') return;
+    const items = drawerFocusables();
+    if (!items.length) { event.preventDefault(); document.getElementById('work-detail-drawer')?.focus(); return; }
+    const first = items[0]; const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   }
 
   async function runItemAction(action, item) {
     if (typeof postRepositoryAction !== 'function') throw new Error('Repository actions are unavailable.');
+    if (action === 'restart-issue' || action === 'abandon-issue') {
+      throw new Error('Dangerous issue actions require the manager confirmation layer.');
+    }
     const payload = { issueNumber: Number(item.issueNumber), branchAction: document.getElementById('work-detail-branch-action')?.value || 'keep' };
-    if (action === 'abandon-issue') {
-      const reason = prompt('Why should this attempt be abandoned?', 'Abandoned by user');
-      if (reason === null) return;
-      payload.reason = reason;
-    }
-    if (action === 'restart-issue') {
-      const fresh = payload.branchAction === 'delete';
-      const message = fresh
-        ? 'Start issue #' + item.issueNumber + ' fresh and delete the recorded old branch?'
-        : 'Recover issue #' + item.issueNumber + ' using its existing branch, workspace, and coder when they can be verified safely? A fresh attempt will be used only if recovery is unavailable or already exhausted.';
-      if (!confirm(message)) return;
-    }
     await postRepositoryAction(action, payload);
     if (selectedIssue === item.issueNumber) {
       const refreshed = queueData.items?.find((candidate) => candidate.issueNumber === item.issueNumber);
-      if (refreshed) openDrawer(refreshed); else closeDrawer();
+      if (refreshed) openDrawer(refreshed, null, { preserveInteraction: true }); else closeDrawer();
     }
   }
 
@@ -282,7 +321,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     render();
     if (selectedIssue) {
       const selected = queueData.items?.find((item) => item.issueNumber === selectedIssue);
-      if (selected) openDrawer(selected); else closeDrawer();
+      if (selected) openDrawer(selected, null, { preserveInteraction: true }); else closeDrawer();
     }
     const badge = document.querySelector('[data-manager-badge="work-queue"]');
     if (badge) {
@@ -301,7 +340,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
       return result;
     };
   }
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && selectedIssue) closeDrawer(); });
+  document.addEventListener('keydown', handleDrawerKeydown);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true }); else build();
   try { if (typeof currentStatus !== 'undefined' && currentStatus) renderStatusQueue(currentStatus); } catch {}
 })();
