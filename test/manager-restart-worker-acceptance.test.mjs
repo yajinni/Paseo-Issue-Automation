@@ -143,7 +143,7 @@ process.exit(2);
   assert.equal(settled.coderAgentId, 'coder-303');
   assert.equal(settled.failedAttemptRecoveryCount, 1);
   assert.equal(settled.restartPending, false);
-  assert.match(settled.reason || '', /simulated post-restart coder failure/i);
+  assert.match(settled.reason || '', /Paseo could not wait for the Coder/i);
   assert.ok((settled.activity || []).some((entry) => entry.type === 'failed-attempt-recovery-started'));
   assert.ok((settled.activity || []).some((entry) => entry.type === 'controller-restarted-for-recovery'));
 
