@@ -49,6 +49,12 @@ test('leaving Issues cancels a deferred issue-plan refresh', () => {
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /if \(activeView\(\) === 'automation'\) loadIssuePlan\(\{ force: true \}\);\s*else clearIssuePlanRefreshTimer\(\)/);
 });
 
+test('Issues and PR Reviews subscribe directly to the manager status hub', () => {
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /window\.addManagerStatusListener\(render\)/);
+  assert.doesNotMatch(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /window\.renderStatus\s*=/);
+  assert.doesNotMatch(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /const previous = window\.renderStatus/);
+});
+
 test('PR Reviews removes ChatGPT Profile and orders workflow worker workload', () => {
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /findCard\(view, 'ChatGPT Profile'\)/);
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /profile\?\.remove\(\)/);
