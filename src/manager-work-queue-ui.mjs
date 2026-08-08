@@ -49,12 +49,11 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
 
   function createDrawer() {
     if (document.getElementById('work-detail-drawer')) return;
-    const scrim = document.createElement('button');
-    scrim.type = 'button';
+    const scrim = document.createElement('div');
     scrim.id = 'work-detail-scrim';
     scrim.className = 'work-detail-scrim';
     scrim.hidden = true;
-    scrim.setAttribute('aria-label', 'Close work details');
+    scrim.setAttribute('aria-hidden', 'true');
     scrim.addEventListener('click', closeDrawer);
     const drawer = document.createElement('aside');
     drawer.id = 'work-detail-drawer';
@@ -121,7 +120,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     const actions = document.createElement('div');
     actions.className = 'work-queue-actions';
     const details = document.createElement('button');
-    details.type = 'button'; details.className = 'secondary'; details.textContent = 'Details';
+    details.type = 'button'; details.className = 'secondary'; details.textContent = 'Details'; details.dataset.workDetails = 'true';
     details.addEventListener('click', (event) => openDrawer(item, event.currentTarget));
     actions.append(details);
     const skipped = (statusData?.automation?.skippedIssueNumbers || []).includes(Number(item.issueNumber));
@@ -250,12 +249,15 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
   }
 
   function closeDrawer() {
+    const closingIssue = selectedIssue;
     selectedIssue = null;
     const drawer = document.getElementById('work-detail-drawer'); const scrim = document.getElementById('work-detail-scrim');
     if (drawer) drawer.hidden = true; if (scrim) scrim.hidden = true;
     const returnFocus = drawerReturnFocus;
     drawerReturnFocus = null;
-    try { returnFocus?.focus?.(); } catch {}
+    const currentDetails = closingIssue == null ? null : document.querySelector('.work-queue-item[data-issue-number="' + String(closingIssue) + '"] [data-work-details="true"]');
+    const focusTarget = returnFocus?.isConnected ? returnFocus : currentDetails || document.getElementById('work-queue-search');
+    try { focusTarget?.focus?.(); } catch {}
   }
 
   function drawerFocusables() {
