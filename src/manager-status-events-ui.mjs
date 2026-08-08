@@ -6,7 +6,7 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
   const baseRenderStatus = window.renderStatus;
   if (typeof baseRenderStatus !== 'function') return;
 
-  const legacySubscribers = [];
+  const capturedRenderers = [];
   const listeners = new Set();
   let dispatching = false;
   let activeResult;
@@ -20,8 +20,8 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
     dispatching = true;
     try {
       activeResult = baseRenderStatus(data);
-      for (const subscriber of [...legacySubscribers]) {
-        try { subscriber(data); } catch (error) { reportFailure('subscriber', error); }
+      for (const renderer of [...capturedRenderers]) {
+        try { renderer(data); } catch (error) { reportFailure('renderer', error); }
       }
       for (const listener of [...listeners]) {
         try { listener(data); } catch (error) { reportFailure('listener', error); }
@@ -36,16 +36,18 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
     }
   }
 
-  Object.defineProperty(window, 'renderStatus', {
-    configurable: true,
-    enumerable: true,
-    get() { return dispatchManagerStatus; },
-    set(next) {
-      if (typeof next === 'function' && next !== dispatchManagerStatus && !legacySubscribers.includes(next)) {
-        legacySubscribers.push(next);
-      }
-    },
-  });
+  window.renderStatus = dispatchManagerStatus;
+
+  window.captureManagerStatusRenderer = function captureManagerStatusRenderer() {
+    const renderer = window.renderStatus;
+    if (typeof renderer !== 'function' || renderer === dispatchManagerStatus || capturedRenderers.includes(renderer)) {
+      window.renderStatus = dispatchManagerStatus;
+      return false;
+    }
+    capturedRenderers.push(renderer);
+    window.renderStatus = dispatchManagerStatus;
+    return true;
+  };
 
   window.addManagerStatusListener = function addManagerStatusListener(listener) {
     if (typeof listener !== 'function') throw new TypeError('Manager status listener must be a function.');
@@ -66,6 +68,14 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
 })();
 `;
 
+export const MANAGER_STATUS_CAPTURE_SCRIPT = String.raw`
+window.captureManagerStatusRenderer?.();
+`;
+
 export function enhanceManagerWithStatusEvents(html) {
   return injectIntoBody(html, `<script data-manager-status-events>${MANAGER_STATUS_EVENTS_SCRIPT}</script>`);
+}
+
+export function captureManagerStatusRenderer(html) {
+  return injectIntoBody(html, `<script data-manager-status-capture>${MANAGER_STATUS_CAPTURE_SCRIPT}</script>`);
 }
