@@ -18,13 +18,16 @@ test('status-bearing actions do not schedule an extra refresh', () => {
   assert.doesNotMatch(html, /lightweightActions = new Set\([^)]*review-worker\/stop/);
 });
 
-test('same-repository status refreshes preserve an unsaved configuration draft', () => {
+test('same-repository status refreshes preserve the latest unsaved configuration draft', () => {
   const html = managerHtml();
   assert.match(html, /let configDraftRepositoryId = null/);
+  assert.match(html, /let configDraftValues = null/);
+  assert.match(html, /function snapshotConfigFields\(\)/);
+  assert.match(html, /configDraftValues = snapshotConfigFields\(\)/);
   assert.match(html, /function captureConfigDraft\(\)/);
-  assert.match(html, /function restoreConfigDraft\(draft\)/);
-  assert.match(html, /configDraftRepositoryId === repositoryId \? captureConfigDraft\(\) : null/);
-  assert.match(html, /if \(draft && currentRepositoryId === repositoryId\) restoreConfigDraft\(draft\)/);
+  assert.match(html, /return configDraftValues\.map\(\(saved\) => \(\{ \.\.\.saved \}\)\)/);
+  assert.match(html, /const preserveDraft = configDraftRepositoryId === repositoryId/);
+  assert.match(html, /restoreConfigDraft\(captureConfigDraft\(\)\)/);
   assert.match(html, /configForm\?\.dispatchEvent\(new Event\('input', \{ bubbles: true \}\)\)/);
 });
 
@@ -33,6 +36,7 @@ test('configuration save discard and repository switch intentionally drop the ol
   assert.match(html, /action !== 'config' && configDraftRepositoryId === repositoryId/);
   assert.match(html, /if \(action === 'config'\) clearConfigDraft\(\)/);
   assert.match(html, /#manager-config-discard/);
+  assert.match(html, /configDraftValues = null/);
   assert.match(html, /if \(configDraftRepositoryId && configDraftRepositoryId !== currentRepositoryId\) clearConfigDraft\(\)/);
 });
 
