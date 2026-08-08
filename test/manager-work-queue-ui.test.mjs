@@ -61,11 +61,19 @@ test('detail drawer is an accessible modal with focus containment and focus rest
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /setAttribute\('role', 'dialog'\)/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /setAttribute\('aria-modal', 'true'\)/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /setAttribute\('aria-labelledby', 'work-detail-title'\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /createElement\('div'\);\s*scrim\.id = 'work-detail-scrim'/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /scrim\.setAttribute\('aria-hidden', 'true'\)/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /drawerReturnFocus/);
-  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /returnFocus\?\.focus/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /event\.key === 'Escape'/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /event\.key !== 'Tab'/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /drawerFocusables/);
+});
+
+test('drawer focus restoration survives live queue-row replacement', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /details\.dataset\.workDetails = 'true'/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /const closingIssue = selectedIssue/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /returnFocus\?\.isConnected \? returnFocus : currentDetails \|\| document\.getElementById\('work-queue-search'\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /data-work-details=\"true\"/);
 });
 
 test('queue badge derives from server queue counts and highlights attention', () => {
