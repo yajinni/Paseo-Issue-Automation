@@ -240,13 +240,8 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
     try { if (typeof currentStatus !== 'undefined' && currentStatus) render(currentStatus); } catch {}
   }
 
-  const previous = window.renderStatus;
-  if (typeof previous === 'function') {
-    window.renderStatus = function managerAutomationReviewsRenderStatus(data) {
-      const result = previous(data);
-      render(data);
-      return result;
-    };
+  if (typeof window.addManagerStatusListener === 'function') {
+    window.addManagerStatusListener(render);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true });
   else build();
