@@ -7,6 +7,9 @@ export const AGENT_START_MAX_ATTEMPTS = 3;
 export const LAUNCH_RECONCILIATION_MAX_ATTEMPTS = 3;
 export const PASEO_WORKTREE_SLUG_MAX_LENGTH = 50;
 
+const OBSOLETE_NO_RECOVERY_INSTRUCTION = 'This attempt cannot be resumed or recovered. If interrupted, it will be abandoned and restarted fresh.';
+const RECOVER_FIRST_INSTRUCTION = 'Do not create an ad-hoc replacement workspace, branch, or duplicate coder. If Paseo’s controller explicitly requests recover-first continuation, resume this recorded attempt in place using the existing workspace, branch, and coder; otherwise follow the controller lifecycle instructions.';
+
 export function nextReconciliationAttempt(current = 0) {
   const previous = Number(current);
   const normalized = Number.isInteger(previous) && previous >= 0 ? previous : 0;
@@ -63,10 +66,14 @@ export function workspaceCreateArgs({ root, title, branch, baseBranch }) {
   ];
 }
 
+export function normalizeAttemptPrompt(prompt) {
+  return String(prompt).replace(OBSOLETE_NO_RECOVERY_INSTRUCTION, RECOVER_FIRST_INSTRUCTION);
+}
+
 export function agentRunArgs({ provider, thinking, title, workspaceId, prompt }) {
   const args = ['run', '--background', '--json', '--provider', String(provider)];
   if (thinking) args.push('--thinking', String(thinking));
-  args.push('--title', String(title), '--workspace', String(workspaceId), String(prompt));
+  args.push('--title', String(title), '--workspace', String(workspaceId), normalizeAttemptPrompt(prompt));
   return args;
 }
 
