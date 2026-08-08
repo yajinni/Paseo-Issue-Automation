@@ -27,3 +27,19 @@ test('newer capacity edits remain dirty when an older save response renders', ()
   assert.doesNotMatch(html, /\n    managerCapacityDirty = false;\n    renderManagerCapacity\(body\);/);
   assert.match(html, /if \(managerCapacityEditVersion === editVersionAtStart\) managerCapacityDirty = false;\s*renderManagerCapacity\(body\);/);
 });
+
+test('superseded capacity save responses cannot overwrite a newer save', () => {
+  const html = managerHtml();
+  assert.match(html, /let managerCapacitySaveRequest = 0/);
+  assert.match(html, /const saveRequest = \+\+managerCapacitySaveRequest/);
+  assert.match(html, /if \(saveRequest !== managerCapacitySaveRequest\) return/);
+  const staleGuard = html.indexOf('if (saveRequest !== managerCapacitySaveRequest) return;');
+  const dirtyGuard = html.indexOf('if (managerCapacityEditVersion === editVersionAtStart) managerCapacityDirty = false;', staleGuard);
+  const render = html.indexOf('renderManagerCapacity(body);', dirtyGuard);
+  assert.ok(staleGuard >= 0 && dirtyGuard > staleGuard && render > dirtyGuard, 'stale save responses should be rejected before dirty state or input rendering');
+});
+
+test('errors from superseded capacity saves do not replace the current save state', () => {
+  const html = managerHtml();
+  assert.match(html, /if \(saveRequest === managerCapacitySaveRequest\) showError\(error\)/);
+});
