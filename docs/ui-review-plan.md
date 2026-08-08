@@ -1,6 +1,6 @@
 # Manager UI hardening review — complete
 
-The focused manager UI review and hardening series is complete through PR #156. This document records what shipped, the regression layers that now protect it, and the opt-in browser smoke procedure for future releases or major manager UI changes.
+The focused manager UI review and hardening series is complete through PR #158. This document records what shipped, the regression layers that now protect it, and the browser smoke procedure for future releases or major manager UI changes.
 
 ## Completed implementation
 
@@ -62,19 +62,34 @@ Coverage now includes:
 
 Relevant PRs: #154, #155.
 
-### Opt-in browser smoke
+### Browser smoke
 
-`test/manager-browser-smoke.test.mjs` provides a deterministic Playwright smoke harness around the real generated `managerDashboardHtml()` using in-memory Repo A / Repo B API responses. It does not touch a real repository, GitHub account, or Paseo daemon.
+`test/manager-browser-smoke.test.mjs` provides deterministic Playwright coverage around the real generated `managerDashboardHtml()` using in-memory Repo A / Repo B API responses. It does not touch a real repository, GitHub account, or Paseo daemon.
 
-The harness covers:
+The browser suite covers:
 
 - unsaved Configuration edits surviving an in-flight Refresh;
+- an edit begun after an already-running status request surviving that older response;
 - newer edits surviving an older Configuration Save response;
-- a Repo A action completing after the UI has switched to Repo B;
-- Work Queue drawer branch choice, focus, and visibility across a live status refresh;
-- legacy Integration URL normalization and absence of obsolete setup-link cards.
+- a Repo A status response arriving after Repo B becomes active without repainting Repo B;
+- a Repo A Configuration save finishing after Repo B becomes active without repainting Repo B;
+- a Repo A action completing after the UI has switched to Repo B with repository-scoped feedback;
+- `review-worker/start`, `restart-issue`, and `review-worker/restart` lightweight 202 actions each causing the required follow-up status refresh;
+- repeated Issues status updates remaining inside the 15-second issue-plan cache and producing one deferred refresh per cache cycle rather than immediate duplicates;
+- Work Queue drawer branch choice, focus, and visibility surviving a live status refresh;
+- Back/Forward normalization through legacy Integration and Maintenance history entries;
+- absence of obsolete Configuration setup-link cards.
 
-The browser launch is intentionally **not** part of default CI because the source-test matrix does not install dependencies or browser binaries. The test file itself is discovered and skipped successfully in default CI; Playwright is dynamically imported only when the smoke is enabled.
+PR #158 added `.github/workflows/manager-browser-smoke.yml`. The dedicated workflow:
+
+- runs automatically on pull requests only when the smoke harness or its workflow changes;
+- installs package dependencies and Chromium, then runs the smoke with `PASEO_BROWSER_SMOKE=1`;
+- is also available through `workflow_dispatch` for release/manual validation after merge;
+- does not add browser installation cost to the normal CI matrix.
+
+The full browser suite was executed on PR #158 after Chromium installation: **2 tests passed, 0 failed**. The original cross-module race/focus test completed in about 2 seconds, and the extended lifecycle/cache/history test completed in about 31 seconds, including two real 15-second issue-plan cache windows.
+
+The smoke test remains discovered and skipped by normal dependency-free `npm test`. Playwright is dynamically imported only when browser smoke is enabled.
 
 To run the browser smoke from a source checkout:
 
@@ -93,13 +108,13 @@ $env:PASEO_BROWSER_SMOKE='1'
 node --test test/manager-browser-smoke.test.mjs
 ```
 
-Relevant PR: #156.
+Relevant PRs: #156, #158.
 
 ## Recommended future use
 
-Run the default CI suite for every manager change. Run the opt-in browser smoke before releases that materially change manager navigation, Configuration save/refresh behavior, repository switching, Work Queue drawer behavior, or status/action lifecycle handling.
+Run the default CI suite for every manager change. Run the dedicated Manager browser smoke workflow before releases that materially change manager navigation, Configuration save/refresh behavior, repository switching, Work Queue drawer behavior, issue-plan refresh behavior, or status/action lifecycle handling.
 
-If browser smoke becomes a frequent release gate, consider adding a dedicated Playwright workflow rather than adding browser installation cost to every normal Node matrix job.
+Keep the browser workflow separate from the normal matrix unless browser-level validation becomes valuable enough on every manager PR to justify dependency and Chromium installation cost.
 
 ## Review status
 
