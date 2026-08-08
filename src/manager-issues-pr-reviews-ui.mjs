@@ -341,11 +341,8 @@ export const MANAGER_ISSUES_PR_REVIEWS_SCRIPT = String.raw`
     if (activeView() === 'automation') loadIssuePlan({ force: true });
   }
 
-  const previous = window.renderStatus;
-  if (typeof previous === 'function') {
-    window.renderStatus = function managerIssuesPrReviewsRenderStatus(data) {
-      const result = previous(data); render(data); return result;
-    };
+  if (typeof window.addManagerStatusListener === 'function') {
+    window.addManagerStatusListener(render);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true });
   else build();
