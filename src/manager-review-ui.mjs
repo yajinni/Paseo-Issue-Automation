@@ -19,19 +19,24 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   const configForm = document.getElementById('config-form');
   const repositorySelect = document.getElementById('repository-select');
   let configDraftRepositoryId = null;
+  let configDraftValues = null;
 
   function configFields() {
     return [...(configForm?.querySelectorAll('input,select') || [])]
       .filter((element) => element.id && element.dataset.managerTransient !== 'true');
   }
 
-  function captureConfigDraft() {
-    if (!configForm || !configDraftRepositoryId || configDraftRepositoryId !== repositorySelect?.value) return null;
+  function snapshotConfigFields() {
     return configFields().map((element) => ({
       id: element.id,
       checked: element.type === 'checkbox' ? element.checked : undefined,
       value: element.type === 'checkbox' ? undefined : element.value,
     }));
+  }
+
+  function captureConfigDraft() {
+    if (!configForm || !configDraftRepositoryId || configDraftRepositoryId !== repositorySelect?.value || !configDraftValues) return null;
+    return configDraftValues.map((saved) => ({ ...saved }));
   }
 
   function restoreConfigDraft(draft) {
@@ -52,10 +57,12 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
     const field = event.target;
     if (!field?.matches?.('input,select') || !field.id || field.dataset.managerTransient === 'true') return;
     configDraftRepositoryId = repositorySelect?.value || null;
+    configDraftValues = snapshotConfigFields();
   }
 
   function clearConfigDraft() {
     configDraftRepositoryId = null;
+    configDraftValues = null;
   }
 
   configForm?.addEventListener('input', noteConfigDraft);
@@ -68,10 +75,10 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   if (typeof previousLoadStatus === 'function') {
     window.loadStatus = async function managerDraftPreservingLoadStatus(...args) {
       const repositoryId = repositorySelect?.value || null;
-      const draft = configDraftRepositoryId === repositoryId ? captureConfigDraft() : null;
+      const preserveDraft = configDraftRepositoryId === repositoryId;
       const result = await previousLoadStatus(...args);
       const currentRepositoryId = repositorySelect?.value || null;
-      if (draft && currentRepositoryId === repositoryId) restoreConfigDraft(draft);
+      if (preserveDraft && currentRepositoryId === repositoryId) restoreConfigDraft(captureConfigDraft());
       else if (configDraftRepositoryId && configDraftRepositoryId !== currentRepositoryId) clearConfigDraft();
       return result;
     };
@@ -82,10 +89,9 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   window.postRepositoryAction = async function managerLightweightActionPostRepositoryAction(action, payload) {
     const repositoryId = repositorySelect?.value || null;
     const preserveDraft = action !== 'config' && configDraftRepositoryId === repositoryId;
-    const draft = preserveDraft ? captureConfigDraft() : null;
     const body = await previousPostRepositoryAction(action, payload);
     if (action === 'config') clearConfigDraft();
-    else if (draft && repositorySelect?.value === repositoryId) restoreConfigDraft(draft);
+    else if (preserveDraft && repositorySelect?.value === repositoryId) restoreConfigDraft(captureConfigDraft());
     if (lightweightActions.has(action) && !body?.status && typeof window.loadStatus === 'function') {
       queueMicrotask(() => window.loadStatus().catch((error) => {
         if (typeof window.showError === 'function') window.showError(error);
