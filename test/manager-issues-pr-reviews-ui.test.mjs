@@ -25,6 +25,16 @@ test('Issues view exposes workflow worker and full issue workload plan', () => {
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /data-manager-badge=\"automation\"/);
 });
 
+test('issue-plan refreshes deduplicate in-flight work and avoid loading churn during status polling', () => {
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /let issuePlanInFlight = null/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /const ISSUE_PLAN_CACHE_MS = 15000/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /sameRepository && issuePlanInFlight/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /Date\.now\(\) - issuePlanLoadedAt < ISSUE_PLAN_CACHE_MS/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /if \(!sameRepository \|\| !issuePlanLoadedAt\) renderIssuePlan\(\{ loading: true \}\)/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /loadIssuePlan\(\{ force: true \}\)/);
+  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /queueMicrotask\(\(\) => loadIssuePlan\(\)\)/);
+});
+
 test('PR Reviews removes ChatGPT Profile and orders workflow worker workload', () => {
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /findCard\(view, 'ChatGPT Profile'\)/);
   assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /profile\?\.remove\(\)/);
