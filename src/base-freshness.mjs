@@ -67,7 +67,7 @@ export function inspectBaseFreshness(root, state, baseBranch, {
 } = {}) {
   const cwd = state?.worktreePath || root;
   const remoteRef = `refs/remotes/origin/${baseBranch}`;
-  const fetch = runner('git', ['fetch', '--prune', 'origin', `+${baseBranch}:${remoteRef}`], {
+  const fetch = runner('git', ['fetch', '--prune', 'origin', `+refs/heads/${baseBranch}:${remoteRef}`], {
     cwd,
     allowFailure: true,
   });
