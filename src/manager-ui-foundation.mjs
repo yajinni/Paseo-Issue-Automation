@@ -37,8 +37,35 @@ pre{background:#0d1219;border:1px solid #253042;color:var(--paseo-muted);border-
 @media(max-width:760px){.shell{padding:14px}}
 `;
 
+export const MANAGER_LEGACY_VIEW_NORMALIZATION_SCRIPT = String.raw`
+(function normalizeLegacyManagerViews() {
+  const legacySteps = { integration: 'repository', maintenance: 'readiness' };
+
+  function activateConfigurationStep(step) {
+    localStorage.setItem('paseo-manager-config-tab', step);
+    queueMicrotask(() => {
+      document.querySelector?.('.manager-config-tab[data-config-tab="' + step + '"]')?.click();
+    });
+  }
+
+  function normalize() {
+    const url = new URL(location.href);
+    const legacyView = url.searchParams.get('view');
+    const step = legacySteps[legacyView];
+    if (!step) return false;
+    activateConfigurationStep(step);
+    url.searchParams.set('view', 'configuration');
+    history.replaceState({ managerView: 'configuration' }, '', url);
+    return true;
+  }
+
+  normalize();
+  window.addEventListener('popstate', normalize);
+})();
+`;
+
 export function enhanceManagerWithUiFoundation(html) {
-  const payload = `${sharedUiThemeStyleTag('data-paseo-ui-theme="manager"')}<style data-manager-ui-foundation>${MANAGER_UI_FOUNDATION_CSS}</style>`;
+  const payload = `${sharedUiThemeStyleTag('data-paseo-ui-theme="manager"')}<style data-manager-ui-foundation>${MANAGER_UI_FOUNDATION_CSS}</style><script data-manager-legacy-view-normalization>${MANAGER_LEGACY_VIEW_NORMALIZATION_SCRIPT}</script>`;
   return injectIntoHead(html, payload);
 }
 
