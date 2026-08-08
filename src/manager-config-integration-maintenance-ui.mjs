@@ -511,22 +511,16 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     renderMaintenance(data);
   }
 
-  function removeSetupLinkCards() {
-    for (const card of document.querySelectorAll('.manager-config-step-link')) card.remove();
-  }
-
   function build() {
     if (built) return;
     if (!document.querySelector('[data-manager-view="configuration"]')) return;
     built = true;
     buildConfiguration(); buildIntegration(); buildMaintenance();
-    removeSetupLinkCards();
     baseline = snapshotConfigForm(); renderDirtyState();
     try { if (typeof currentStatus !== 'undefined' && currentStatus) render(currentStatus); } catch {}
   }
 
   document.addEventListener('paseo:configuration-tab', (event) => {
-    removeSetupLinkCards();
     const step = event.detail?.step;
     const savebar = document.getElementById('manager-config-savebar');
     if (savebar) savebar.style.display = step === 'paseo' ? 'none' : '';
@@ -535,13 +529,8 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     if (step === 'review' && document.getElementById('review-workflow')?.value === 'quick-web-chatgpt') loadChatGptProfile();
   });
 
-  const previous = window.renderStatus;
-  if (typeof previous === 'function') {
-    window.renderStatus = function managerConfigIntegrationRenderStatus(data) {
-      const result = previous(data);
-      render(data);
-      return result;
-    };
+  if (typeof window.addManagerStatusListener === 'function') {
+    window.addManagerStatusListener(render);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true });
   else build();
