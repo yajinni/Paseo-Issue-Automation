@@ -111,7 +111,15 @@ if (args[0] === 'pr' && args[1] === 'create') {
 }
 if (args[0] === 'pr' && args[1] === 'view') { const pr = currentPr(); if (!pr) process.exit(1); output(pr); process.exit(0); }
 if (args[0] === 'pr' && args[1] === 'comment') process.exit(0);
-if (args[0] === 'api') { output({ status: 'ahead', behind_by: 0, ahead_by: 1 }); process.exit(0); }
+if (args[0] === 'api') {
+  const pr = currentPr();
+  if (!pr) process.exit(1);
+  const behindBy = Number(execFileSync('git', ['rev-list', '--count', pr.headRefOid + '..' + pr.baseRefOid], { cwd: root, encoding: 'utf8' }).trim());
+  const aheadBy = Number(execFileSync('git', ['rev-list', '--count', pr.baseRefOid + '..' + pr.headRefOid], { cwd: root, encoding: 'utf8' }).trim());
+  const status = behindBy > 0 ? (aheadBy > 0 ? 'diverged' : 'behind') : (aheadBy > 0 ? 'ahead' : 'identical');
+  output({ status, behind_by: behindBy, ahead_by: aheadBy });
+  process.exit(0);
+}
 process.stderr.write('Unhandled fake gh command: ' + args.join(' '));
 process.exit(2);
 `;
