@@ -7,17 +7,23 @@ import {
   MANAGER_STATUS_EVENTS_SCRIPT,
 } from '../src/manager-status-events-ui.mjs';
 
-function statusHarness() {
+function statusHarness({ selectedRepositoryId: initialRepositoryId = null } = {}) {
   const calls = [];
   const errors = [];
   const events = [];
   const microtasks = [];
   const domListeners = new Map();
+  let selectedRepositoryId = initialRepositoryId;
+  let pendingPost = null;
   class CustomEvent {
     constructor(type, init = {}) { this.type = type; this.detail = init.detail; }
   }
+  const repositorySelect = {
+    get value() { return selectedRepositoryId || ''; },
+  };
   const document = {
     readyState: 'loading',
+    getElementById(id) { return id === 'repository-select' ? repositorySelect : null; },
     addEventListener(type, listener) { domListeners.set(type, listener); },
     dispatchEvent(event) { events.push(event); return true; },
   };
@@ -25,6 +31,9 @@ function statusHarness() {
     renderStatus(data) {
       calls.push('base:' + data.id);
       return 'base-result:' + data.id;
+    },
+    postRepositoryAction(action) {
+      return new Promise((resolve, reject) => { pendingPost = { action, resolve, reject }; });
     },
   };
   vm.runInNewContext(MANAGER_STATUS_EVENTS_SCRIPT, {
@@ -36,7 +45,17 @@ function statusHarness() {
     Set,
     TypeError,
   });
-  return { window, calls, errors, events, microtasks, domListeners };
+  return {
+    window, calls, errors, events, microtasks, domListeners,
+    setSelectedRepositoryId(value) { selectedRepositoryId = value; },
+    resolvePost(body) {
+      assert.ok(pendingPost, 'a repository action should be pending');
+      calls.push('post:' + pendingPost.action);
+      const { resolve } = pendingPost;
+      pendingPost = null;
+      resolve(body);
+    },
+  };
 }
 
 test('captured renderStatus wrappers become independent subscribers and base rendering runs once', () => {
@@ -68,6 +87,63 @@ test('captured renderStatus wrappers become independent subscribers and base ren
   calls.length = 0;
   window.renderStatus({ id: 8 });
   assert.deepEqual(calls, ['base:8', 'first:8', 'second:8']);
+});
+
+test('stale repository status is rejected before base rendering or subscribers run', () => {
+  const { window, calls, events } = statusHarness({ selectedRepositoryId: 'repo-b' });
+  window.addManagerStatusListener((data) => calls.push('listener:' + data.id));
+
+  assert.equal(window.renderStatus({ id: 10, repository: { id: 'repo-a' } }), undefined);
+  assert.deepEqual(calls, []);
+  assert.equal(events.filter((event) => event.type === 'paseo:manager-status').length, 0);
+
+  assert.equal(window.renderStatus({ id: 11, repository: { id: 'repo-b' } }), 'base-result:11');
+  assert.deepEqual(calls, ['base:11', 'listener:11']);
+  assert.equal(events.filter((event) => event.type === 'paseo:manager-status').length, 1);
+});
+
+test('late action response restores the latest accepted status for the newly selected repository', async () => {
+  const harness = statusHarness({ selectedRepositoryId: 'repo-a' });
+  harness.window.renderStatus({ id: 20, repository: { id: 'repo-a' } });
+  harness.calls.length = 0;
+  harness.events.length = 0;
+
+  const action = harness.window.postRepositoryAction('run-now');
+  harness.setSelectedRepositoryId('repo-b');
+  harness.window.renderStatus({ id: 21, repository: { id: 'repo-b' } });
+  harness.calls.length = 0;
+  harness.events.length = 0;
+
+  harness.resolvePost({ result: { ok: true } });
+  assert.deepEqual(await action, { result: { ok: true } });
+  assert.deepEqual(harness.calls, ['post:run-now', 'base:21']);
+  assert.equal(harness.events.filter((event) => event.type === 'paseo:manager-status').length, 1);
+  assert.equal(harness.events.find((event) => event.type === 'paseo:manager-status').detail.id, 21);
+});
+
+test('stale action response never re-renders the old repository when the new status is not loaded yet', async () => {
+  const harness = statusHarness({ selectedRepositoryId: 'repo-a' });
+  harness.window.renderStatus({ id: 30, repository: { id: 'repo-a' } });
+  harness.calls.length = 0;
+
+  const action = harness.window.postRepositoryAction('pause');
+  harness.setSelectedRepositoryId('repo-b');
+  harness.resolvePost({ result: { ok: true } });
+  await action;
+
+  assert.deepEqual(harness.calls, ['post:pause']);
+});
+
+test('same-repository action response does not trigger a redundant status render', async () => {
+  const harness = statusHarness({ selectedRepositoryId: 'repo-a' });
+  harness.window.renderStatus({ id: 40, repository: { id: 'repo-a' } });
+  harness.calls.length = 0;
+
+  const action = harness.window.postRepositoryAction('pause');
+  harness.resolvePost({ result: { ok: true } });
+  await action;
+
+  assert.deepEqual(harness.calls, ['post:pause']);
 });
 
 test('one failing captured renderer does not prevent later manager UI renderers', () => {
