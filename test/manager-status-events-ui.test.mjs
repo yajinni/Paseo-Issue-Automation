@@ -7,7 +7,7 @@ import {
   MANAGER_STATUS_EVENTS_SCRIPT,
 } from '../src/manager-status-events-ui.mjs';
 
-function statusHarness() {
+function statusHarness({ selectedRepositoryId = null } = {}) {
   const calls = [];
   const errors = [];
   const events = [];
@@ -18,6 +18,7 @@ function statusHarness() {
   }
   const document = {
     readyState: 'loading',
+    getElementById(id) { return id === 'repository-select' && selectedRepositoryId ? { value: selectedRepositoryId } : null; },
     addEventListener(type, listener) { domListeners.set(type, listener); },
     dispatchEvent(event) { events.push(event); return true; },
   };
@@ -68,6 +69,19 @@ test('captured renderStatus wrappers become independent subscribers and base ren
   calls.length = 0;
   window.renderStatus({ id: 8 });
   assert.deepEqual(calls, ['base:8', 'first:8', 'second:8']);
+});
+
+test('stale repository status is rejected before base rendering or subscribers run', () => {
+  const { window, calls, events } = statusHarness({ selectedRepositoryId: 'repo-b' });
+  window.addManagerStatusListener((data) => calls.push('listener:' + data.id));
+
+  assert.equal(window.renderStatus({ id: 10, repository: { id: 'repo-a' } }), undefined);
+  assert.deepEqual(calls, []);
+  assert.equal(events.filter((event) => event.type === 'paseo:manager-status').length, 0);
+
+  assert.equal(window.renderStatus({ id: 11, repository: { id: 'repo-b' } }), 'base-result:11');
+  assert.deepEqual(calls, ['base:11', 'listener:11']);
+  assert.equal(events.filter((event) => event.type === 'paseo:manager-status').length, 1);
 });
 
 test('one failing captured renderer does not prevent later manager UI renderers', () => {
