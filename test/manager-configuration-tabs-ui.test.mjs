@@ -32,7 +32,21 @@ test('configuration tab content is explicitly hidden when it does not belong to 
 
 test('review workflow changes immediately re-evaluate conditional Review setup content', () => {
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /getElementById\('review-workflow'\).*addEventListener\('change'/s);
-  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /queueMicrotask\(\(\) => showStep\(activeStep\)\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /queueMicrotask\(\(\) => \{ syncAutoMergeSetting\(\); showStep\(activeStep\); \}\)/);
+});
+
+test('automatic merge is presented as one full-width accessible setting with visible state', () => {
+  assert.match(MANAGER_CONFIGURATION_TABS_STYLE, /manager-auto-merge-setting.*grid-column:1\/-1/s);
+  assert.match(MANAGER_CONFIGURATION_TABS_STYLE, /manager-auto-merge-switch/);
+  assert.match(MANAGER_CONFIGURATION_TABS_STYLE, /input:checked \+ \.manager-auto-merge-track/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /function enhanceAutoMergeSetting\(\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /role', 'switch'/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /manager-auto-merge-state/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /Enabled/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /Disabled/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /Unavailable/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /exact-head full-review approval, passing validation and checks/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /syncAutoMergeSetting\(\)/);
 });
 
 test('configuration groups map to the setup tab that owns them', () => {
