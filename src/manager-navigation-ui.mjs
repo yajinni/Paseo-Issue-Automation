@@ -450,13 +450,8 @@ export const MANAGER_NAVIGATION_SCRIPT = String.raw`
     try { if (typeof currentStatus !== 'undefined' && currentStatus) renderSidebarState(currentStatus); } catch {}
   }
 
-  const baseRenderStatus = window.renderStatus;
-  if (typeof baseRenderStatus === 'function') {
-    window.renderStatus = function managerNavigationRenderStatus(data) {
-      const result = baseRenderStatus(data);
-      renderSidebarState(data);
-      return result;
-    };
+  if (typeof window.addManagerStatusListener === 'function') {
+    window.addManagerStatusListener(renderSidebarState);
   }
 
   window.showManagerView = (id) => showView(id, { historyMode: 'push', focusHeading: true });
