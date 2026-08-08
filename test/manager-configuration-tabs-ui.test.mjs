@@ -6,7 +6,7 @@ import {
   enhanceManagerWithConfigurationTabs,
 } from '../src/manager-configuration-tabs-ui.mjs';
 
-test('configuration tabs mirror the simplified setup walkthrough', () => {
+test('configuration tabs mirror the simplified setup walkthrough without recreating setup link cards', () => {
   for (const label of [
     'Connect Paseo',
     'Coding harness',
@@ -16,9 +16,9 @@ test('configuration tabs mirror the simplified setup walkthrough', () => {
     'Final readiness',
   ]) assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, new RegExp(label));
 
-  for (const path of ['/setup/paseo', '/setup/harness', '/setup/repository', '/setup/issues', '/setup/review', '/setup/readiness']) {
-    assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, new RegExp(path.replaceAll('/', '\\/')));
-  }
+  assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_SCRIPT, /setupLinkCard/);
+  assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_SCRIPT, /Edit this setup step/);
+  assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_STYLE, /manager-config-step-link/);
 });
 
 test('configuration tab content is explicitly hidden when it does not belong to the active tab', () => {

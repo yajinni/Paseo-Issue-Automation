@@ -5,9 +5,6 @@ export const MANAGER_CONFIGURATION_TABS_STYLE = String.raw`
 .manager-config-tab{flex:0 0 auto;border:0!important;background:transparent!important;color:#9aabc0!important;border-radius:9px!important;padding:9px 12px!important;font-weight:650!important;white-space:nowrap}
 .manager-config-tab:hover{background:#1a2432!important;color:#eef2f7!important}
 .manager-config-tab[aria-selected="true"]{background:#243044!important;color:#fff!important}
-.manager-config-step-link{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.manager-config-step-link h2{margin-bottom:5px}.manager-config-step-link p{margin:0;color:var(--paseo-muted);line-height:1.45}
-.manager-config-step-link .paseo-action{flex:0 0 auto}
 [data-config-step][hidden],[data-config-step-group][hidden],[data-manager-config-edit-card][hidden]{display:none!important}
 [data-manager-view-target="integration"],[data-manager-view-target="maintenance"]{display:none!important}
 .manager-config-fields .manager-auto-merge-setting{grid-column:1/-1!important;display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;gap:16px!important;align-items:center!important;margin-top:4px!important;padding:14px 16px!important;border:1px solid #334156;border-radius:11px;background:#101925;color:var(--paseo-text)!important;cursor:pointer;transition:border-color .15s ease,background .15s ease}
@@ -16,18 +13,18 @@ export const MANAGER_CONFIGURATION_TABS_STYLE = String.raw`
 .manager-auto-merge-state{display:inline-flex;align-items:center;border:1px solid #526074;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:750;letter-spacing:.02em;color:#aab8c9;background:#182231}.manager-auto-merge-state.enabled{border-color:#2f8d55;background:#163424;color:#b9e9ca}.manager-auto-merge-state.disabled{border-color:#526074;background:#182231;color:#aab8c9}.manager-auto-merge-state.unavailable{border-color:#6c5b35;background:#2b2515;color:#e2cf91}
 .manager-auto-merge-help{margin:0!important;padding:0!important;border:0!important;background:transparent!important;color:var(--paseo-muted)!important;font-size:12px!important;line-height:1.45!important}
 .manager-auto-merge-switch{position:relative;width:46px;height:26px;flex:0 0 auto}.manager-auto-merge-switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:2}.manager-auto-merge-switch input:disabled{cursor:not-allowed}.manager-auto-merge-track{position:absolute;inset:0;border:1px solid #526074;border-radius:999px;background:#202b39;transition:background .15s ease,border-color .15s ease}.manager-auto-merge-track::after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#c8d3e0;transition:transform .15s ease,background .15s ease}.manager-auto-merge-switch input:checked + .manager-auto-merge-track{background:#2f6fed;border-color:#5f8ff3}.manager-auto-merge-switch input:checked + .manager-auto-merge-track::after{transform:translateX(20px);background:#fff}.manager-auto-merge-switch input:focus-visible + .manager-auto-merge-track{outline:2px solid #8ab8ff;outline-offset:3px}.manager-auto-merge-setting[aria-disabled="true"] .manager-auto-merge-track{opacity:.55}
-@media(max-width:720px){.manager-config-step-link{display:block}.manager-config-step-link .paseo-action{display:inline-flex;margin-top:12px}.manager-config-tabs{margin-inline:-2px}.manager-config-fields .manager-auto-merge-setting{grid-template-columns:minmax(0,1fr) auto!important;padding:13px!important}}
+@media(max-width:720px){.manager-config-tabs{margin-inline:-2px}.manager-config-fields .manager-auto-merge-setting{grid-template-columns:minmax(0,1fr) auto!important;padding:13px!important}}
 `;
 
 export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
 (function managerConfigurationTabs() {
   const STEPS = [
-    ['paseo', 'Connect Paseo', '/setup/paseo', 'Change the Paseo daemon connection, authentication, and compatibility checks.'],
-    ['harness', 'Coding harness', '/setup/harness', 'Change the Provider/Coding Harness plus coding and review model selections.'],
-    ['repository', 'GitHub repository', '/setup/repository', 'Change repository/base-branch setup and inspect manager-owned repository integration.'],
-    ['issues', 'Issues setup', '/setup/issues', 'Change issue selection, concurrency, retries, exclusions, and polling behavior.'],
-    ['review', 'Review setup', '/setup/review', 'Change the review workflow, review limits, auto-merge policy, and Web ChatGPT profile settings.'],
-    ['readiness', 'Final readiness', '/setup/readiness', 'Review health, managed installation state, repair, removal, and recovery controls.'],
+    ['paseo', 'Connect Paseo'],
+    ['harness', 'Coding harness'],
+    ['repository', 'GitHub repository'],
+    ['issues', 'Issues setup'],
+    ['review', 'Review setup'],
+    ['readiness', 'Final readiness'],
   ];
   const GROUP_STEP = new Map([
     ['Coder model', 'harness'],
@@ -42,23 +39,6 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
   const AUTO_MERGE_UNAVAILABLE_COPY = 'Unavailable for Light model review → Manual review. A person must merge the PR after manual review.';
   let built = false;
   let activeStep = localStorage.getItem('paseo-manager-config-tab') || 'paseo';
-
-  function setupLinkCard(step) {
-    const meta = STEPS.find(([id]) => id === step);
-    if (!meta) return null;
-    const [, label, path, description] = meta;
-    const card = document.createElement('section');
-    card.className = 'card manager-config-step-link';
-    card.dataset.configStep = step;
-    const copy = document.createElement('div');
-    const heading = document.createElement('h2'); heading.textContent = label;
-    const text = document.createElement('p'); text.textContent = description;
-    copy.append(heading, text);
-    const link = document.createElement('a');
-    link.className = 'paseo-action'; link.href = path; link.textContent = 'Edit this setup step';
-    card.append(copy, link);
-    return card;
-  }
 
   function moveViewCards(source, target, step) {
     if (!source || !target) return;
@@ -210,14 +190,6 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
       tabs.append(button);
     }
     configuration.prepend(tabs);
-
-    let insertionPoint = tabs;
-    for (const [id] of STEPS) {
-      const linkCard = setupLinkCard(id);
-      if (!linkCard) continue;
-      insertionPoint.after(linkCard);
-      insertionPoint = linkCard;
-    }
 
     moveViewCards(integration, configuration, 'repository');
     moveViewCards(maintenance, configuration, 'readiness');
