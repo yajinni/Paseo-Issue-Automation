@@ -118,6 +118,7 @@ const output = (value) => process.stdout.write(JSON.stringify(value));
 const arg = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : null; };
 const workspaceFile = path.join(fixture, 'workspace.json');
 const prFile = path.join(fixture, 'pr.json');
+const externalMode = path.join(fixture, 'external-head-mode');
 if (args[0] === 'workspace' && args[1] === 'create') {
   const root = arg('--path');
   const branch = arg('--new-branch');
@@ -142,10 +143,15 @@ if (args[0] === 'wait') {
     execFileSync('git', ['push', '--quiet', '-u', 'origin', workspace.branch], { cwd: workspace.cwd, stdio: 'pipe' });
     writeFileSync(completed, 'done\\n');
   } else if (existsSync(repairPending)) {
-    writeFileSync(path.join(workspace.cwd, 'acceptance-marker.txt'), 'review repair completed\\n');
-    execFileSync('git', ['add', 'acceptance-marker.txt'], { cwd: workspace.cwd, stdio: 'pipe' });
-    execFileSync('git', ['commit', '--quiet', '-m', 'Apply requested review repair'], { cwd: workspace.cwd, stdio: 'pipe' });
-    execFileSync('git', ['push', '--quiet', 'origin', workspace.branch], { cwd: workspace.cwd, stdio: 'pipe' });
+    if (existsSync(externalMode)) {
+      execFileSync('git', ['fetch', '--quiet', 'origin', workspace.branch], { cwd: workspace.cwd, stdio: 'pipe' });
+      execFileSync('git', ['reset', '--hard', 'origin/' + workspace.branch], { cwd: workspace.cwd, stdio: 'pipe' });
+    } else {
+      writeFileSync(path.join(workspace.cwd, 'acceptance-marker.txt'), 'review repair completed\\n');
+      execFileSync('git', ['add', 'acceptance-marker.txt'], { cwd: workspace.cwd, stdio: 'pipe' });
+      execFileSync('git', ['commit', '--quiet', '-m', 'Apply requested review repair'], { cwd: workspace.cwd, stdio: 'pipe' });
+      execFileSync('git', ['push', '--quiet', 'origin', workspace.branch], { cwd: workspace.cwd, stdio: 'pipe' });
+    }
     const pr = JSON.parse(readFileSync(prFile, 'utf8'));
     pr.headRefOid = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace.cwd, encoding: 'utf8' }).trim();
     writeFileSync(prFile, JSON.stringify(pr, null, 2));
@@ -157,6 +163,26 @@ if (args[0] === 'run') {
   const countFile = path.join(fixture, 'review-count');
   const count = existsSync(countFile) ? Number(readFileSync(countFile, 'utf8')) : 0;
   writeFileSync(countFile, String(count + 1));
+  if (existsSync(externalMode)) {
+    if (count === 0) {
+      const workspace = JSON.parse(readFileSync(workspaceFile, 'utf8'));
+      const external = path.join(fixture, 'external');
+      const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: workspace.cwd, encoding: 'utf8' }).trim();
+      execFileSync('git', ['clone', '--quiet', remote, external], { stdio: 'pipe' });
+      execFileSync('git', ['config', 'user.name', 'External Contributor'], { cwd: external, stdio: 'pipe' });
+      execFileSync('git', ['config', 'user.email', 'external@example.invalid'], { cwd: external, stdio: 'pipe' });
+      execFileSync('git', ['checkout', '--quiet', workspace.branch], { cwd: external, stdio: 'pipe' });
+      writeFileSync(path.join(external, 'external-head.txt'), 'external exact-head change\\n');
+      execFileSync('git', ['add', 'external-head.txt'], { cwd: external, stdio: 'pipe' });
+      execFileSync('git', ['commit', '--quiet', '-m', 'Advance PR head externally'], { cwd: external, stdio: 'pipe' });
+      execFileSync('git', ['push', '--quiet', 'origin', workspace.branch], { cwd: external, stdio: 'pipe' });
+      const pr = JSON.parse(readFileSync(prFile, 'utf8'));
+      pr.headRefOid = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: external, encoding: 'utf8' }).trim();
+      writeFileSync(prFile, JSON.stringify(pr, null, 2));
+    }
+    output({ approved: true, findings: 'Reviewer approved the exact head presented for this round.' });
+    process.exit(0);
+  }
   if (count === 0) { output({ approved: false, findings: 'Replace the initial marker content with the reviewed repair.' }); process.exit(0); }
   output({ approved: true, findings: 'The repaired exact head satisfies review.' });
   process.exit(0);
@@ -299,4 +325,63 @@ test('functional acceptance: requested review changes repair the same PR and req
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 2);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 2);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'issue' && args[1] === 'comment'), 1);
+});
+
+test('functional acceptance: an externally advanced PR head invalidates approval and requires fresh exact-head validation and review', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
+  const { fixture, root } = setupRepository(t);
+  writeFileSync(path.join(fixture, 'external-head-mode'), 'enabled\n');
+
+  const dispatch = dispatchSpecificIssue(root, 102);
+  assert.equal(dispatch.claimed, true);
+  assert.equal(dispatch.issueNumber, 102);
+  assert.equal(dispatch.attempt, 1);
+  assert.equal(dispatch.workspaceId, 'workspace-1');
+
+  const state = await waitForTerminalRun(root, 102);
+  if (state.phase === 'failed') {
+    const lifecycle = loadIssueLifecycle(root, 102, { limit: 160 });
+    assert.fail(`${state.reason || 'controller entered failed state'}\nLifecycle: ${JSON.stringify(lifecycle, null, 2)}`);
+  }
+  assert.equal(state.status, 'human-review');
+  assert.equal(state.phase, 'human-review');
+  assert.equal(state.prNumber, 8);
+  assert.equal(state.attempt, 1);
+  assert.equal(state.workspaceId, 'workspace-1');
+  assert.equal(state.coderAgentId, 'agent-1');
+
+  const reviews = (state.events || []).filter((event) => event.event === 'review');
+  assert.equal(reviews.length, 2);
+  assert.equal(reviews[0].result, 'APPROVED');
+  assert.equal(reviews[1].result, 'APPROVED');
+  assert.notEqual(reviews[0].commit, reviews[1].commit);
+  assert.equal(state.approvedCommit, reviews[1].commit);
+
+  const validatedCommits = new Set((state.events || [])
+    .filter((event) => event.event === 'validation-summary' && event.result === 'PASS')
+    .map((event) => event.commit));
+  assert.equal(validatedCommits.has(reviews[0].commit), true);
+  assert.equal(validatedCommits.has(reviews[1].commit), true);
+
+  const worktree = JSON.parse(readFileSync(path.join(fixture, 'workspace.json'), 'utf8')).cwd;
+  const finalHead = git(worktree, ['rev-parse', 'HEAD']);
+  const remoteHead = git(root, ['ls-remote', '--heads', 'origin', `refs/heads/${state.branch}`]).split(/\s+/)[0];
+  const pr = JSON.parse(readFileSync(path.join(fixture, 'pr.json'), 'utf8'));
+  assert.equal(finalHead, reviews[1].commit);
+  assert.equal(remoteHead, finalHead);
+  assert.equal(pr.headRefOid, finalHead);
+  assert.equal(readFileSync(path.join(worktree, 'acceptance-marker.txt'), 'utf8'), 'initial reviewed content\n');
+  assert.equal(readFileSync(path.join(worktree, 'external-head.txt'), 'utf8'), 'external exact-head change\n');
+  assert.equal(git(worktree, ['status', '--porcelain=v1', '--untracked-files=all']), '');
+
+  const recovery = (state.activity || []).filter((entry) => entry.type === 'completion-evidence-recovery');
+  assert.equal(recovery.length, 1);
+  assert.match(recovery[0].details, /Worktree HEAD and pull-request HEAD/);
+
+  const commands = commandLog(fixture);
+  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && args.includes('--background')), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'send'), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'wait'), 2);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 2);
+  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 2);
 });
