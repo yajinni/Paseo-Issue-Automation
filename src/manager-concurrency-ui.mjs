@@ -15,10 +15,13 @@ const CAPACITY_PANEL = `  <section class="card wide" style="margin-top:14px">
 `;
 
 const CAPACITY_SCRIPT = `<script>
+let managerCapacityDirty = false;
+
 function renderManagerCapacity(body) {
   const config = body.config || {};
   const manager = body.manager || {};
-  document.getElementById('global-max-active').value = config.globalMaxActive || manager.globalMaxActive || 2;
+  const input = document.getElementById('global-max-active');
+  if (input && !managerCapacityDirty) input.value = config.globalMaxActive || manager.globalMaxActive || 2;
   facts('manager-capacity-facts', [
     ['Active coding jobs', manager.active == null ? 'Unknown' : manager.active],
     ['Available slots', manager.available == null ? 'Unknown' : manager.available],
@@ -34,6 +37,7 @@ async function loadManagerCapacity() {
   renderManagerCapacity(body);
 }
 
+document.getElementById('global-max-active').addEventListener('input', () => { managerCapacityDirty = true; });
 document.getElementById('save-manager-config').addEventListener('click', async () => {
   try {
     const body = await jsonRequest('/api/manager/config', {
@@ -41,6 +45,7 @@ document.getElementById('save-manager-config').addEventListener('click', async (
       headers: {'content-type':'application/json'},
       body: JSON.stringify({globalMaxActive: Number(document.getElementById('global-max-active').value)}),
     });
+    managerCapacityDirty = false;
     renderManagerCapacity(body);
   } catch (error) { showError(error); }
 });
