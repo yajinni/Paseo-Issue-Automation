@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { dispatchSpecificIssue } from '../src/attempts.mjs';
-import { loadRun, saveConfig, saveRuntime } from '../src/state.mjs';
+import { loadIssueLifecycle, loadRun, saveConfig, saveRuntime } from '../src/state.mjs';
 
 function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -234,7 +234,10 @@ test('functional acceptance: one eligible issue reaches exact-head human review 
   assert.ok(Number(dispatch.controllerPid) > 0);
 
   const state = await waitForTerminalRun(root, 101);
-  assert.notEqual(state.phase, 'failed', state.reason || 'controller entered failed state');
+  if (state.phase === 'failed') {
+    const lifecycle = loadIssueLifecycle(root, 101, { limit: 100 });
+    assert.fail(`${state.reason || 'controller entered failed state'}\nLifecycle: ${JSON.stringify(lifecycle, null, 2)}`);
+  }
   assert.equal(state.status, 'human-review');
   assert.equal(state.phase, 'human-review');
   assert.equal(state.prNumber, 7);
