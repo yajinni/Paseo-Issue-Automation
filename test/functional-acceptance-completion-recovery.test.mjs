@@ -41,7 +41,7 @@ function issueBody() {
   ].join('\n\n');
 }
 
-function setupRepository(t) {
+function setupRepository(t, { recoverCompletion = true } = {}) {
   const fixture = mkdtempSync(path.join(os.tmpdir(), 'paseo-completion-recovery-'));
   const root = path.join(fixture, 'repo');
   const remote = path.join(fixture, 'remote.git');
@@ -58,6 +58,7 @@ function setupRepository(t) {
   git(root, ['remote', 'add', 'origin', remote]);
   git(root, ['push', '--quiet', '-u', 'origin', 'main']);
   git(root, ['fetch', '--quiet', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
+  if (recoverCompletion) writeFileSync(path.join(fixture, 'allow-recovery'), 'yes\n');
 
   const issue = {
     number: 103,
@@ -137,7 +138,7 @@ if (args[0] === 'wait') {
     writeFileSync(firstWait, 'done without pushed completion evidence\\n');
     process.exit(0);
   }
-  if (existsSync(recoveryPending)) {
+  if (existsSync(recoveryPending) && existsSync(path.join(fixture, 'allow-recovery'))) {
     const workspace = JSON.parse(readFileSync(workspaceFile, 'utf8'));
     writeFileSync(path.join(workspace.cwd, 'acceptance-marker.txt'), 'completion recovery succeeded\\n');
     execFileSync('git', ['add', 'acceptance-marker.txt'], { cwd: workspace.cwd, stdio: 'pipe' });
@@ -278,4 +279,42 @@ test('functional acceptance: incomplete coder completion evidence recovers once 
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 1);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 1);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 1);
+});
+
+test('functional acceptance: persistent incomplete completion evidence fails closed after the single recovery attempt', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
+  const { fixture, root } = setupRepository(t, { recoverCompletion: false });
+
+  const dispatch = dispatchSpecificIssue(root, 103);
+  assert.equal(dispatch.claimed, true);
+  assert.equal(dispatch.attempt, 1);
+  assert.equal(dispatch.workspaceId, 'workspace-1');
+
+  const state = await waitForTerminalRun(root, 103);
+  assert.equal(state.phase, 'failed');
+  assert.notEqual(state.status, 'human-review');
+  assert.equal(state.attempt, 1);
+  assert.equal(state.workspaceId, 'workspace-1');
+  assert.equal(state.coderAgentId, 'agent-1');
+  assert.equal(state.prNumber, null);
+  assert.match(state.reason || '', /pushed|branch|completion/i);
+
+  const recoveryActivities = (state.activity || []).filter((entry) => entry.type === 'completion-evidence-recovery');
+  assert.equal(recoveryActivities.length, 1);
+  assert.match(recoveryActivities[0].details, /recovery attempt 1\/1/i);
+  assert.equal((state.events || []).some((event) => event.event === 'validation-summary' && event.result === 'PASS'), false);
+  assert.equal((state.events || []).some((event) => event.event === 'review'), false);
+
+  const commands = commandLog(fixture);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'workspace' && args[1] === 'create'), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && args.includes('--background')), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'send'), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'wait'), 2);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 0);
+  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 0);
+  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 0);
+
+  const remoteHead = git(root, ['ls-remote', '--heads', 'origin', `refs/heads/${state.branch}`]);
+  assert.equal(remoteHead, '');
+  const worktree = JSON.parse(readFileSync(path.join(fixture, 'workspace.json'), 'utf8')).cwd;
+  assert.equal(git(worktree, ['status', '--porcelain=v1', '--untracked-files=all']), '');
 });
