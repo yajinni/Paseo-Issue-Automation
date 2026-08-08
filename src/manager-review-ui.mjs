@@ -20,6 +20,8 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   const repositorySelect = document.getElementById('repository-select');
   let configDraftRepositoryId = null;
   let configDraftValues = null;
+  let configDraftVersion = 0;
+  let restoringConfigDraft = false;
 
   function configFields() {
     return [...(configForm?.querySelectorAll('input,select') || [])]
@@ -41,28 +43,36 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
 
   function restoreConfigDraft(draft) {
     if (!draft?.length || configDraftRepositoryId !== repositorySelect?.value) return;
-    for (const saved of draft) {
-      const element = document.getElementById(saved.id);
-      if (!element) continue;
-      if (element.type === 'checkbox') element.checked = saved.checked === true;
-      else element.value = saved.value == null ? '' : String(saved.value);
+    restoringConfigDraft = true;
+    try {
+      for (const saved of draft) {
+        const element = document.getElementById(saved.id);
+        if (!element) continue;
+        if (element.type === 'checkbox') element.checked = saved.checked === true;
+        else element.value = saved.value == null ? '' : String(saved.value);
+      }
+      if (typeof window.syncAutoMergeAvailability === 'function') window.syncAutoMergeAvailability();
+      const workflow = document.getElementById('review-workflow');
+      workflow?.dispatchEvent(new Event('change', { bubbles: true }));
+      configForm?.dispatchEvent(new Event('input', { bubbles: true }));
+    } finally {
+      restoringConfigDraft = false;
     }
-    if (typeof window.syncAutoMergeAvailability === 'function') window.syncAutoMergeAvailability();
-    const workflow = document.getElementById('review-workflow');
-    workflow?.dispatchEvent(new Event('change', { bubbles: true }));
-    configForm?.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   function noteConfigDraft(event) {
+    if (restoringConfigDraft) return;
     const field = event.target;
     if (!field?.matches?.('input,select') || !field.id || field.dataset.managerTransient === 'true') return;
     configDraftRepositoryId = repositorySelect?.value || null;
     configDraftValues = snapshotConfigFields();
+    configDraftVersion += 1;
   }
 
   function clearConfigDraft() {
     configDraftRepositoryId = null;
     configDraftValues = null;
+    configDraftVersion = 0;
   }
 
   configForm?.addEventListener('input', noteConfigDraft);
@@ -88,10 +98,19 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   if (typeof previousPostRepositoryAction !== 'function') return;
   window.postRepositoryAction = async function managerLightweightActionPostRepositoryAction(action, payload) {
     const repositoryId = repositorySelect?.value || null;
+    const configDraftVersionAtStart = configDraftVersion;
     const preserveDraft = action !== 'config' && configDraftRepositoryId === repositoryId;
     const body = await previousPostRepositoryAction(action, payload);
-    if (action === 'config') clearConfigDraft();
-    else if (preserveDraft && repositorySelect?.value === repositoryId) restoreConfigDraft(captureConfigDraft());
+    if (action === 'config') {
+      const currentRepositoryId = repositorySelect?.value || null;
+      const hasNewerDraft = currentRepositoryId === repositoryId
+        && configDraftRepositoryId === repositoryId
+        && configDraftVersion > configDraftVersionAtStart;
+      if (hasNewerDraft) restoreConfigDraft(captureConfigDraft());
+      else if (configDraftRepositoryId === repositoryId) clearConfigDraft();
+    } else if (preserveDraft && repositorySelect?.value === repositoryId) {
+      restoreConfigDraft(captureConfigDraft());
+    }
     if (lightweightActions.has(action) && !body?.status && typeof window.loadStatus === 'function') {
       queueMicrotask(() => window.loadStatus().catch((error) => {
         if (typeof window.showError === 'function') window.showError(error);
