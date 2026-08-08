@@ -15,10 +15,16 @@ const CAPACITY_PANEL = `  <section class="card wide" style="margin-top:14px">
 `;
 
 const CAPACITY_SCRIPT = `<script>
+let managerCapacityDirty = false;
+let managerCapacityEditVersion = 0;
+let managerCapacityStatusRequest = 0;
+let managerCapacitySaveInFlight = false;
+
 function renderManagerCapacity(body) {
   const config = body.config || {};
   const manager = body.manager || {};
-  document.getElementById('global-max-active').value = config.globalMaxActive || manager.globalMaxActive || 2;
+  const input = document.getElementById('global-max-active');
+  if (input && !managerCapacityDirty) input.value = config.globalMaxActive || manager.globalMaxActive || 2;
   facts('manager-capacity-facts', [
     ['Active coding jobs', manager.active == null ? 'Unknown' : manager.active],
     ['Available slots', manager.available == null ? 'Unknown' : manager.available],
@@ -30,19 +36,35 @@ function renderManagerCapacity(body) {
 }
 
 async function loadManagerCapacity() {
+  if (managerCapacitySaveInFlight) return;
+  const request = ++managerCapacityStatusRequest;
   const body = await jsonRequest('/api/manager/status');
+  if (managerCapacitySaveInFlight || request !== managerCapacityStatusRequest) return;
   renderManagerCapacity(body);
 }
 
+document.getElementById('global-max-active').addEventListener('input', () => {
+  managerCapacityDirty = true;
+  managerCapacityEditVersion += 1;
+});
 document.getElementById('save-manager-config').addEventListener('click', async () => {
+  if (managerCapacitySaveInFlight) return;
+  const editVersionAtStart = managerCapacityEditVersion;
+  managerCapacitySaveInFlight = true;
+  managerCapacityStatusRequest += 1;
   try {
     const body = await jsonRequest('/api/manager/config', {
       method: 'POST',
       headers: {'content-type':'application/json'},
       body: JSON.stringify({globalMaxActive: Number(document.getElementById('global-max-active').value)}),
     });
+    if (managerCapacityEditVersion === editVersionAtStart) managerCapacityDirty = false;
     renderManagerCapacity(body);
-  } catch (error) { showError(error); }
+  } catch (error) {
+    showError(error);
+  } finally {
+    managerCapacitySaveInFlight = false;
+  }
 });
 document.getElementById('refresh-manager-status').addEventListener('click', () => loadManagerCapacity().catch(showError));
 loadManagerCapacity().catch(showError);
