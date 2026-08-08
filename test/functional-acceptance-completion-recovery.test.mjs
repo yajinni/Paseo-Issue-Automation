@@ -46,6 +46,7 @@ function setupRepository(t, { recoverCompletion = true } = {}) {
   const root = path.join(fixture, 'repo');
   const remote = path.join(fixture, 'remote.git');
   const bin = path.join(fixture, 'bin');
+  const controllerPids = new Set();
   mkdirSync(root, { recursive: true });
   mkdirSync(bin, { recursive: true });
   git(fixture, ['init', '--bare', '--quiet', remote]);
@@ -191,9 +192,8 @@ process.exit(2);
   saveRuntime(root, { claimsEnabled: true, skippedIssueNumbers: [] });
 
   t.after(() => {
-    const state = loadRun(root, 103);
-    if (state?.controllerPid) {
-      try { process.kill(state.controllerPid, 0); process.kill(state.controllerPid, 'SIGTERM'); } catch {}
+    for (const controllerPid of controllerPids) {
+      try { process.kill(controllerPid, 0); process.kill(controllerPid, 'SIGTERM'); } catch {}
     }
     process.env.PATH = previous.PATH;
     if (previous.fixture === undefined) delete process.env.PASEO_ACCEPTANCE_FIXTURE;
@@ -202,10 +202,10 @@ process.exit(2);
     else process.env.PASEO_COMMAND_TIMEOUT_MS = previous.commandTimeout;
     if (previous.agentTimeout === undefined) delete process.env.PASEO_AGENT_TIMEOUT_MS;
     else process.env.PASEO_AGENT_TIMEOUT_MS = previous.agentTimeout;
-    rmSync(fixture, { recursive: true, force: true, maxRetries: 100, retryDelay: 100 });
+    rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  return { fixture, root };
+  return { fixture, root, controllerPids };
 }
 
 async function waitForTerminalRun(root, issueNumber, timeoutMs = 15000) {
@@ -231,9 +231,10 @@ function countCommands(commands, command, predicate) {
 }
 
 test('functional acceptance: incomplete coder completion evidence recovers once on the same attempt and reaches human review', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
-  const { fixture, root } = setupRepository(t);
+  const { fixture, root, controllerPids } = setupRepository(t);
 
   const dispatch = dispatchSpecificIssue(root, 103);
+  controllerPids.add(dispatch.controllerPid);
   assert.equal(dispatch.claimed, true);
   assert.equal(dispatch.issueNumber, 103);
   assert.equal(dispatch.attempt, 1);
@@ -282,9 +283,10 @@ test('functional acceptance: incomplete coder completion evidence recovers once 
 });
 
 test('functional acceptance: persistent incomplete completion evidence fails closed after the single recovery attempt', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
-  const { fixture, root } = setupRepository(t, { recoverCompletion: false });
+  const { fixture, root, controllerPids } = setupRepository(t, { recoverCompletion: false });
 
   const dispatch = dispatchSpecificIssue(root, 103);
+  controllerPids.add(dispatch.controllerPid);
   assert.equal(dispatch.claimed, true);
   assert.equal(dispatch.attempt, 1);
   assert.equal(dispatch.workspaceId, 'workspace-1');
