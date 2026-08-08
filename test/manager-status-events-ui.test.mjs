@@ -21,9 +21,14 @@ function statusHarness({ selectedRepositoryId: initialRepositoryId = null } = {}
   const repositorySelect = {
     get value() { return selectedRepositoryId || ''; },
   };
+  const dispatchResult = { textContent: 'No dispatch has been recorded.' };
   const document = {
     readyState: 'loading',
-    getElementById(id) { return id === 'repository-select' ? repositorySelect : null; },
+    getElementById(id) {
+      if (id === 'repository-select') return repositorySelect;
+      if (id === 'dispatch-result') return dispatchResult;
+      return null;
+    },
     addEventListener(type, listener) { domListeners.set(type, listener); },
     dispatchEvent(event) { events.push(event); return true; },
   };
@@ -46,7 +51,7 @@ function statusHarness({ selectedRepositoryId: initialRepositoryId = null } = {}
     TypeError,
   });
   return {
-    window, calls, errors, events, microtasks, domListeners,
+    window, calls, errors, events, microtasks, domListeners, dispatchResult,
     setSelectedRepositoryId(value) { selectedRepositoryId = value; },
     resolvePost(body) {
       assert.ok(pendingPost, 'a repository action should be pending');
@@ -121,17 +126,19 @@ test('late action response restores the latest accepted status for the newly sel
   assert.equal(harness.events.find((event) => event.type === 'paseo:manager-status').detail.id, 21);
 });
 
-test('stale action response never re-renders the old repository when the new status is not loaded yet', async () => {
+test('stale action response clears old action result when the new status is not loaded yet', async () => {
   const harness = statusHarness({ selectedRepositoryId: 'repo-a' });
   harness.window.renderStatus({ id: 30, repository: { id: 'repo-a' } });
   harness.calls.length = 0;
 
   const action = harness.window.postRepositoryAction('pause');
   harness.setSelectedRepositoryId('repo-b');
+  harness.dispatchResult.textContent = 'repo-a action completed';
   harness.resolvePost({ result: { ok: true } });
   await action;
 
   assert.deepEqual(harness.calls, ['post:pause']);
+  assert.equal(harness.dispatchResult.textContent, 'Waiting for the selected repository status.');
 });
 
 test('same-repository action response does not trigger a redundant status render', async () => {
