@@ -160,11 +160,13 @@ if (args[0] === 'wait') {
     execFileSync('git', ['push', '--quiet', '-u', 'origin', workspace.branch], { cwd: workspace.cwd, stdio: 'pipe' });
     writeFileSync(completed, 'done\\n');
   } else if (existsSync(baseUpdatePending)) {
-    execFileSync('git', ['merge', '--no-edit', 'origin/main'], { cwd: workspace.cwd, stdio: 'pipe' });
-    execFileSync('git', ['push', '--quiet', 'origin', workspace.branch], { cwd: workspace.cwd, stdio: 'pipe' });
-    const pr = JSON.parse(readFileSync(prFile, 'utf8'));
-    pr.headRefOid = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace.cwd, encoding: 'utf8' }).trim();
-    writeFileSync(prFile, JSON.stringify(pr, null, 2));
+    if (!existsSync(path.join(fixture, 'withhold-base-update'))) {
+      execFileSync('git', ['merge', '--no-edit', 'origin/main'], { cwd: workspace.cwd, stdio: 'pipe' });
+      execFileSync('git', ['push', '--quiet', 'origin', workspace.branch], { cwd: workspace.cwd, stdio: 'pipe' });
+      const pr = JSON.parse(readFileSync(prFile, 'utf8'));
+      pr.headRefOid = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace.cwd, encoding: 'utf8' }).trim();
+      writeFileSync(prFile, JSON.stringify(pr, null, 2));
+    }
     unlinkSync(baseUpdatePending);
   }
   process.exit(0);
@@ -319,4 +321,52 @@ test('functional acceptance: a base advance after approval forces a same-PR base
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 2);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 1);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 2);
+});
+
+test('functional acceptance: repeated no-op base updates stay bounded and fail closed without reusing stale approval', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
+  const { fixture, root } = setupRepository(t);
+  writeFileSync(path.join(fixture, 'withhold-base-update'), 'withhold\n');
+
+  const dispatch = dispatchSpecificIssue(root, 105);
+  assert.equal(dispatch.claimed, true);
+  assert.equal(dispatch.attempt, 1);
+  assert.equal(dispatch.workspaceId, 'workspace-1');
+
+  const state = await waitForTerminalRun(root, 105);
+  assert.equal(state.phase, 'failed');
+  assert.equal(state.reason, 'Maximum controller repair cycles reached.');
+  assert.equal(state.prNumber, 11);
+  assert.equal(state.attempt, 1);
+  assert.equal(state.workspaceId, 'workspace-1');
+  assert.equal(state.coderAgentId, 'agent-1');
+
+  const reviews = (state.events || []).filter((event) => event.event === 'review');
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].result, 'APPROVED');
+  const validated = (state.events || []).filter((event) => event.event === 'validation-summary' && event.result === 'PASS');
+  assert.equal(validated.length, 1);
+  assert.equal(validated[0].commit, reviews[0].commit);
+
+  const lifecycle = loadIssueLifecycle(root, 105, { limit: 180 });
+  const freshness = lifecycle.filter((entry) => entry.type === 'base-freshness-check');
+  assert.equal(freshness.filter((entry) => entry.status === 'warning').length, 8);
+  assert.equal(freshness.at(-1)?.status, 'warning');
+
+  const worktree = JSON.parse(readFileSync(path.join(fixture, 'workspace.json'), 'utf8')).cwd;
+  const finalHead = git(worktree, ['rev-parse', 'HEAD']);
+  const newBase = git(root, ['rev-parse', 'main']);
+  const remoteHead = git(root, ['ls-remote', '--heads', 'origin', `refs/heads/${state.branch}`]).split(/\s+/)[0];
+  assert.equal(finalHead, reviews[0].commit);
+  assert.equal(remoteHead, finalHead);
+  assert.notEqual(git(worktree, ['merge-base', newBase, finalHead]), newBase);
+  assert.equal(existsSync(path.join(worktree, 'base-update.txt')), false);
+  assert.equal(git(worktree, ['status', '--porcelain=v1', '--untracked-files=all']), '');
+
+  const commands = commandLog(fixture);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && args.includes('--background')), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'send'), 8);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'wait'), 9);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 1);
+  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 1);
+  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 1);
 });
