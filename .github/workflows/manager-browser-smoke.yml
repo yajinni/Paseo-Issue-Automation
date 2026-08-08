@@ -1,0 +1,26 @@
+name: Manager browser smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'test/manager-browser-smoke.test.mjs'
+      - '.github/workflows/manager-browser-smoke.yml'
+
+jobs:
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install package dependencies
+        run: npm install
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run manager browser smoke
+        env:
+          PASEO_BROWSER_SMOKE: '1'
+        run: node --test test/manager-browser-smoke.test.mjs
