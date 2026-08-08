@@ -32,6 +32,16 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
     if (result) result.textContent = 'Waiting for the selected repository status.';
   }
 
+  function scopeCrossRepositoryActionFeedback(body) {
+    if (!body || typeof body !== 'object') return;
+    const message = 'Action completed for the previously selected repository after you switched repositories.';
+    if (body.result && typeof body.result === 'object' && !Array.isArray(body.result)) {
+      body.result = { ...body.result, message };
+    } else {
+      body.result = { message };
+    }
+  }
+
   function dispatchManagerStatus(data) {
     if (!statusMatchesSelectedRepository(data)) return undefined;
     if (dispatching) return activeResult;
@@ -64,6 +74,7 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
       const body = await basePostRepositoryAction(...args);
       const currentRepositoryId = selectedRepositoryId();
       if (actionRepositoryId && currentRepositoryId && String(actionRepositoryId) !== String(currentRepositoryId)) {
+        scopeCrossRepositoryActionFeedback(body);
         const acceptedRepositoryId = lastAcceptedStatus?.repository?.id;
         if (acceptedRepositoryId != null && String(acceptedRepositoryId) === String(currentRepositoryId)) {
           dispatchManagerStatus(lastAcceptedStatus);

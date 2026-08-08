@@ -107,7 +107,7 @@ test('stale repository status is rejected before base rendering or subscribers r
   assert.equal(events.filter((event) => event.type === 'paseo:manager-status').length, 1);
 });
 
-test('late action response restores the latest accepted status for the newly selected repository', async () => {
+test('late action response restores the latest accepted status and scopes feedback to the previous repository', async () => {
   const harness = statusHarness({ selectedRepositoryId: 'repo-a' });
   harness.window.renderStatus({ id: 20, repository: { id: 'repo-a' } });
   harness.calls.length = 0;
@@ -120,13 +120,15 @@ test('late action response restores the latest accepted status for the newly sel
   harness.events.length = 0;
 
   harness.resolvePost({ result: { ok: true } });
-  assert.deepEqual(await action, { result: { ok: true } });
+  const body = await action;
+  assert.equal(body.result.ok, true);
+  assert.equal(body.result.message, 'Action completed for the previously selected repository after you switched repositories.');
   assert.deepEqual(harness.calls, ['post:run-now', 'base:21']);
   assert.equal(harness.events.filter((event) => event.type === 'paseo:manager-status').length, 1);
   assert.equal(harness.events.find((event) => event.type === 'paseo:manager-status').detail.id, 21);
 });
 
-test('stale action response clears old action result when the new status is not loaded yet', async () => {
+test('stale action response clears old action result and scopes feedback when the new status is not loaded yet', async () => {
   const harness = statusHarness({ selectedRepositoryId: 'repo-a' });
   harness.window.renderStatus({ id: 30, repository: { id: 'repo-a' } });
   harness.calls.length = 0;
@@ -135,21 +137,24 @@ test('stale action response clears old action result when the new status is not 
   harness.setSelectedRepositoryId('repo-b');
   harness.dispatchResult.textContent = 'repo-a action completed';
   harness.resolvePost({ result: { ok: true } });
-  await action;
+  const body = await action;
 
   assert.deepEqual(harness.calls, ['post:pause']);
   assert.equal(harness.dispatchResult.textContent, 'Waiting for the selected repository status.');
+  assert.equal(body.result.ok, true);
+  assert.equal(body.result.message, 'Action completed for the previously selected repository after you switched repositories.');
 });
 
-test('same-repository action response does not trigger a redundant status render', async () => {
+test('same-repository action response keeps its original feedback and does not trigger a redundant status render', async () => {
   const harness = statusHarness({ selectedRepositoryId: 'repo-a' });
   harness.window.renderStatus({ id: 40, repository: { id: 'repo-a' } });
   harness.calls.length = 0;
 
   const action = harness.window.postRepositoryAction('pause');
   harness.resolvePost({ result: { ok: true } });
-  await action;
+  const body = await action;
 
+  assert.deepEqual(body, { result: { ok: true } });
   assert.deepEqual(harness.calls, ['post:pause']);
 });
 
