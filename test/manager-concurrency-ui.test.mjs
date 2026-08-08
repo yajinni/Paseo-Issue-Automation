@@ -24,6 +24,6 @@ test('capacity save clears dirty state only when no newer edit occurred', () => 
 
 test('newer capacity edits remain dirty when an older save response renders', () => {
   const html = managerHtml();
-  assert.doesNotMatch(html, /managerCapacityDirty = false;\s*renderManagerCapacity\(body\);/);
+  assert.doesNotMatch(html, /\n    managerCapacityDirty = false;\n    renderManagerCapacity\(body\);/);
   assert.match(html, /if \(managerCapacityEditVersion === editVersionAtStart\) managerCapacityDirty = false;\s*renderManagerCapacity\(body\);/);
 });
