@@ -70,6 +70,12 @@ test('sidebar has a responsive mobile drawer with keyboard escape handling', () 
   assert.match(MANAGER_NAVIGATION_SCRIPT, /manager-sidebar-scrim/);
 });
 
+test('navigation subscribes directly to the manager status hub', () => {
+  assert.match(MANAGER_NAVIGATION_SCRIPT, /window\.addManagerStatusListener\(renderSidebarState\)/);
+  assert.doesNotMatch(MANAGER_NAVIGATION_SCRIPT, /window\.renderStatus\s*=/);
+  assert.doesNotMatch(MANAGER_NAVIGATION_SCRIPT, /baseRenderStatus/);
+});
+
 test('review tab uses current manager v3 review state rather than legacy embedded labels', () => {
   assert.match(MANAGER_NAVIGATION_SCRIPT, /quick-manual/);
   assert.match(MANAGER_NAVIGATION_SCRIPT, /quick-web-chatgpt/);
