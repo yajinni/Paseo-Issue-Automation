@@ -37,7 +37,8 @@ test('drafts created after a refresh or unrelated action starts are still restor
   const html = managerHtml();
   assert.doesNotMatch(html, /const preserveDraft = configDraftRepositoryId === repositoryId/);
   assert.doesNotMatch(html, /const preserveDraft = action !== 'config'/);
-  assert.match(html, /const result = await previousLoadStatus\(\.\.\.args\);\s*const currentRepositoryId = repositorySelect\?\.value \|\| null;\s*if \(currentRepositoryId === repositoryId && configDraftRepositoryId === repositoryId\)/);
+  assert.match(html, /let result = await previousLoadStatus\(\.\.\.args\)/);
+  assert.match(html, /if \(currentRepositoryId === repositoryId && configDraftRepositoryId === repositoryId\) \{\s*restoreConfigDraft\(captureConfigDraft\(\)\)/);
   assert.match(html, /else if \(repositorySelect\?\.value === repositoryId && configDraftRepositoryId === repositoryId\) \{\s*restoreConfigDraft\(captureConfigDraft\(\)\)/);
 });
 
@@ -64,6 +65,15 @@ test('configuration saves are single-flight so older server responses cannot win
   assert.match(html, /if \(configSave && configSaveInFlight\) throw new Error\('Configuration save is already in progress\.'\)/);
   assert.match(html, /if \(configSave\) configSaveInFlight = true/);
   assert.match(html, /finally \{\s*if \(configSave\) configSaveInFlight = false/);
+});
+
+test('a status load spanning a successful config save is refreshed before it can remain stale', () => {
+  const html = managerHtml();
+  assert.match(html, /let configSaveRevision = 0/);
+  assert.match(html, /let observedSaveRevision = configSaveRevision/);
+  assert.match(html, /while \(currentRepositoryId === repositoryId && configSaveRevision !== observedSaveRevision\)/);
+  assert.match(html, /observedSaveRevision = configSaveRevision;\s*result = await previousLoadStatus\(\.\.\.args\)/);
+  assert.match(html, /if \(configSave\) \{\s*configSaveRevision \+= 1/);
 });
 
 test('discard and repository switch intentionally drop only the old draft', () => {
