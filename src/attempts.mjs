@@ -347,6 +347,7 @@ function startRecordedAgent(root, issue, repository) {
   try {
     const payload = runJson('paseo', agentRunArgs({
       provider: config.models.coder,
+      thinking: config.models.coderThinking,
       title,
       workspaceId: current.workspaceId,
       prompt: buildAttemptPrompt(repository, issue, current.branch, config),
