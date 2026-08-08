@@ -28,9 +28,17 @@ test('same-repository status refreshes preserve the latest unsaved configuration
   assert.match(html, /configDraftVersion \+= 1/);
   assert.match(html, /function captureConfigDraft\(\)/);
   assert.match(html, /return configDraftValues\.map\(\(saved\) => \(\{ \.\.\.saved \}\)\)/);
-  assert.match(html, /const preserveDraft = configDraftRepositoryId === repositoryId/);
+  assert.match(html, /currentRepositoryId === repositoryId && configDraftRepositoryId === repositoryId/);
   assert.match(html, /restoreConfigDraft\(captureConfigDraft\(\)\)/);
   assert.match(html, /configForm\?\.dispatchEvent\(new Event\('input', \{ bubbles: true \}\)\)/);
+});
+
+test('drafts created after a refresh or unrelated action starts are still restored', () => {
+  const html = managerHtml();
+  assert.doesNotMatch(html, /const preserveDraft = configDraftRepositoryId === repositoryId/);
+  assert.doesNotMatch(html, /const preserveDraft = action !== 'config'/);
+  assert.match(html, /const result = await previousLoadStatus\(\.\.\.args\);\s*const currentRepositoryId = repositorySelect\?\.value \|\| null;\s*if \(currentRepositoryId === repositoryId && configDraftRepositoryId === repositoryId\)/);
+  assert.match(html, /else if \(repositorySelect\?\.value === repositoryId && configDraftRepositoryId === repositoryId\) \{\s*restoreConfigDraft\(captureConfigDraft\(\)\)/);
 });
 
 test('synthetic restoration events do not masquerade as newer user edits', () => {
@@ -52,11 +60,10 @@ test('configuration save clears only the submitted draft and preserves edits mad
 
 test('discard and repository switch intentionally drop only the old draft', () => {
   const html = managerHtml();
-  assert.match(html, /action !== 'config' && configDraftRepositoryId === repositoryId/);
   assert.match(html, /#manager-config-discard/);
   assert.match(html, /configDraftValues = null/);
   assert.match(html, /configDraftVersion = 0/);
-  assert.match(html, /if \(configDraftRepositoryId && configDraftRepositoryId !== currentRepositoryId\) clearConfigDraft\(\)/);
+  assert.match(html, /if \(configDraftRepositoryId && configDraftRepositoryId !== currentRepositoryId\) \{\s*clearConfigDraft\(\)/);
 });
 
 test('restored review-workflow drafts reapply conditional configuration presentation', () => {
