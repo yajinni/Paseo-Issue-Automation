@@ -250,14 +250,23 @@ async function diagnosticFailure(page, error, { reviewRequestId = 'browser', sta
   return { screenshot: existsSync(screenshot) ? path.basename(screenshot) : null, diagnostic: path.basename(diagnostic) };
 }
 
+export function browserContextLaunchOptions({ headless = false } = {}) {
+  const args = ['--disable-blink-features=AutomationControlled'];
+  if (!headless) args.unshift('--start-maximized');
+  return {
+    headless,
+    viewport: headless ? { width: 1440, height: 1000 } : null,
+    args,
+  };
+}
+
 async function launchContext({ headless = false } = {}) {
   const { chromium } = await loadPlaywright();
   const paths = browserPaths();
-  const context = await chromium.launchPersistentContext(paths.profile, {
-    headless,
-    viewport: { width: 1440, height: 1000 },
-    args: ['--disable-blink-features=AutomationControlled'],
-  });
+  const context = await chromium.launchPersistentContext(
+    paths.profile,
+    browserContextLaunchOptions({ headless }),
+  );
   const pages = context.pages();
   return { context, page: pages[0] || await context.newPage() };
 }
