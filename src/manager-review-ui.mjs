@@ -13,6 +13,24 @@ const REVIEW_FACTS = `    ['Capacity check error', data.worker && data.worker.ca
     ['Last reconciliation', data.reviewWorker && data.reviewWorker.lastReconciliationAt],
     ['Reconciliation error', data.reviewWorker && data.reviewWorker.lastReconciliationError],`;
 
+const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
+(function managerLightweightActionStatusSync() {
+  const lightweightActions = new Set(['review-worker/start', 'review-worker/restart', 'restart-issue']);
+  const previousPostRepositoryAction = window.postRepositoryAction;
+  if (typeof previousPostRepositoryAction !== 'function') return;
+  window.postRepositoryAction = async function managerLightweightActionPostRepositoryAction(action, payload) {
+    const body = await previousPostRepositoryAction(action, payload);
+    if (lightweightActions.has(action) && !body?.status && typeof window.loadStatus === 'function') {
+      queueMicrotask(() => window.loadStatus().catch((error) => {
+        if (typeof window.showError === 'function') window.showError(error);
+        else console.error(error);
+      }));
+    }
+    return body;
+  };
+})();
+</script>`;
+
 export function managerHtml() {
   return concurrencyManagerHtml()
     .replace(
@@ -30,5 +48,6 @@ export function managerHtml() {
     .replace(
       'Manager-wide fair coding capacity is enforced. PR-review workers and installation remain separate.',
       'Manager-wide fair coding capacity and repository PR-review schedulers are available. Installation remains separate.',
-    );
+    )
+    .replace('</body>', `${LIGHTWEIGHT_ACTION_STATUS_SCRIPT}\n</body>`);
 }
