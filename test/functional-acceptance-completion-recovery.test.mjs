@@ -202,7 +202,7 @@ process.exit(2);
     else process.env.PASEO_COMMAND_TIMEOUT_MS = previous.commandTimeout;
     if (previous.agentTimeout === undefined) delete process.env.PASEO_AGENT_TIMEOUT_MS;
     else process.env.PASEO_AGENT_TIMEOUT_MS = previous.agentTimeout;
-    rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(fixture, { recursive: true, force: true, maxRetries: 100, retryDelay: 100 });
   });
 
   return { fixture, root };
