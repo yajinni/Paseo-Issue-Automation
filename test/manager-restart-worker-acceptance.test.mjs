@@ -75,6 +75,10 @@ process.exit(2);
 const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 appendFileSync(process.env.PASEO_ACCEPTANCE_CALLS, JSON.stringify({ cmd: 'gh', args }) + '\\n');
+if (args[0] === 'issue' && args[1] === 'list') {
+  process.stdout.write('[]');
+  process.exit(0);
+}
 if (args[0] === 'issue' && args[1] === 'edit') process.exit(0);
 process.stderr.write('Unexpected fake gh command: ' + args.join(' '));
 process.exit(2);
