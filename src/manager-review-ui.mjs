@@ -85,11 +85,13 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   if (typeof previousLoadStatus === 'function') {
     window.loadStatus = async function managerDraftPreservingLoadStatus(...args) {
       const repositoryId = repositorySelect?.value || null;
-      const preserveDraft = configDraftRepositoryId === repositoryId;
       const result = await previousLoadStatus(...args);
       const currentRepositoryId = repositorySelect?.value || null;
-      if (preserveDraft && currentRepositoryId === repositoryId) restoreConfigDraft(captureConfigDraft());
-      else if (configDraftRepositoryId && configDraftRepositoryId !== currentRepositoryId) clearConfigDraft();
+      if (currentRepositoryId === repositoryId && configDraftRepositoryId === repositoryId) {
+        restoreConfigDraft(captureConfigDraft());
+      } else if (configDraftRepositoryId && configDraftRepositoryId !== currentRepositoryId) {
+        clearConfigDraft();
+      }
       return result;
     };
   }
@@ -99,7 +101,6 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   window.postRepositoryAction = async function managerLightweightActionPostRepositoryAction(action, payload) {
     const repositoryId = repositorySelect?.value || null;
     const configDraftVersionAtStart = configDraftVersion;
-    const preserveDraft = action !== 'config' && configDraftRepositoryId === repositoryId;
     const body = await previousPostRepositoryAction(action, payload);
     if (action === 'config') {
       const currentRepositoryId = repositorySelect?.value || null;
@@ -108,7 +109,7 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
         && configDraftVersion > configDraftVersionAtStart;
       if (hasNewerDraft) restoreConfigDraft(captureConfigDraft());
       else if (configDraftRepositoryId === repositoryId) clearConfigDraft();
-    } else if (preserveDraft && repositorySelect?.value === repositoryId) {
+    } else if (repositorySelect?.value === repositoryId && configDraftRepositoryId === repositoryId) {
       restoreConfigDraft(captureConfigDraft());
     }
     if (lightweightActions.has(action) && !body?.status && typeof window.loadStatus === 'function') {
