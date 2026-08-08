@@ -23,6 +23,7 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   let configDraftVersion = 0;
   let restoringConfigDraft = false;
   let configSaveInFlight = false;
+  let configSaveRevision = 0;
 
   function configFields() {
     return [...(configForm?.querySelectorAll('input,select') || [])]
@@ -86,8 +87,14 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   if (typeof previousLoadStatus === 'function') {
     window.loadStatus = async function managerDraftPreservingLoadStatus(...args) {
       const repositoryId = repositorySelect?.value || null;
-      const result = await previousLoadStatus(...args);
-      const currentRepositoryId = repositorySelect?.value || null;
+      let observedSaveRevision = configSaveRevision;
+      let result = await previousLoadStatus(...args);
+      let currentRepositoryId = repositorySelect?.value || null;
+      while (currentRepositoryId === repositoryId && configSaveRevision !== observedSaveRevision) {
+        observedSaveRevision = configSaveRevision;
+        result = await previousLoadStatus(...args);
+        currentRepositoryId = repositorySelect?.value || null;
+      }
       if (currentRepositoryId === repositoryId && configDraftRepositoryId === repositoryId) {
         restoreConfigDraft(captureConfigDraft());
       } else if (configDraftRepositoryId && configDraftRepositoryId !== currentRepositoryId) {
@@ -112,6 +119,7 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
       if (configSave) configSaveInFlight = false;
     }
     if (configSave) {
+      configSaveRevision += 1;
       const currentRepositoryId = repositorySelect?.value || null;
       const hasNewerDraft = currentRepositoryId === repositoryId
         && configDraftRepositoryId === repositoryId
