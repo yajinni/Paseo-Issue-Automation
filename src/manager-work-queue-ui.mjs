@@ -332,13 +332,8 @@ export const MANAGER_WORK_QUEUE_SCRIPT = String.raw`
     }
   }
 
-  const baseRenderStatus = window.renderStatus;
-  if (typeof baseRenderStatus === 'function') {
-    window.renderStatus = function managerWorkQueueRenderStatus(data) {
-      const result = baseRenderStatus(data);
-      renderStatusQueue(data);
-      return result;
-    };
+  if (typeof window.addManagerStatusListener === 'function') {
+    window.addManagerStatusListener(renderStatusQueue);
   }
   document.addEventListener('keydown', handleDrawerKeydown);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true }); else build();
