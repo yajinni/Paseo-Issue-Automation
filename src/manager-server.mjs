@@ -10,6 +10,7 @@ import { enhanceManagerWithIssueProcessingFlow } from './manager-issue-processin
 import { enhanceManagerWithIssuesPrReviews } from './manager-issues-pr-reviews-ui.mjs';
 import { managerHtml } from './manager-maintenance-ui.mjs';
 import { enhanceManagerWithNavigation } from './manager-navigation-ui.mjs';
+import { captureManagerStatusRenderer, enhanceManagerWithStatusEvents } from './manager-status-events-ui.mjs';
 import { enhanceManagerWithUiFoundation, enhanceSetupWithSharedUiTheme } from './manager-ui-foundation.mjs';
 import { enhanceManagerWithWorkQueue } from './manager-work-queue-ui.mjs';
 import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
@@ -64,7 +65,11 @@ export function managerHasConfiguredRepository({ rootDir } = {}) {
   });
 }
 
-function managerDashboardHtml() {
+function captureStatusConsumer(html, enhancer) {
+  return captureManagerStatusRenderer(enhancer(html));
+}
+
+export function managerDashboardHtml() {
   const setupLink = '<a href="/setup" data-manager-setup-link class="manager-setup-link">Add repository via setup</a>';
   const manualForm = `  <form class="register" id="register-form">
     <input id="repository-path" required placeholder="C:\\path\\to\\repository or /path/to/repository" aria-label="Repository path">
@@ -91,13 +96,14 @@ ${manualForm}
     html = html.includes('</body>') ? html.replace('</body>', `${setupLink}</body>`) : `${html}${setupLink}`;
   }
   const themed = enhanceManagerWithUiFoundation(html);
-  const navigated = enhanceManagerWithNavigation(themed);
-  const queued = enhanceManagerWithWorkQueue(navigated);
-  const operations = enhanceManagerWithAutomationReviews(queued);
-  const organized = enhanceManagerWithConfigIntegrationMaintenance(operations);
-  const configured = enhanceManagerWithConfigurationTabs(organized);
-  const issueAndReviewViews = enhanceManagerWithIssuesPrReviews(configured);
-  const issueFlow = enhanceManagerWithIssueProcessingFlow(issueAndReviewViews);
+  const statusEvents = enhanceManagerWithStatusEvents(themed);
+  const navigated = captureStatusConsumer(statusEvents, enhanceManagerWithNavigation);
+  const queued = captureStatusConsumer(navigated, enhanceManagerWithWorkQueue);
+  const operations = captureStatusConsumer(queued, enhanceManagerWithAutomationReviews);
+  const organized = captureStatusConsumer(operations, enhanceManagerWithConfigIntegrationMaintenance);
+  const configured = captureStatusConsumer(organized, enhanceManagerWithConfigurationTabs);
+  const issueAndReviewViews = captureStatusConsumer(configured, enhanceManagerWithIssuesPrReviews);
+  const issueFlow = captureStatusConsumer(issueAndReviewViews, enhanceManagerWithIssueProcessingFlow);
   return enhanceManagerWithInteractionPolish(issueFlow);
 }
 
