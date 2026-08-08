@@ -22,8 +22,10 @@ test('same-repository status refreshes preserve the latest unsaved configuration
   const html = managerHtml();
   assert.match(html, /let configDraftRepositoryId = null/);
   assert.match(html, /let configDraftValues = null/);
+  assert.match(html, /let configDraftVersion = 0/);
   assert.match(html, /function snapshotConfigFields\(\)/);
   assert.match(html, /configDraftValues = snapshotConfigFields\(\)/);
+  assert.match(html, /configDraftVersion \+= 1/);
   assert.match(html, /function captureConfigDraft\(\)/);
   assert.match(html, /return configDraftValues\.map\(\(saved\) => \(\{ \.\.\.saved \}\)\)/);
   assert.match(html, /const preserveDraft = configDraftRepositoryId === repositoryId/);
@@ -31,12 +33,29 @@ test('same-repository status refreshes preserve the latest unsaved configuration
   assert.match(html, /configForm\?\.dispatchEvent\(new Event\('input', \{ bubbles: true \}\)\)/);
 });
 
-test('configuration save discard and repository switch intentionally drop the old draft', () => {
+test('synthetic restoration events do not masquerade as newer user edits', () => {
+  const html = managerHtml();
+  assert.match(html, /let restoringConfigDraft = false/);
+  assert.match(html, /restoringConfigDraft = true/);
+  assert.match(html, /if \(restoringConfigDraft\) return/);
+  assert.match(html, /finally \{\s*restoringConfigDraft = false/);
+});
+
+test('configuration save clears only the submitted draft and preserves edits made while saving', () => {
+  const html = managerHtml();
+  assert.match(html, /const configDraftVersionAtStart = configDraftVersion/);
+  assert.match(html, /configDraftVersion > configDraftVersionAtStart/);
+  assert.match(html, /if \(hasNewerDraft\) restoreConfigDraft\(captureConfigDraft\(\)\)/);
+  assert.match(html, /else if \(configDraftRepositoryId === repositoryId\) clearConfigDraft\(\)/);
+  assert.doesNotMatch(html, /if \(action === 'config'\) clearConfigDraft\(\)/);
+});
+
+test('discard and repository switch intentionally drop only the old draft', () => {
   const html = managerHtml();
   assert.match(html, /action !== 'config' && configDraftRepositoryId === repositoryId/);
-  assert.match(html, /if \(action === 'config'\) clearConfigDraft\(\)/);
   assert.match(html, /#manager-config-discard/);
   assert.match(html, /configDraftValues = null/);
+  assert.match(html, /configDraftVersion = 0/);
   assert.match(html, /if \(configDraftRepositoryId && configDraftRepositoryId !== currentRepositoryId\) clearConfigDraft\(\)/);
 });
 
