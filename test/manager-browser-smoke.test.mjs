@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chromium } from 'playwright';
 import { managerDashboardHtml } from '../src/manager-server.mjs';
 
 const enabled = process.env.PASEO_BROWSER_SMOKE === '1';
@@ -269,9 +268,10 @@ function fakeManagerApi() {
 
 async function launchBrowser() {
   try {
+    const { chromium } = await import('playwright');
     return await chromium.launch({ headless: true });
   } catch (error) {
-    throw new Error(`Manager browser smoke requires a local Chromium binary. Run \`npx playwright install chromium\` before setting PASEO_BROWSER_SMOKE=1.\n${error.message}`);
+    throw new Error(`Manager browser smoke requires Playwright and a local Chromium binary. Install package dependencies and run \`npx playwright install chromium\` before setting PASEO_BROWSER_SMOKE=1.\n${error.message}`);
   }
 }
 
