@@ -55,7 +55,15 @@ test('configuration save clears only the submitted draft and preserves edits mad
   assert.match(html, /configDraftVersion > configDraftVersionAtStart/);
   assert.match(html, /if \(hasNewerDraft\) restoreConfigDraft\(captureConfigDraft\(\)\)/);
   assert.match(html, /else if \(configDraftRepositoryId === repositoryId\) clearConfigDraft\(\)/);
-  assert.doesNotMatch(html, /if \(action === 'config'\) clearConfigDraft\(\)/);
+});
+
+test('configuration saves are single-flight so older server responses cannot win out of order', () => {
+  const html = managerHtml();
+  assert.match(html, /let configSaveInFlight = false/);
+  assert.match(html, /const configSave = action === 'config'/);
+  assert.match(html, /if \(configSave && configSaveInFlight\) throw new Error\('Configuration save is already in progress\.'\)/);
+  assert.match(html, /if \(configSave\) configSaveInFlight = true/);
+  assert.match(html, /finally \{\s*if \(configSave\) configSaveInFlight = false/);
 });
 
 test('discard and repository switch intentionally drop only the old draft', () => {
