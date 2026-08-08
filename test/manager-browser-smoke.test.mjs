@@ -123,9 +123,23 @@ function fakeManagerApi() {
     ['repo-b', statusFor('repo-b')],
   ]);
   const delays = new Map();
+  const requestCounts = new Map();
+
+  function requestKey(method, pathname) {
+    return `${method.toUpperCase()} ${pathname}`;
+  }
+
+  function countRequest(method, pathname) {
+    const key = requestKey(method, pathname);
+    requestCounts.set(key, (requestCounts.get(key) || 0) + 1);
+  }
+
+  function countFor(method, pathname) {
+    return requestCounts.get(requestKey(method, pathname)) || 0;
+  }
 
   function armDelay(method, pathname) {
-    const key = `${method.toUpperCase()} ${pathname}`;
+    const key = requestKey(method, pathname);
     const seen = deferred();
     const release = deferred();
     const done = deferred();
@@ -141,7 +155,7 @@ function fakeManagerApi() {
   }
 
   function takeDelay(method, pathname) {
-    const key = `${method.toUpperCase()} ${pathname}`;
+    const key = requestKey(method, pathname);
     const queue = delays.get(key);
     if (!queue?.length) return null;
     const entry = queue.shift();
@@ -157,6 +171,7 @@ function fakeManagerApi() {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method().toUpperCase();
+    countRequest(method, url.pathname);
     if (request.isNavigationRequest() && url.origin === ORIGIN && url.pathname === '/') {
       await route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: managerDashboardHtml() });
       return;
@@ -252,7 +267,7 @@ function fakeManagerApi() {
         await json(route, { status: clone(current), result: { saved: true } });
         return;
       }
-      if (method === 'POST' && action === 'run-now') {
+      if (method === 'POST' && ['run-now', 'review-worker/start', 'review-worker/restart', 'restart-issue'].includes(action)) {
         await json(route, { result: { ok: true } }, 202);
         return;
       }
@@ -263,7 +278,17 @@ function fakeManagerApi() {
     }
   }
 
-  return { statuses, armDelay, routeHandler };
+  return { statuses, armDelay, countFor, routeHandler };
+}
+
+async function waitForRequestCount(api, method, pathname, minimum, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (api.countFor(method, pathname) < minimum) {
+    if (Date.now() >= deadline) {
+      assert.fail(`Timed out waiting for ${method} ${pathname} request count ${minimum}; saw ${api.countFor(method, pathname)}.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 
 async function launchBrowser() {
@@ -333,6 +358,108 @@ test('manager browser smoke covers refresh save repository-switch drawer and leg
     await page.goto(`${ORIGIN}/?view=integration`);
     await page.waitForFunction(() => new URL(location.href).searchParams.get('view') === 'configuration');
     assert.equal(await page.locator('.manager-config-tab[aria-selected="true"]').getAttribute('data-config-tab'), 'repository');
+    assert.equal(await page.locator('.manager-config-step-link').count(), 0);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('manager browser smoke covers remaining request-order refresh history and lightweight-action lifecycles', { skip: !enabled, timeout: 90_000 }, async () => {
+  const browser = await launchBrowser();
+  const api = fakeManagerApi();
+  const page = await browser.newPage();
+  await page.route(`${ORIGIN}/**`, (route) => api.routeHandler(route));
+
+  try {
+    await page.goto(`${ORIGIN}/`);
+    await page.waitForFunction(() => document.getElementById('manager-current-repository')?.textContent.includes('Repo A'));
+    await page.locator('[data-manager-view-target="configuration"]').click();
+    await page.locator('.manager-config-tab[data-config-tab="repository"]').click();
+    let baseBranch = page.locator('#base-branch');
+
+    const cleanRefreshDelay = api.armDelay('GET', '/api/repositories/repo-a/status');
+    await page.evaluate(() => { window.__smokeRefresh = window.loadStatus(); });
+    await cleanRefreshDelay.seen;
+    await baseBranch.fill('typed-after-refresh-started');
+    cleanRefreshDelay.release();
+    await cleanRefreshDelay.done;
+    await page.evaluate(() => window.__smokeRefresh);
+    assert.equal(await baseBranch.inputValue(), 'typed-after-refresh-started', 'an edit started after Refresh begins must survive its response');
+
+    await page.goto(`${ORIGIN}/`);
+    await page.waitForFunction(() => document.getElementById('manager-current-repository')?.textContent.includes('Repo A'));
+    const staleStatusDelay = api.armDelay('GET', '/api/repositories/repo-a/status');
+    await page.evaluate(() => { window.__staleStatus = window.loadStatus(); });
+    await staleStatusDelay.seen;
+    await page.locator('#repository-select').selectOption('repo-b');
+    await page.waitForFunction(() => document.getElementById('manager-current-repository')?.textContent.includes('Repo B'));
+    staleStatusDelay.release();
+    await staleStatusDelay.done;
+    await page.evaluate(() => window.__staleStatus);
+    assert.equal(await page.locator('#repository-select').inputValue(), 'repo-b');
+    assert.match(await page.locator('#manager-current-repository').textContent(), /Repo B/);
+
+    await page.locator('#repository-select').selectOption('repo-a');
+    await page.waitForFunction(() => document.getElementById('manager-current-repository')?.textContent.includes('Repo A'));
+    await page.locator('[data-manager-view-target="configuration"]').click();
+    await page.locator('.manager-config-tab[data-config-tab="repository"]').click();
+    baseBranch = page.locator('#base-branch');
+    await baseBranch.fill('saved-in-repo-a');
+    const saveSwitchDelay = api.armDelay('POST', '/api/repositories/repo-a/config');
+    await page.locator('#manager-config-save').click();
+    await saveSwitchDelay.seen;
+    await page.locator('#repository-select').selectOption('repo-b');
+    await page.waitForFunction(() => document.getElementById('manager-current-repository')?.textContent.includes('Repo B'));
+    saveSwitchDelay.release();
+    await saveSwitchDelay.done;
+    await page.waitForTimeout(50);
+    assert.equal(await page.locator('#repository-select').inputValue(), 'repo-b');
+    assert.equal(await page.locator('#base-branch').inputValue(), 'main', 'Repo A save completion must not repaint Repo B configuration');
+
+    const statusPath = '/api/repositories/repo-b/status';
+    for (const [action, payload] of [
+      ['review-worker/start', null],
+      ['restart-issue', { issueNumber: 201, branchAction: 'keep' }],
+      ['review-worker/restart', null],
+    ]) {
+      const before = api.countFor('GET', statusPath);
+      const body = await page.evaluate(({ action: name, payload: bodyPayload }) => window.postRepositoryAction(name, bodyPayload), { action, payload });
+      assert.equal(body.result.ok, true);
+      await waitForRequestCount(api, 'GET', statusPath, before + 1);
+    }
+
+    await page.locator('[data-manager-view-target="automation"]').click();
+    const planPath = '/api/repositories/repo-b/issues-plan';
+    await waitForRequestCount(api, 'GET', planPath, 1);
+    await page.waitForFunction(() => document.querySelector('#manager-issue-plan-list')?.textContent.includes('Synthetic browser smoke issue'));
+    const initialPlanCount = api.countFor('GET', planPath);
+    const repoBStatus = clone(api.statuses.get('repo-b'));
+    await page.evaluate((status) => {
+      window.renderStatus(status);
+      window.renderStatus(status);
+      window.renderStatus(status);
+    }, repoBStatus);
+    await page.waitForTimeout(150);
+    assert.equal(api.countFor('GET', planPath), initialPlanCount, 'cached status renders must not refetch the issue plan immediately');
+    await waitForRequestCount(api, 'GET', planPath, initialPlanCount + 1, 17_000);
+    const firstDeferredCount = api.countFor('GET', planPath);
+    await page.evaluate((status) => window.renderStatus(status), repoBStatus);
+    await page.waitForTimeout(150);
+    assert.equal(api.countFor('GET', planPath), firstDeferredCount, 'a new cache window should still suppress an immediate duplicate');
+    await waitForRequestCount(api, 'GET', planPath, firstDeferredCount + 1, 17_000);
+
+    await page.goto(`${ORIGIN}/?view=configuration`);
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('view') === 'configuration');
+    await page.evaluate(() => {
+      history.pushState({}, '', '/?view=integration');
+      history.pushState({}, '', '/?view=maintenance');
+      history.back();
+    });
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('view') === 'configuration'
+      && document.querySelector('.manager-config-tab[aria-selected="true"]')?.dataset.configTab === 'repository');
+    await page.evaluate(() => history.forward());
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('view') === 'configuration'
+      && document.querySelector('.manager-config-tab[aria-selected="true"]')?.dataset.configTab === 'readiness');
     assert.equal(await page.locator('.manager-config-step-link').count(), 0);
   } finally {
     await browser.close();
