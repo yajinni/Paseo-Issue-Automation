@@ -25,6 +25,46 @@ function writeExecutable(file, content) {
   chmodSync(file, 0o755);
 }
 
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function signalDetachedController(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    try {
+      process.kill(pid, signal);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function stopDetachedController(pid, timeoutMs = 3000) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (!signalDetachedController(pid, 'SIGTERM')) return;
+
+  const deadline = Date.now() + timeoutMs;
+  while (processIsAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  if (!processIsAlive(pid)) return;
+
+  signalDetachedController(pid, 'SIGKILL');
+  const killDeadline = Date.now() + 1000;
+  while (processIsAlive(pid) && Date.now() < killDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 function issueBody() {
   return [
     '<!-- paseo-issue-template:v2 -->',
@@ -46,6 +86,7 @@ function setupRepository(t, { recoverCompletion = true } = {}) {
   const root = path.join(fixture, 'repo');
   const remote = path.join(fixture, 'remote.git');
   const bin = path.join(fixture, 'bin');
+  const controllerPids = new Set();
   mkdirSync(root, { recursive: true });
   mkdirSync(bin, { recursive: true });
   git(fixture, ['init', '--bare', '--quiet', remote]);
@@ -190,10 +231,9 @@ process.exit(2);
   });
   saveRuntime(root, { claimsEnabled: true, skippedIssueNumbers: [] });
 
-  t.after(() => {
-    const state = loadRun(root, 103);
-    if (state?.controllerPid) {
-      try { process.kill(state.controllerPid, 0); process.kill(state.controllerPid, 'SIGTERM'); } catch {}
+  t.after(async () => {
+    for (const controllerPid of controllerPids) {
+      await stopDetachedController(controllerPid);
     }
     process.env.PATH = previous.PATH;
     if (previous.fixture === undefined) delete process.env.PASEO_ACCEPTANCE_FIXTURE;
@@ -202,10 +242,10 @@ process.exit(2);
     else process.env.PASEO_COMMAND_TIMEOUT_MS = previous.commandTimeout;
     if (previous.agentTimeout === undefined) delete process.env.PASEO_AGENT_TIMEOUT_MS;
     else process.env.PASEO_AGENT_TIMEOUT_MS = previous.agentTimeout;
-    rmSync(fixture, { recursive: true, force: true });
+    rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  return { fixture, root };
+  return { fixture, root, controllerPids };
 }
 
 async function waitForTerminalRun(root, issueNumber, timeoutMs = 15000) {
@@ -231,9 +271,10 @@ function countCommands(commands, command, predicate) {
 }
 
 test('functional acceptance: incomplete coder completion evidence recovers once on the same attempt and reaches human review', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
-  const { fixture, root } = setupRepository(t);
+  const { fixture, root, controllerPids } = setupRepository(t);
 
   const dispatch = dispatchSpecificIssue(root, 103);
+  controllerPids.add(dispatch.controllerPid);
   assert.equal(dispatch.claimed, true);
   assert.equal(dispatch.issueNumber, 103);
   assert.equal(dispatch.attempt, 1);
@@ -282,9 +323,10 @@ test('functional acceptance: incomplete coder completion evidence recovers once 
 });
 
 test('functional acceptance: persistent incomplete completion evidence fails closed after the single recovery attempt', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
-  const { fixture, root } = setupRepository(t, { recoverCompletion: false });
+  const { fixture, root, controllerPids } = setupRepository(t, { recoverCompletion: false });
 
   const dispatch = dispatchSpecificIssue(root, 103);
+  controllerPids.add(dispatch.controllerPid);
   assert.equal(dispatch.claimed, true);
   assert.equal(dispatch.attempt, 1);
   assert.equal(dispatch.workspaceId, 'workspace-1');
