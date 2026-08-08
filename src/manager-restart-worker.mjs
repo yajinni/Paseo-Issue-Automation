@@ -35,8 +35,6 @@ if (!root || !Number.isInteger(issueNumber) || issueNumber <= 0 || !['keep', 'de
       ),
     });
     recoverOrRestartCodingIssue(root, issueNumber, { branchAction });
-    const restarted = loadRun(root, issueNumber);
-    if (restarted) saveRun(root, issueNumber, { ...restarted, restartPending: false, restartRequestedAt: null });
   } catch (error) {
     const state = loadRun(root, issueNumber) || { issueNumber };
     const failedAt = now();
