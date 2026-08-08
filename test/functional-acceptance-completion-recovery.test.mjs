@@ -25,6 +25,46 @@ function writeExecutable(file, content) {
   chmodSync(file, 0o755);
 }
 
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function signalDetachedController(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    try {
+      process.kill(pid, signal);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function stopDetachedController(pid, timeoutMs = 3000) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (!signalDetachedController(pid, 'SIGTERM')) return;
+
+  const deadline = Date.now() + timeoutMs;
+  while (processIsAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  if (!processIsAlive(pid)) return;
+
+  signalDetachedController(pid, 'SIGKILL');
+  const killDeadline = Date.now() + 1000;
+  while (processIsAlive(pid) && Date.now() < killDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 function issueBody() {
   return [
     '<!-- paseo-issue-template:v2 -->',
@@ -191,9 +231,9 @@ process.exit(2);
   });
   saveRuntime(root, { claimsEnabled: true, skippedIssueNumbers: [] });
 
-  t.after(() => {
+  t.after(async () => {
     for (const controllerPid of controllerPids) {
-      try { process.kill(controllerPid, 0); process.kill(controllerPid, 'SIGTERM'); } catch {}
+      await stopDetachedController(controllerPid);
     }
     process.env.PATH = previous.PATH;
     if (previous.fixture === undefined) delete process.env.PASEO_ACCEPTANCE_FIXTURE;
