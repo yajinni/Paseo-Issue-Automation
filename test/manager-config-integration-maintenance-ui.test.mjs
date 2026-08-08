@@ -6,13 +6,19 @@ import {
   MANAGER_CONFIG_INTEGRATION_STYLE,
 } from '../src/manager-config-integration-maintenance-ui.mjs';
 
-test('Connect Paseo is configured directly in the manager and setup-link cards are removed', () => {
+test('Connect Paseo is configured directly in the manager without obsolete setup-link cleanup', () => {
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['Paseo connection'/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /configuration\/paseo-connection/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Connect & check/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Paseo host/);
-  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /removeSetupLinkCards/);
-  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /manager-config-step-link/);
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /removeSetupLinkCards/);
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /manager-config-step-link/);
+});
+
+test('Configuration integration subscribes directly to the manager status hub', () => {
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /window\.addManagerStatusListener\(render\)/);
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /window\.renderStatus\s*=/);
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /const previous = window\.renderStatus/);
 });
 
 test('Coding harness configuration uses separate coder review and harness boxes in the requested order', () => {
