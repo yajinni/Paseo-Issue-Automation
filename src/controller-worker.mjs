@@ -173,6 +173,7 @@ function runReviewer(root, issueNumber, snapshot, reviewRound) {
   });
   const verdict = runJson('paseo', [
     'run', '--provider', config.models.reviewer,
+    ...(config.models.reviewerThinking ? ['--thinking', config.models.reviewerThinking] : []),
     '--workspace', String(snapshot.state.workspaceId),
     '--title', `Issue #${issueNumber} Reviewer`,
     '--output-schema', REVIEW_OUTPUT_SCHEMA,
