@@ -54,8 +54,9 @@ export function handoffValidatedPullRequest(root, {
   const at = new Date().toISOString();
   saveRun(root, issue.number, {
     ...current,
-    status: 'pr-review-queued',
+    status: PR_REVIEW_LABELS.queued,
     phase: 'review-queued',
+    reason: null,
     prNumber: pr.number,
     prUrl: pr.url,
     completedAt: at,
