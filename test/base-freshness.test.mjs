@@ -6,7 +6,7 @@ function commandResult({ ok = true, exitCode = ok ? 0 : 1, stdout = '', stderr =
   return { ok, exitCode, stdout, stderr, error: null };
 }
 
-function gitRunner({ ancestorExitCode = 0, ancestorStderr = '', behind = 0, ahead = 1 } = {}) {
+function gitRunner({ ancestorExitCode = 0, ancestorStderr = '', behind = 0, ahead = 1, mergeBase = null } = {}) {
   return (command, args) => {
     assert.equal(command, 'git');
     if (args[0] === 'fetch') return commandResult();
@@ -19,7 +19,9 @@ function gitRunner({ ancestorExitCode = 0, ancestorStderr = '', behind = 0, ahea
         stderr: ancestorStderr,
       });
     }
-    if (args[0] === 'merge-base') return commandResult({ stdout: ancestorExitCode === 0 ? 'base-sha' : 'older-merge-base' });
+    if (args[0] === 'merge-base') {
+      return commandResult({ stdout: mergeBase || (ancestorExitCode === 0 ? 'base-sha' : 'older-merge-base') });
+    }
     if (args[0] === 'rev-list') return commandResult({ stdout: `${behind}\t${ahead}` });
     throw new Error(`Unexpected command: ${command} ${args.join(' ')}`);
   };
@@ -64,6 +66,21 @@ test('git ancestry execution errors are indeterminate instead of stale', () => {
   assert.match(result.reason, /coder was not asked to rewrite/i);
 });
 
+test('self-contradictory local ancestry evidence never triggers a coder base update', () => {
+  const result = inspectBaseFreshness('/repo', { worktreePath: '/repo/worktree' }, 'main', {
+    runner: gitRunner({ ancestorExitCode: 1, behind: 0, ahead: 1, mergeBase: 'base-sha' }),
+    jsonRunner: () => null,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'inconsistent');
+  assert.equal(result.evidence.baseSha, 'base-sha');
+  assert.equal(result.evidence.mergeBase, 'base-sha');
+  assert.equal(result.evidence.behind, 0);
+  assert.match(result.reason, /Git ancestry checks disagreed/);
+  assert.match(result.reason, /coder was not asked to rewrite/i);
+});
+
 test('local stale result that contradicts GitHub becomes controller inconsistency', () => {
   const result = inspectBaseFreshness('/repo', { worktreePath: '/repo/worktree' }, 'main', {
     runner: gitRunner({ ancestorExitCode: 1, behind: 1, ahead: 1 }),
@@ -76,7 +93,7 @@ test('local stale result that contradicts GitHub becomes controller inconsistenc
   assert.equal(result.evidence.githubCompareAvailable, true);
   assert.equal(result.evidence.githubBehind, 0);
   assert.equal(result.evidence.githubAhead, 1);
-  assert.match(result.reason, /GitHub reports it is 0 commits behind/);
+  assert.match(result.reason, /GitHub also reports the branch is 0 commits behind/);
 });
 
 test('genuine stale ancestry remains eligible for coder base update', () => {
