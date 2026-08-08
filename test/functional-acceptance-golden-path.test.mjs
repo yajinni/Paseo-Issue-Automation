@@ -222,6 +222,11 @@ function countCommands(commands, command, predicate) {
   return commands.filter((entry) => entry.command === command && predicate(entry.args)).length;
 }
 
+function commandOption(args, name) {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : null;
+}
+
 test('functional acceptance: one eligible issue reaches exact-head human review through the real controller', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
   const { fixture, root } = setupRepository(t);
 
@@ -270,6 +275,13 @@ test('functional acceptance: one eligible issue reaches exact-head human review 
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 1);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 1);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'issue' && args[1] === 'comment'), 1);
+
+  const coderRun = commands.find((entry) => entry.command === 'paseo' && entry.args[0] === 'run' && entry.args.includes('--background'));
+  const reviewerRun = commands.find((entry) => entry.command === 'paseo' && entry.args[0] === 'run' && !entry.args.includes('--background'));
+  assert.equal(commandOption(coderRun.args, '--provider'), 'fixture/coder');
+  assert.equal(commandOption(coderRun.args, '--thinking'), 'medium');
+  assert.equal(commandOption(reviewerRun.args, '--provider'), 'fixture/reviewer');
+  assert.equal(commandOption(reviewerRun.args, '--thinking'), 'high');
 
   const issueEdits = commands.filter((entry) => entry.command === 'gh' && entry.args[0] === 'issue' && entry.args[1] === 'edit');
   assert.equal(issueEdits.some((entry) => entry.args.includes('--add-label') && entry.args.includes('agent-running')), true);
