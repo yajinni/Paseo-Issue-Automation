@@ -6,7 +6,6 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
   const baseRenderStatus = window.renderStatus;
   if (typeof baseRenderStatus !== 'function') return;
 
-  const capturedRenderers = [];
   const listeners = new Set();
   let dispatching = false;
   let activeResult;
@@ -49,9 +48,6 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
     try {
       activeResult = baseRenderStatus(data);
       lastAcceptedStatus = data;
-      for (const renderer of [...capturedRenderers]) {
-        try { renderer(data); } catch (error) { reportFailure('renderer', error); }
-      }
       for (const listener of [...listeners]) {
         try { listener(data); } catch (error) { reportFailure('listener', error); }
       }
@@ -86,17 +82,6 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
     };
   }
 
-  window.captureManagerStatusRenderer = function captureManagerStatusRenderer() {
-    const renderer = window.renderStatus;
-    if (typeof renderer !== 'function' || renderer === dispatchManagerStatus || capturedRenderers.includes(renderer)) {
-      window.renderStatus = dispatchManagerStatus;
-      return false;
-    }
-    capturedRenderers.push(renderer);
-    window.renderStatus = dispatchManagerStatus;
-    return true;
-  };
-
   window.addManagerStatusListener = function addManagerStatusListener(listener) {
     if (typeof listener !== 'function') throw new TypeError('Manager status listener must be a function.');
     listeners.add(listener);
@@ -116,14 +101,6 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
 })();
 `;
 
-export const MANAGER_STATUS_CAPTURE_SCRIPT = String.raw`
-window.captureManagerStatusRenderer?.();
-`;
-
 export function enhanceManagerWithStatusEvents(html) {
   return injectIntoBody(html, `<script data-manager-status-events>${MANAGER_STATUS_EVENTS_SCRIPT}</script>`);
-}
-
-export function captureManagerStatusRenderer(html) {
-  return injectIntoBody(html, `<script data-manager-status-capture>${MANAGER_STATUS_CAPTURE_SCRIPT}</script>`);
 }
