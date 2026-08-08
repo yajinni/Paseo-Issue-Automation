@@ -56,6 +56,7 @@ function setupRepository(t) {
   git(root, ['commit', '--quiet', '-m', 'Initial fixture']);
   git(root, ['remote', 'add', 'origin', remote]);
   git(root, ['push', '--quiet', '-u', 'origin', 'main']);
+  git(root, ['fetch', '--quiet', 'origin', '+main:refs/remotes/origin/main']);
 
   const issue = {
     number: 101,
@@ -121,7 +122,7 @@ if (args[0] === 'workspace' && args[1] === 'create') {
   const base = arg('--base');
   const title = arg('--title');
   const worktree = path.join(fixture, 'worktree');
-  execFileSync('git', ['worktree', 'add', '--quiet', '-b', branch, worktree, base], { cwd: root, stdio: 'pipe' });
+  execFileSync('git', ['worktree', 'add', '--quiet', '-b', branch, worktree, 'origin/' + base], { cwd: root, stdio: 'pipe' });
   const workspace = { workspaceId: 'workspace-1', cwd: worktree, title, branch };
   writeFileSync(workspaceFile, JSON.stringify(workspace, null, 2));
   output(workspace);
