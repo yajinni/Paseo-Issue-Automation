@@ -15,7 +15,15 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
     try { console.error('Manager status ' + kind + ' failed.', error); } catch {}
   }
 
+  function statusMatchesSelectedRepository(data) {
+    const selectedRepositoryId = document.getElementById?.('repository-select')?.value;
+    const statusRepositoryId = data?.repository?.id;
+    if (!selectedRepositoryId || statusRepositoryId == null || statusRepositoryId === '') return true;
+    return String(statusRepositoryId) === String(selectedRepositoryId);
+  }
+
   function dispatchManagerStatus(data) {
+    if (!statusMatchesSelectedRepository(data)) return undefined;
     if (dispatching) return activeResult;
     dispatching = true;
     try {
