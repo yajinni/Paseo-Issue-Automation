@@ -119,6 +119,7 @@ const arg = (name) => { const index = args.indexOf(name); return index >= 0 ? ar
 const workspaceFile = path.join(fixture, 'workspace.json');
 const prFile = path.join(fixture, 'pr.json');
 const externalMode = path.join(fixture, 'external-head-mode');
+const reviewerFailureMode = path.join(fixture, 'reviewer-failure-mode');
 if (args[0] === 'workspace' && args[1] === 'create') {
   const root = arg('--path');
   const branch = arg('--new-branch');
@@ -163,6 +164,10 @@ if (args[0] === 'run') {
   const countFile = path.join(fixture, 'review-count');
   const count = existsSync(countFile) ? Number(readFileSync(countFile, 'utf8')) : 0;
   writeFileSync(countFile, String(count + 1));
+  if (existsSync(reviewerFailureMode)) {
+    process.stderr.write('simulated reviewer failure');
+    process.exit(2);
+  }
   if (existsSync(externalMode)) {
     if (count === 0) {
       const workspace = JSON.parse(readFileSync(workspaceFile, 'utf8'));
@@ -384,4 +389,55 @@ test('functional acceptance: an externally advanced PR head invalidates approval
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'wait'), 2);
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 2);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 2);
+});
+
+test('functional acceptance: reviewer subprocess failure fails closed without recording approval', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
+  const { fixture, root } = setupRepository(t);
+  writeFileSync(path.join(fixture, 'reviewer-failure-mode'), 'enabled\n');
+
+  const dispatch = dispatchSpecificIssue(root, 102);
+  assert.equal(dispatch.claimed, true);
+  assert.equal(dispatch.issueNumber, 102);
+  assert.equal(dispatch.attempt, 1);
+  assert.equal(dispatch.workspaceId, 'workspace-1');
+
+  const state = await waitForTerminalRun(root, 102);
+  assert.equal(state.status, 'failed');
+  assert.equal(state.phase, 'failed');
+  assert.match(String(state.reason || ''), /simulated reviewer failure/);
+  assert.equal(state.prNumber, 8);
+  assert.equal(state.attempt, 1);
+  assert.equal(state.workspaceId, 'workspace-1');
+  assert.equal(state.coderAgentId, 'agent-1');
+  assert.equal(state.approvedCommit || null, null);
+
+  const validations = (state.events || []).filter((event) => event.event === 'validation-summary' && event.result === 'PASS');
+  const reviews = (state.events || []).filter((event) => event.event === 'review');
+  assert.equal(validations.length, 1);
+  assert.ok(validations[0].commit);
+  assert.equal(reviews.length, 0);
+
+  const worktree = JSON.parse(readFileSync(path.join(fixture, 'workspace.json'), 'utf8')).cwd;
+  const finalHead = git(worktree, ['rev-parse', 'HEAD']);
+  const remoteHead = git(root, ['ls-remote', '--heads', 'origin', `refs/heads/${state.branch}`]).split(/\s+/)[0];
+  const pr = JSON.parse(readFileSync(path.join(fixture, 'pr.json'), 'utf8'));
+  assert.equal(pr.isDraft, true);
+  assert.equal(finalHead, validations[0].commit);
+  assert.equal(remoteHead, finalHead);
+  assert.equal(pr.headRefOid, finalHead);
+  assert.equal(readFileSync(path.join(worktree, 'acceptance-marker.txt'), 'utf8'), 'initial reviewed content\n');
+  assert.equal(git(worktree, ['status', '--porcelain=v1', '--untracked-files=all']), '');
+
+  const activityTypes = new Set((state.activity || []).map((entry) => entry.type));
+  assert.equal(activityTypes.has('controller-validation-recorded'), true);
+  assert.equal(activityTypes.has('review-started'), true);
+  assert.equal(activityTypes.has('review-changes-required'), false);
+
+  const commands = commandLog(fixture);
+  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && args.includes('--background')), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'wait'), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 1);
+  assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'send'), 0);
+  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 0);
 });
