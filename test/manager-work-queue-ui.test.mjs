@@ -33,14 +33,16 @@ test('each queue item exposes existing issue actions without introducing new act
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /postRepositoryAction\(action, payload\)/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /branchAction/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /skippedIssueNumbers/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /button\.dataset\.issueAction = action/);
 });
 
-test('failed work is presented as recover-first rather than an unconditional fresh restart', () => {
+test('failed work is presented as recover-first and delegates confirmation to the shared manager layer', () => {
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /actionButton\('Recover', 'restart-issue'/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Recover existing work first \(recommended\)/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Start fresh and delete old branch/);
-  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /using its existing branch, workspace, and coder/);
-  assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /Restart issue #' \+ item\.issueNumber \+ ' with a fresh attempt/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Dangerous issue actions require the manager confirmation layer/);
+  assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /\bconfirm\s*\(/);
+  assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /\bprompt\s*\(/);
 });
 
 test('detail drawer shows exact review identity and recorded timeline', () => {
@@ -53,6 +55,17 @@ test('detail drawer shows exact review identity and recorded timeline', () => {
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /No blocked label — native dependency wait/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Open issue #/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Open PR/);
+});
+
+test('detail drawer is an accessible modal with focus containment and focus restoration', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /setAttribute\('role', 'dialog'\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /setAttribute\('aria-modal', 'true'\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /setAttribute\('aria-labelledby', 'work-detail-title'\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /drawerReturnFocus/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /returnFocus\?\.focus/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /event\.key === 'Escape'/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /event\.key !== 'Tab'/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /drawerFocusables/);
 });
 
 test('queue badge derives from server queue counts and highlights attention', () => {
