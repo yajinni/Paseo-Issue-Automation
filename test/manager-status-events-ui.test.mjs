@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import test from 'node:test';
 import {
+  captureManagerStatusRenderer,
   enhanceManagerWithStatusEvents,
   MANAGER_STATUS_EVENTS_SCRIPT,
 } from '../src/manager-status-events-ui.mjs';
@@ -38,7 +39,7 @@ function statusHarness() {
   return { window, calls, errors, events, microtasks, domListeners };
 }
 
-test('legacy renderStatus wrappers become independent subscribers and base rendering runs once', () => {
+test('captured renderStatus wrappers become independent subscribers and base rendering runs once', () => {
   const { window, calls, events } = statusHarness();
   const firstPrevious = window.renderStatus;
   window.renderStatus = (data) => {
@@ -46,14 +47,17 @@ test('legacy renderStatus wrappers become independent subscribers and base rende
     calls.push('first:' + data.id);
     return result;
   };
+  assert.equal(window.captureManagerStatusRenderer(), true);
+
   const secondPrevious = window.renderStatus;
   window.renderStatus = (data) => {
     const result = secondPrevious(data);
     calls.push('second:' + data.id);
     return result;
   };
-  const remove = window.addManagerStatusListener((data) => calls.push('listener:' + data.id));
+  assert.equal(window.captureManagerStatusRenderer(), true);
 
+  const remove = window.addManagerStatusListener((data) => calls.push('listener:' + data.id));
   const result = window.renderStatus({ id: 7 });
   assert.equal(result, 'base-result:7');
   assert.deepEqual(calls, ['base:7', 'first:7', 'second:7', 'listener:7']);
@@ -66,24 +70,38 @@ test('legacy renderStatus wrappers become independent subscribers and base rende
   assert.deepEqual(calls, ['base:8', 'first:8', 'second:8']);
 });
 
-test('one failing status subscriber does not prevent later manager UI subscribers', () => {
+test('one failing captured renderer does not prevent later manager UI renderers', () => {
   const { window, calls, errors } = statusHarness();
   const brokenPrevious = window.renderStatus;
   window.renderStatus = (data) => {
     brokenPrevious(data);
-    throw new Error('broken subscriber');
+    throw new Error('broken renderer');
   };
+  window.captureManagerStatusRenderer();
+
   const healthyPrevious = window.renderStatus;
   window.renderStatus = (data) => {
     const result = healthyPrevious(data);
     calls.push('healthy:' + data.id);
     return result;
   };
+  window.captureManagerStatusRenderer();
 
   assert.equal(window.renderStatus({ id: 9 }), 'base-result:9');
   assert.deepEqual(calls, ['base:9', 'healthy:9']);
   assert.equal(errors.length, 1);
-  assert.match(String(errors[0][0]), /subscriber failed/i);
+  assert.match(String(errors[0][0]), /renderer failed/i);
+});
+
+test('capture boundary restores the stable dispatcher and ignores duplicate captures', () => {
+  const { window } = statusHarness();
+  const dispatcher = window.renderStatus;
+  assert.equal(window.captureManagerStatusRenderer(), false);
+  assert.equal(window.renderStatus, dispatcher);
+  window.renderStatus = () => 'enhanced';
+  assert.equal(window.captureManagerStatusRenderer(), true);
+  assert.equal(window.renderStatus, dispatcher);
+  assert.equal(window.captureManagerStatusRenderer(), false);
 });
 
 test('status hub announces a stable manager UI ready lifecycle event', () => {
@@ -96,10 +114,15 @@ test('status hub announces a stable manager UI ready lifecycle event', () => {
   assert.ok(events.some((event) => event.type === 'paseo:manager-ui-ready'));
 });
 
-test('status event enhancer injects the compatibility hub without replacing manager markup', () => {
-  const html = enhanceManagerWithStatusEvents('<html><head></head><body><main>manager</main></body></html>');
+test('status event enhancer and capture boundary inject without replacing manager markup', () => {
+  const source = '<html><head></head><body><main>manager</main></body></html>';
+  const withHub = enhanceManagerWithStatusEvents(source);
+  const html = captureManagerStatusRenderer(withHub);
   assert.match(html, /<main>manager<\/main>/);
   assert.match(html, /data-manager-status-events/);
+  assert.match(html, /data-manager-status-capture/);
   assert.match(html, /addManagerStatusListener/);
-  assert.ok(html.indexOf('data-manager-status-events') < html.indexOf('</body>'));
+  assert.doesNotMatch(html, /Object\.defineProperty\(window, 'renderStatus'/);
+  assert.ok(html.indexOf('data-manager-status-events') < html.indexOf('data-manager-status-capture'));
+  assert.ok(html.indexOf('data-manager-status-capture') < html.indexOf('</body>'));
 });
