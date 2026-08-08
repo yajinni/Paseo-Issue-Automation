@@ -135,6 +135,8 @@ export function recoverFailedAttempt(root, number, {
     controllerPid: null,
     heartbeatAt: startedAt,
     updatedAt: startedAt,
+    restartPending: false,
+    restartRequestedAt: null,
     failedAttemptRecoveryCount: recoveryCount,
     failedAttemptRecoveryStartedAt: startedAt,
     activity: appendActivity(
