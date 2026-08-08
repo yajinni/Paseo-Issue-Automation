@@ -17,6 +17,7 @@ const CAPACITY_PANEL = `  <section class="card wide" style="margin-top:14px">
 const CAPACITY_SCRIPT = `<script>
 let managerCapacityDirty = false;
 let managerCapacityEditVersion = 0;
+let managerCapacitySaveRequest = 0;
 
 function renderManagerCapacity(body) {
   const config = body.config || {};
@@ -44,15 +45,19 @@ document.getElementById('global-max-active').addEventListener('input', () => {
 });
 document.getElementById('save-manager-config').addEventListener('click', async () => {
   const editVersionAtStart = managerCapacityEditVersion;
+  const saveRequest = ++managerCapacitySaveRequest;
   try {
     const body = await jsonRequest('/api/manager/config', {
       method: 'POST',
       headers: {'content-type':'application/json'},
       body: JSON.stringify({globalMaxActive: Number(document.getElementById('global-max-active').value)}),
     });
+    if (saveRequest !== managerCapacitySaveRequest) return;
     if (managerCapacityEditVersion === editVersionAtStart) managerCapacityDirty = false;
     renderManagerCapacity(body);
-  } catch (error) { showError(error); }
+  } catch (error) {
+    if (saveRequest === managerCapacitySaveRequest) showError(error);
+  }
 });
 document.getElementById('refresh-manager-status').addEventListener('click', () => loadManagerCapacity().catch(showError));
 loadManagerCapacity().catch(showError);
