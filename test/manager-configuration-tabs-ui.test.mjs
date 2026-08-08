@@ -42,7 +42,9 @@ test('automatic merge is presented as one full-width accessible setting with vis
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /function enhanceAutoMergeSetting\(\)/);
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /role', 'switch'/);
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /manager-auto-merge-state/);
-  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /Enabled.*Disabled.*Unavailable/s);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /Enabled/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /Disabled/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /Unavailable/);
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /exact-head full-review approval, passing validation and checks/);
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /syncAutoMergeSetting\(\)/);
 });
