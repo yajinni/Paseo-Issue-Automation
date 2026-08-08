@@ -22,6 +22,7 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   let configDraftValues = null;
   let configDraftVersion = 0;
   let restoringConfigDraft = false;
+  let configSaveInFlight = false;
 
   function configFields() {
     return [...(configForm?.querySelectorAll('input,select') || [])]
@@ -101,8 +102,16 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
   window.postRepositoryAction = async function managerLightweightActionPostRepositoryAction(action, payload) {
     const repositoryId = repositorySelect?.value || null;
     const configDraftVersionAtStart = configDraftVersion;
-    const body = await previousPostRepositoryAction(action, payload);
-    if (action === 'config') {
+    const configSave = action === 'config';
+    if (configSave && configSaveInFlight) throw new Error('Configuration save is already in progress.');
+    if (configSave) configSaveInFlight = true;
+    let body;
+    try {
+      body = await previousPostRepositoryAction(action, payload);
+    } finally {
+      if (configSave) configSaveInFlight = false;
+    }
+    if (configSave) {
       const currentRepositoryId = repositorySelect?.value || null;
       const hasNewerDraft = currentRepositoryId === repositoryId
         && configDraftRepositoryId === repositoryId
