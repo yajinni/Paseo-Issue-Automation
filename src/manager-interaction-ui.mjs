@@ -202,7 +202,15 @@ export const MANAGER_INTERACTION_SCRIPT = String.raw`
     if (!issueNumber) { toast('error', 'Action unavailable', 'A valid issue number could not be determined.'); return; }
     const payload = { issueNumber, branchAction: document.getElementById('work-detail-branch-action')?.value || document.getElementById('branch-action')?.value || 'keep' };
     if (action === 'restart-issue') {
-      const approved = await modal({ title: 'Restart issue #' + issueNumber + '?', message: 'This starts a fresh automation attempt. Use the branch choice shown with the action to decide whether the prior branch is retained.', confirmLabel: 'Restart issue', danger: true });
+      const fresh = payload.branchAction === 'delete';
+      const approved = await modal({
+        title: fresh ? 'Start issue #' + issueNumber + ' fresh?' : 'Recover issue #' + issueNumber + '?',
+        message: fresh
+          ? 'Start a fresh automation attempt and delete the recorded old branch? Existing work on that branch will not be preserved.'
+          : 'Recover this issue using its existing branch, workspace, and coder when they can be verified safely? A fresh attempt will be used only if recovery is unavailable or already exhausted.',
+        confirmLabel: fresh ? 'Start fresh' : 'Recover issue',
+        danger: fresh,
+      });
       if (!approved) return;
     } else {
       const reason = await modal({ title: 'Abandon issue #' + issueNumber + '?', message: 'Record why this active attempt should be abandoned. The reason is saved with the run history.', confirmLabel: 'Abandon attempt', danger: true, input: true, inputValue: 'Abandoned by user' });
@@ -237,7 +245,8 @@ export const MANAGER_INTERACTION_SCRIPT = String.raw`
     const button = event.target.closest?.('button');
     if (!button || button.disabled) return;
     const configured = CONFIRM_ACTIONS[button.id];
-    const issueAction = button.dataset.issueAction || ((button.textContent.trim() === 'Restart' || button.textContent.trim() === 'Abandon') && (button.closest('.work-queue-item') || button.closest('#work-detail-drawer')) ? (button.textContent.trim() === 'Restart' ? 'restart-issue' : 'abandon-issue') : null);
+    const label = button.textContent.trim();
+    const issueAction = button.dataset.issueAction || ((['Restart', 'Recover', 'Abandon'].includes(label)) && (button.closest('.work-queue-item') || button.closest('#work-detail-drawer')) ? (label === 'Abandon' ? 'abandon-issue' : 'restart-issue') : null);
     if (!configured && !issueAction && button.id !== 'remove-button') { pendingButton = button; return; }
     if (issueAction && !['restart-issue', 'abandon-issue'].includes(issueAction)) { pendingButton = button; return; }
     event.preventDefault(); event.stopImmediatePropagation();
