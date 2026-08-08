@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { locateMessageComposer } from '../src/browser-service.mjs';
+import {
+  browserContextLaunchOptions,
+  locateMessageComposer,
+} from '../src/browser-service.mjs';
 
 function missingLocator() {
   return {
@@ -17,4 +20,19 @@ test('missing ChatGPT composer produces a recoverable browser failure', async ()
     locator() { return locator; },
   };
   await assert.rejects(locateMessageComposer(page, { timeoutMs: 1 }), /composer could not be located/);
+});
+
+test('headed ChatGPT browser uses the real maximized Chromium viewport', () => {
+  const options = browserContextLaunchOptions({ headless: false });
+  assert.equal(options.headless, false);
+  assert.equal(options.viewport, null);
+  assert.ok(options.args.includes('--start-maximized'));
+  assert.ok(options.args.includes('--disable-blink-features=AutomationControlled'));
+});
+
+test('headless ChatGPT checks retain a deterministic viewport', () => {
+  const options = browserContextLaunchOptions({ headless: true });
+  assert.equal(options.headless, true);
+  assert.deepEqual(options.viewport, { width: 1440, height: 1000 });
+  assert.equal(options.args.includes('--start-maximized'), false);
 });
