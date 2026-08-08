@@ -12,28 +12,45 @@ const STATUS_CONSUMERS = [
   'data-manager-issue-processing-flow',
 ];
 
-test('manager status hub captures each status-consuming enhancer before the next enhancer loads', () => {
+test('manager status hub loads once before every direct status consumer with no capture boundaries', () => {
   const html = managerDashboardHtml();
-  let cursor = html.indexOf('data-manager-status-events');
-  assert.ok(cursor >= 0, 'manager status hub should be present');
+  const hub = html.indexOf('<script data-manager-status-events>');
+  assert.ok(hub >= 0, 'manager status hub should be present');
+  assert.equal(html.match(/data-manager-status-events/g)?.length, 1);
+  assert.doesNotMatch(html, /data-manager-status-capture/);
+  assert.doesNotMatch(html, /captureManagerStatusRenderer/);
 
+  let cursor = hub;
   for (const marker of STATUS_CONSUMERS) {
-    const consumer = html.indexOf(marker, cursor + 1);
-    assert.ok(consumer > cursor, marker + ' should load after the previous status boundary');
-    const capture = html.indexOf('data-manager-status-capture', consumer + 1);
-    assert.ok(capture > consumer, marker + ' should be captured after it loads');
-    cursor = capture;
+    const consumer = html.indexOf('<script ' + marker + '>', cursor + 1);
+    assert.ok(consumer > cursor, marker + ' should load after the status hub and previous enhancer');
+    cursor = consumer;
   }
-
-  assert.equal(html.match(/data-manager-status-capture/g)?.length, STATUS_CONSUMERS.length);
 });
 
-test('interaction polish remains final and does not need a status-renderer capture', () => {
+test('all status-consuming enhancers register through the listener API in the composed document', () => {
   const html = managerDashboardHtml();
-  const lastCapture = html.lastIndexOf('data-manager-status-capture');
+  assert.ok((html.match(/addManagerStatusListener/g) || []).length >= STATUS_CONSUMERS.length + 1);
+  assert.doesNotMatch(html, /managerNavigationRenderStatus/);
+  assert.doesNotMatch(html, /managerWorkQueueRenderStatus/);
+  assert.doesNotMatch(html, /managerIssuesPrReviewsRenderStatus/);
+  assert.doesNotMatch(html, /unifiedIssueProcessingRenderStatus/);
+  assert.doesNotMatch(html, /managerConfigIntegrationRenderStatus/);
+});
+
+test('composed Configuration exposes the six setup-aligned tabs without obsolete setup-link cards', () => {
+  const html = managerDashboardHtml();
+  for (const label of ['Connect Paseo', 'Coding harness', 'GitHub repository', 'Issues setup', 'Review setup', 'Final readiness']) {
+    assert.match(html, new RegExp(label));
+  }
+  assert.doesNotMatch(html, /manager-config-step-link/);
+  assert.doesNotMatch(html, /removeSetupLinkCards/);
+});
+
+test('interaction polish remains final after the direct status consumers', () => {
+  const html = managerDashboardHtml();
   const interaction = html.indexOf('<script data-manager-interaction>');
   const issueFlow = html.indexOf('<script data-manager-issue-processing-flow>');
-  assert.ok(interaction > lastCapture);
   assert.ok(interaction > issueFlow);
   assert.ok(interaction < html.indexOf('</body>'));
 });
