@@ -216,13 +216,8 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     }
   }
 
-  const previousRenderStatus = window.renderStatus;
-  if (typeof previousRenderStatus === 'function') {
-    window.renderStatus = function managerConfigurationTabsRenderStatus(data) {
-      const result = previousRenderStatus(data);
-      syncAutoMergeSetting();
-      return result;
-    };
+  if (typeof window.addManagerStatusListener === 'function') {
+    window.addManagerStatusListener(() => syncAutoMergeSetting());
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true });
   else build();

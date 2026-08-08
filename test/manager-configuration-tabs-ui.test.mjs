@@ -49,6 +49,12 @@ test('automatic merge is presented as one full-width accessible setting with vis
   assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /syncAutoMergeSetting\(\)/);
 });
 
+test('configuration tabs subscribe directly to the manager status hub', () => {
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /window\.addManagerStatusListener\(\(\) => syncAutoMergeSetting\(\)\)/);
+  assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_SCRIPT, /window\.renderStatus\s*=/);
+  assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_SCRIPT, /previousRenderStatus/);
+});
+
 test('configuration groups map to the setup tab that owns them', () => {
   for (const mapping of [
     "['Coder model', 'harness']",
