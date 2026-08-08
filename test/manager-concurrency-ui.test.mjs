@@ -28,18 +28,21 @@ test('newer capacity edits remain dirty when an older save response renders', ()
   assert.match(html, /if \(managerCapacityEditVersion === editVersionAtStart\) managerCapacityDirty = false;\s*renderManagerCapacity\(body\);/);
 });
 
-test('superseded capacity save responses cannot overwrite a newer save', () => {
+test('capacity saves are single-flight and invalidate older status polls', () => {
   const html = managerHtml();
-  assert.match(html, /let managerCapacitySaveRequest = 0/);
-  assert.match(html, /const saveRequest = \+\+managerCapacitySaveRequest/);
-  assert.match(html, /if \(saveRequest !== managerCapacitySaveRequest\) return/);
-  const staleGuard = html.indexOf('if (saveRequest !== managerCapacitySaveRequest) return;');
-  const dirtyGuard = html.indexOf('if (managerCapacityEditVersion === editVersionAtStart) managerCapacityDirty = false;', staleGuard);
-  const render = html.indexOf('renderManagerCapacity(body);', dirtyGuard);
-  assert.ok(staleGuard >= 0 && dirtyGuard > staleGuard && render > dirtyGuard, 'stale save responses should be rejected before dirty state or input rendering');
+  assert.match(html, /let managerCapacityStatusRequest = 0/);
+  assert.match(html, /let managerCapacitySaveInFlight = false/);
+  assert.match(html, /if \(managerCapacitySaveInFlight\) return;\s*const request = \+\+managerCapacityStatusRequest/);
+  assert.match(html, /if \(managerCapacitySaveInFlight \|\| request !== managerCapacityStatusRequest\) return/);
+  assert.match(html, /if \(managerCapacitySaveInFlight\) return;\s*const editVersionAtStart/);
+  assert.match(html, /managerCapacitySaveInFlight = true;\s*managerCapacityStatusRequest \+= 1/);
+  assert.match(html, /finally \{\s*managerCapacitySaveInFlight = false/);
 });
 
-test('errors from superseded capacity saves do not replace the current save state', () => {
+test('a capacity poll that started before save cannot repaint the saved value', () => {
   const html = managerHtml();
-  assert.match(html, /if \(saveRequest === managerCapacitySaveRequest\) showError\(error\)/);
+  const statusRequest = html.indexOf('const request = ++managerCapacityStatusRequest;');
+  const staleGuard = html.indexOf('if (managerCapacitySaveInFlight || request !== managerCapacityStatusRequest) return;', statusRequest);
+  const saveInvalidation = html.indexOf('managerCapacityStatusRequest += 1;', staleGuard);
+  assert.ok(statusRequest >= 0 && staleGuard > statusRequest && saveInvalidation > staleGuard, 'save should invalidate any status request that started earlier');
 });
