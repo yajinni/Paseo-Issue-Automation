@@ -9,7 +9,7 @@ import { LABELS, loadConfig, loadRun, saveRun } from './state.mjs';
 
 export const FAILED_ATTEMPT_RECOVERY_MAX = 1;
 
-const controllerWorkerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'controller-worker.mjs');
+const controllerWorkerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'recovery-controller-worker.mjs');
 const now = () => new Date().toISOString();
 
 function appendActivity(state, type, details, at = now()) {
@@ -172,14 +172,6 @@ export function recoverFailedAttempt(root, number, {
     throw error;
   }
 
-  const controllerStartedAt = now();
-  recoveredState = writeRun(root, issueNumber, {
-    ...recoveredState,
-    controllerPid: child.pid,
-    updatedAt: controllerStartedAt,
-    activity: appendActivity(recoveredState, 'controller-restarted-for-recovery', `Issue Execution Controller PID ${child.pid} resumed attempt ${state.attempt || 1}.`, controllerStartedAt),
-  });
-
   return {
     recovered: true,
     claimed: true,
@@ -189,6 +181,6 @@ export function recoverFailedAttempt(root, number, {
     workspaceId: state.workspaceId,
     coderAgentId: coderId,
     controllerPid: child.pid,
-    state: recoveredState,
+    state: { ...recoveredState, controllerPid: child.pid },
   };
 }
