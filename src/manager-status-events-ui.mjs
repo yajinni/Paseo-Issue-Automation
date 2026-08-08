@@ -27,6 +27,11 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
     return String(statusRepositoryId) === String(selectedId);
   }
 
+  function clearStaleActionResult() {
+    const result = document.getElementById?.('dispatch-result');
+    if (result) result.textContent = 'Waiting for the selected repository status.';
+  }
+
   function dispatchManagerStatus(data) {
     if (!statusMatchesSelectedRepository(data)) return undefined;
     if (dispatching) return activeResult;
@@ -62,6 +67,8 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
         const acceptedRepositoryId = lastAcceptedStatus?.repository?.id;
         if (acceptedRepositoryId != null && String(acceptedRepositoryId) === String(currentRepositoryId)) {
           dispatchManagerStatus(lastAcceptedStatus);
+        } else {
+          clearStaleActionResult();
         }
       }
       return body;
