@@ -63,6 +63,22 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
     if (button) target.append(button);
   }
 
+  function addAction(target, action, label, className = '') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'repository-action' + (className ? ' ' + className : '');
+    button.dataset.action = action;
+    button.textContent = label;
+    button.addEventListener('click', () => {
+      if (typeof window.postRepositoryAction !== 'function') return;
+      window.postRepositoryAction(action).catch((error) => {
+        if (typeof showError === 'function') showError(error);
+      });
+    });
+    target.append(button);
+    return button;
+  }
+
   function workflowLabel(workflow) {
     if (workflow === 'quick-manual') return 'Quick → Manual';
     if (workflow === 'quick-web-chatgpt') return 'Quick → Web ChatGPT';
@@ -85,6 +101,12 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
     if (!value) return 'Not yet';
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  }
+
+  function reviewTickSummary(result) {
+    if (!result) return 'Not yet';
+    if (result.started === true) return result.jobId ? 'Started review ' + result.jobId : 'Review started';
+    return result.reason || 'No review started';
   }
 
   function reviewCounts(data) {
@@ -156,6 +178,7 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
     const automation = data.automation || {};
     const worker = data.worker || {};
     const reviewWorker = data.reviewWorker || {};
+    const prReviews = data.prReviews || {};
     const review = data.configuration?.review || {};
     renderFacts('manager-claims-facts', [
       ['Claims', automation.claimsEnabled ? 'Enabled' : 'Paused'],
@@ -179,10 +202,13 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
       ['Approved PR auto-merge', review.autoMergeApproved ? 'Enabled' : 'Disabled'],
     ]);
     renderFacts('manager-review-worker-facts', [
+      ['Review queue', prReviews.available === false ? 'Unavailable' : prReviews.queuePaused ? 'Paused' : 'Active'],
+      ['Queued reviews', prReviews.waitingReviewCount ?? 0],
       ['Worker', reviewWorker.running ? 'Running' : 'Stopped'],
       ['Last review tick', time(reviewWorker.lastReviewTickAt)],
+      ['Scheduler result', reviewTickSummary(reviewWorker.lastReviewResult)],
       ['Review in progress', reviewWorker.reviewTicking ? 'Yes' : 'No'],
-      ['Last review error', reviewWorker.lastReviewError || 'None'],
+      ['Last review error', reviewWorker.lastReviewError || prReviews.error || 'None'],
       ['Last reconciliation', time(reviewWorker.lastReconciliationAt)],
       ['Reconciliation in progress', reviewWorker.reconciling ? 'Yes' : 'No'],
       ['Reconciliation error', reviewWorker.lastReconciliationError || 'None'],
@@ -218,8 +244,10 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
     const workflow = card('Review workflow', 'Selected review path and reviewer configuration for coding pull requests.', 'manager-review-workflow-facts');
     const stages = card('Review workload', 'Recorded pull requests currently moving through review and fix stages.');
     const stageList = document.createElement('div'); stageList.id = 'manager-review-stage-counts'; stageList.className = 'manager-review-stage-list'; stages.append(stageList);
-    const reviewWorker = card('PR-review worker', 'Repository-scoped review scheduler and reconciliation state.', 'manager-review-worker-facts');
+    const reviewWorker = card('PR-review worker', 'Repository-scoped review queue, scheduler, and reconciliation state.', 'manager-review-worker-facts');
     const reviewActions = actionArea(reviewWorker);
+    addAction(reviewActions, 'pr-review/resume', 'Resume PR reviews');
+    addAction(reviewActions, 'pr-review/pause', 'Pause PR reviews', 'danger');
     for (const action of ['review-worker/start', 'review-worker/stop', 'review-worker/restart']) moveAction(oldControls, reviewActions, action);
     const profile = card('ChatGPT Profile', 'Web ChatGPT review uses the setup-managed browser profile and repository-specific review chat.');
     profile.classList.add('wide');
