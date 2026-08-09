@@ -144,7 +144,7 @@ export function appendControllerLog(root, input = {}) {
     message: truncateString(input.message || input.action || 'Controller event'),
     details: sanitizeLogDetails(input.details || {}),
   };
-  rotateLogs(root, Date.parse(event.timestamp) || Date.now());
+  rotateLogs(root, Date.now());
   appendFileSync(currentLogFile(root), `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
   return event;
 }
@@ -167,6 +167,57 @@ function matchesFilters(event, options) {
   return true;
 }
 
+function lifecycleLevel(status) {
+  const value = String(status || '').toLowerCase();
+  if (['error', 'failed', 'failure'].includes(value)) return 'error';
+  if (['warning', 'warn', 'attention', 'stale'].includes(value)) return 'warn';
+  if (value === 'debug') return 'debug';
+  return 'info';
+}
+
+function lifecycleStatus(status) {
+  const value = String(status || '').toLowerCase();
+  if (['error', 'failed', 'failure'].includes(value)) return 'failed';
+  if (['cancelled', 'canceled'].includes(value)) return 'cancelled';
+  if (['waiting', 'queued', 'pending'].includes(value)) return 'waiting';
+  if (value === 'paused') return 'paused';
+  return 'success';
+}
+
+function lifecycleLogEvents(root, since) {
+  if (!since) return [];
+  const directory = statePaths(root).lifecycle;
+  if (!existsSync(directory)) return [];
+  const events = [];
+  for (const name of readdirSync(directory)) {
+    if (!/^issue-\d+\.jsonl$/.test(name)) continue;
+    const file = path.join(directory, name);
+    for (const lifecycle of parseLogFile(file)) {
+      const timestamp = lifecycle.at || lifecycle.timestamp || null;
+      if (!timestamp || timestamp < since) continue;
+      const issueNumber = Number(lifecycle.issueNumber) || null;
+      const level = lifecycleLevel(lifecycle.status);
+      events.push({
+        id: `issue-lifecycle:${lifecycle.id || `${issueNumber}:${timestamp}:${lifecycle.type || 'event'}`}`,
+        timestamp,
+        level,
+        category: 'issues',
+        action: truncateString(lifecycle.type || 'lifecycle-event'),
+        status: lifecycleStatus(lifecycle.status),
+        source: truncateString(lifecycle.source || 'controller'),
+        message: truncateString(`${issueNumber ? `Issue #${issueNumber}: ` : ''}${lifecycle.message || lifecycle.type || 'Issue lifecycle event'}`),
+        details: sanitizeLogDetails({
+          issueNumber,
+          attempt: lifecycle.attempt ?? null,
+          lifecycleStatus: lifecycle.status || null,
+          evidence: lifecycle.evidence || {},
+        }),
+      });
+    }
+  }
+  return events;
+}
+
 export function listControllerLogs(root, options = {}) {
   const limit = Math.max(1, Math.min(10_000, Number(options.limit) || 250));
   const normalized = {
@@ -176,22 +227,25 @@ export function listControllerLogs(root, options = {}) {
     before: options.before ? String(options.before) : null,
     since: options.since ? String(options.since) : null,
   };
-  const events = [];
+  const allEvents = [];
   const categories = new Set();
   for (const file of logFilesNewestFirst(root)) {
     for (const event of parseLogFile(file)) {
       if (normalized.since && String(event.timestamp) < normalized.since) continue;
       if (event.category) categories.add(event.category);
-      if (!matchesFilters(event, normalized)) continue;
-      events.push(event);
-      if (events.length >= limit) break;
+      if (matchesFilters(event, normalized)) allEvents.push(event);
     }
-    if (events.length >= limit) break;
   }
+  for (const event of lifecycleLogEvents(root, normalized.since)) {
+    if (event.category) categories.add(event.category);
+    if (matchesFilters(event, normalized)) allEvents.push(event);
+  }
+  allEvents.sort((left, right) => String(right.timestamp).localeCompare(String(left.timestamp)));
+  const events = allEvents.slice(0, limit);
   return {
     events,
     categories: [...categories].sort(),
-    hasMore: events.length === limit,
+    hasMore: allEvents.length > limit,
     nextBefore: events.at(-1)?.timestamp || null,
     retention: {
       days: RETENTION_DAYS,
