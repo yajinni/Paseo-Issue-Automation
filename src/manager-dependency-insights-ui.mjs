@@ -53,7 +53,9 @@ export const MANAGER_DEPENDENCY_INSIGHTS_SCRIPT = String.raw`
     const activeValue = Number(latestStatus?.automation?.activeRunCount);
     const active = Number.isFinite(activeValue) && activeValue >= 0 ? activeValue : Number(plan?.active || 0);
     const runnable = (plan?.items || []).filter((item) => item.statusId === 'next' || item.statusId === 'eligible').length;
-    const structurallyReady = Number(plan?.graph?.counts?.readyNow || 0);
+    const structurallyReady = plan?.graph?.available === false
+      ? 'Unknown'
+      : Number(plan?.graph?.counts?.readyNow || 0);
     const availableSlots = Math.max(0, maxActive - active);
     return {
       structurallyReady,
@@ -81,7 +83,7 @@ export const MANAGER_DEPENDENCY_INSIGHTS_SCRIPT = String.raw`
     const snapshot = capacity(plan);
     const bar = document.createElement('div'); bar.className = 'manager-dependency-insights'; bar.setAttribute('aria-label', 'Parallel work summary');
     bar.append(
-      metric('Structurally ready', snapshot.structurallyReady, 'No unresolved open blockers'),
+      metric('Structurally ready', snapshot.structurallyReady, snapshot.structurallyReady === 'Unknown' ? 'Native relationship data is incomplete' : 'No unresolved open blockers'),
       metric('Runnable now', snapshot.runnable, 'Also passes issue-selection rules'),
       metric('Active', snapshot.active + ' / ' + snapshot.maxActive, 'Current issue-processing capacity'),
       metric('Open slots', snapshot.availableSlots, 'Configured capacity still free'),
@@ -110,7 +112,9 @@ export const MANAGER_DEPENDENCY_INSIGHTS_SCRIPT = String.raw`
     const dependents = numberList(graph.unlocks?.[number]);
     const upstream = walk(number, graph.dependencies || {});
     const downstream = walk(number, graph.unlocks || {});
-    const immediateUnlocks = dependents.filter((dependent) => numberList(graph.dependencies?.[dependent]).length === 1);
+    const immediateUnlocks = dependents.filter((dependent) =>
+      numberList(graph.dependencies?.[dependent]).length === 1
+      && numberList(graph.externalDependencies?.[dependent]).length === 0);
     const title = document.createElement('div'); title.className = 'manager-selected-issue-title'; title.textContent = '#' + number + ' ' + item.title;
     const status = document.createElement('div'); status.className = 'manager-selected-issue-status'; status.textContent = item.status || 'Open issue';
     const facts = document.createElement('div'); facts.className = 'manager-selected-issue-facts';
@@ -136,7 +140,7 @@ export const MANAGER_DEPENDENCY_INSIGHTS_SCRIPT = String.raw`
       const line = document.createElement('div'); line.className = 'manager-selected-issue-list'; line.innerHTML = '<b>Direct dependents:</b> ' + dependents.map((value) => '#' + value).join(', '); panel.append(line);
     }
     const key = document.createElement('div'); key.className = 'manager-dependency-selection-key';
-    key.textContent = 'Blue = upstream blocker · purple = downstream dependent. “Would become ready” counts direct dependents for which this issue is the only remaining open blocker.';
+    key.textContent = 'Blue = upstream blocker · purple = downstream dependent. “Would become ready” counts direct dependents for which this issue is the only remaining known open blocker and no external open blocker is recorded.';
     panel.append(key); levels.append(panel);
   }
 
