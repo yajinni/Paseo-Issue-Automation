@@ -141,7 +141,6 @@ function reconcileMergedInStore(store, managed, pr, at, precomputed = {}) {
     mergedAt: pr.mergedAt || at,
     reviewVerified,
     verifyIssueClosure: store.config.githubActions.verifyIssueClosure,
-    allowClosureFallback: store.config.githubActions.allowPaseoIssueClosureFallback,
     explicitAssociation: prHasExplicitIssueAssociation(pr, managed.issueNumber),
   });
   return { state: 'merged', reviewVerified, effects };
@@ -314,7 +313,11 @@ function completeMergedLifecycle(root, effect) {
   return completed;
 }
 
-function applyMergedIssueEffect(root, effect) {
+export function applyMergedIssueEffect(root, effect, {
+  issueReader = issueSnapshot,
+  issueCloser = closeAssociatedIssue,
+  lifecycleCompleter = completeMergedLifecycle,
+} = {}) {
   if (!effect.reviewVerified) {
     const message = `PR #${effect.pullRequestNumber} merged, but exact approved review evidence for ${effect.headSha} was not recorded.`;
     updateMergedIssueStatus(root, effect, {
@@ -325,23 +328,14 @@ function applyMergedIssueEffect(root, effect) {
     return { issueClosed: false, needsOperator: true, reviewEvidenceMissing: true };
   }
   if (!effect.verifyIssueClosure) {
-    completeMergedLifecycle(root, effect);
+    lifecycleCompleter(root, effect);
     return { issueClosed: true, verificationSkipped: true };
   }
-  const issue = issueSnapshot(root, effect.issueNumber);
+  const issue = issueReader(root, effect.issueNumber);
   if (!issue) throw new Error(`Could not verify associated issue #${effect.issueNumber} after merge.`);
   if (String(issue.state).toUpperCase() === 'CLOSED') {
-    completeMergedLifecycle(root, effect);
+    lifecycleCompleter(root, effect);
     return { issueClosed: true };
-  }
-  if (!effect.allowClosureFallback) {
-    const message = `PR merged, but associated issue #${effect.issueNumber} remains open.`;
-    updateMergedIssueStatus(root, effect, {
-      issueClosurePending: true,
-      lifecycleCompletionPending: true,
-      lastError: message,
-    });
-    return { issueClosed: false, needsOperator: true };
   }
   if (!effect.explicitAssociation) {
     const message = `PR merged, but issue association for #${effect.issueNumber} is ambiguous.`;
@@ -352,8 +346,20 @@ function applyMergedIssueEffect(root, effect) {
     });
     return { issueClosed: false, needsOperator: true };
   }
-  closeAssociatedIssue(root, effect.issueNumber, effect.pullRequestNumber);
-  completeMergedLifecycle(root, effect);
+
+  issueCloser(root, effect.issueNumber, effect.pullRequestNumber);
+  const closedIssue = issueReader(root, effect.issueNumber);
+  if (!closedIssue) throw new Error(`Could not verify associated issue #${effect.issueNumber} after Paseo requested closure.`);
+  if (String(closedIssue.state).toUpperCase() !== 'CLOSED') {
+    const message = `Paseo requested closure for associated issue #${effect.issueNumber}, but GitHub still reports it open.`;
+    updateMergedIssueStatus(root, effect, {
+      issueClosurePending: true,
+      lifecycleCompletionPending: true,
+      lastError: message,
+    });
+    return { issueClosed: false, retryPending: true };
+  }
+  lifecycleCompleter(root, effect);
   return { issueClosed: true, closedByPaseo: true };
 }
 
