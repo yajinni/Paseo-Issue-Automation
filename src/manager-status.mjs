@@ -2,6 +2,7 @@ import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
 import { inspectExternalMigrationAdoption } from './external-adoption.mjs';
 import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
+import { managerOverviewStatus } from './manager-overview-status.mjs';
 import { managerPrHealthSummary } from './manager-pr-health.mjs';
 import { managerReviewEvidenceSummary } from './manager-review-evidence.mjs';
 import { managerPrHealthSnapshot } from './pr-review-github.mjs';
@@ -200,5 +201,10 @@ export function managerRepositoryStatus(repository, {
     },
     stateDirectory: statePaths(inspected.path).root,
   };
-  return { ...status, ...managedRepositoryOperationalSummary(status) };
+  const operational = managedRepositoryOperationalSummary(status);
+  const completeStatus = { ...status, ...operational };
+  return {
+    ...completeStatus,
+    overview: managerOverviewStatus(completeStatus, { prReviewStore }),
+  };
 }
