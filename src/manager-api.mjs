@@ -24,15 +24,6 @@ import { loadConfig } from './state.mjs';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-function workerAction(workerManager, context, pathname) {
-  const workerRoute = ['/api/worker/start', '/api/worker/stop', '/api/worker/restart'].includes(pathname);
-  if (!workerRoute) return null;
-  if (!workerManager) throw new Error('The standalone manager coding-worker pool is unavailable.');
-  if (pathname === '/api/worker/start') return workerManager.start(context.repository);
-  if (pathname === '/api/worker/stop') return workerManager.stop(context.repository.id);
-  return workerManager.restart(context.repository);
-}
-
 function reviewWorkerAction(reviewWorkerManager, context, pathname) {
   const workerRoute = [
     '/api/review-worker/start',
@@ -221,10 +212,6 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     });
     if (issueProcessingResult !== null) return refreshedResult(context, options, issueProcessingResult);
 
-    const codingWorkerResult = workerAction(options.workerManager, context, context.pathname);
-    if (codingWorkerResult !== null) {
-      return refreshedResult(context, options, codingWorkerResult);
-    }
     const reviewResult = reviewWorkerAction(options.reviewWorkerManager, context, context.pathname);
     if (reviewResult !== null) {
       if (context.pathname === '/api/review-worker/start' || context.pathname === '/api/review-worker/restart') {
