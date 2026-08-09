@@ -12,10 +12,30 @@ test('Work Queue becomes the Issue Lifecycle surface with separate status and st
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /work-queue-filter/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /work-queue-stage-filter/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /All recorded work/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /PR problems/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /All stages/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Available/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Claimed/);
   assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /Ready \/ Backlog/);
+});
+
+test('PR problems filter uses current Work Queue PR health instead of lifecycle attention alone', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /prHealthFor\(item\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /hasPrProblems\(item\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /filter === 'pr-problems'/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /health\.status/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /problem\.title/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /problem\.message/);
+});
+
+test('collapsed PR column shows the current PR plus a compact health badge', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /compactPrHealth/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /lifecycle-pr-health/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /health\.label/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /\.lifecycle-pr-health/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /\.lifecycle-pr-health\.success/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /\.lifecycle-pr-health\.warning/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /\.lifecycle-pr-health\.danger/);
 });
 
 test('expanded issue shows the selected nine-stage lifecycle and fixing retry loop', () => {
@@ -27,6 +47,28 @@ test('expanded issue shows the selected nine-stage lifecycle and fixing retry lo
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /If changes requested/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Fixing/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /returns to review/);
+});
+
+test('expanded issue adds PR Health before coding or review details and keeps timeline on the right', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /function prHealthCard\(item\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /PR Health/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Required checks passed/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Issue association present/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /for \(const problem of health\.problems/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /main\.append\(health\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /main\.append\(inlineDetails\(item\)\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /panel\.append\(main, activityTimeline\(item\)\)/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /\.pr-health-card/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /\.pr-health-list/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /\.pr-health-row/);
+});
+
+test('PR Health uses the current dashboard muted success, warning, and danger shading', () => {
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /background:#101720/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /background:#12251a/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /background:#272214/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /background:#2b171d/);
+  assert.doesNotMatch(MANAGER_WORK_QUEUE_STYLE, /neon/i);
 });
 
 test('coding and review details share the same lower-left detail card', () => {
@@ -72,6 +114,12 @@ test('Details drawer is a deep diagnostic view rather than a second pretty timel
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Repository controller context/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Execution identity/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /PR and review evidence/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Current PR health diagnosis/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /GitHub snapshot available/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Merge state/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Issue association/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Failed check evidence/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Current PR problems/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Recorded lifecycle evidence/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Raw lifecycle label/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Raw phase/);
@@ -141,6 +189,7 @@ test('Issue Lifecycle UI is responsive down to a full-width troubleshooting draw
   assert.match(MANAGER_WORK_QUEUE_STYLE, /@media\(max-width:560px\)/);
   assert.match(MANAGER_WORK_QUEUE_STYLE, /work-detail-drawer\{width:100%/);
   assert.match(MANAGER_WORK_QUEUE_STYLE, /lifecycle-expanded\{grid-template-columns:1fr\}/);
+  assert.match(MANAGER_WORK_QUEUE_STYLE, /pr-health-identity/);
 });
 
 test('Work Queue enhancer loads after navigation without affecting setup HTML by itself', () => {
