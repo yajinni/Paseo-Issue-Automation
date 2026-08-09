@@ -20,7 +20,7 @@ test('GitHub page exposes account, repository, live base branch, search, and rec
   assert.match(html, /Repository/);
   assert.match(html, /Base branch/);
   assert.match(GITHUB_PAGE_SCRIPT, /for \(const branch of state\.branches \|\| \[\]\)/);
-  assert.match(GITHUB_PAGE_SCRIPT, /select id=\\"github-base-branch\\"/);
+  assert.match(GITHUB_PAGE_SCRIPT, /select id="github-base-branch"/);
   assert.match(html, /recommended/);
   assert.match(html, /Refresh repositories/);
 });
