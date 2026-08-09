@@ -1,11 +1,10 @@
 import { managerHtml as concurrencyManagerHtml } from './manager-concurrency-ui.mjs';
 
-const REVIEW_BUTTONS = `        <button class="repository-action secondary" data-action="worker/restart">Restart worker</button>
-        <button class="repository-action" data-action="review-worker/start">Start PR-review worker</button>
+const REVIEW_BUTTONS = `        <button class="repository-action" data-action="review-worker/start">Start PR-review worker</button>
         <button class="repository-action danger" data-action="review-worker/stop">Stop PR-review worker</button>
         <button class="repository-action secondary" data-action="review-worker/restart">Restart PR-review worker</button>`;
 
-const REVIEW_FACTS = `    ['Capacity check error', data.worker && data.worker.capacityError],
+const REVIEW_FACTS = `    ['Coding worker', data.worker && data.worker.state === 'active' ? 'Active' : 'Idle'],
     ['PR-review worker', data.reviewWorker && data.reviewWorker.running ? 'Running' : 'Stopped'],
     ['Last review tick', data.reviewWorker && data.reviewWorker.lastReviewTickAt],
     ['Last review result', data.reviewWorker && data.reviewWorker.lastReviewResult ? JSON.stringify(data.reviewWorker.lastReviewResult) : null],
@@ -143,11 +142,11 @@ const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
 export function managerHtml() {
   return concurrencyManagerHtml()
     .replace(
-      `        <button class="repository-action secondary" data-action="worker/restart">Restart worker</button>`,
-      REVIEW_BUTTONS,
+      `        <button class="repository-action secondary" data-action="reconcile">Reconcile dependencies</button>`,
+      `        <button class="repository-action secondary" data-action="reconcile">Reconcile dependencies</button>\n${REVIEW_BUTTONS}`,
     )
     .replace(
-      `    ['Capacity check error', data.worker && data.worker.capacityError],`,
+      `    ['Coding worker', data.worker && data.worker.state === 'active' ? 'Active' : 'Idle'],`,
       REVIEW_FACTS,
     )
     .replace(
