@@ -1,4 +1,16 @@
-export const MANAGER_WORK_QUEUE_SCRIPT_PART_3 = String.raw`    const skipped = (statusData?.automation?.skippedIssueNumbers || []).includes(Number(item.issueNumber));
+export const MANAGER_WORK_QUEUE_SCRIPT_PART_3 = String.raw`    const health = prHealthFor(item);
+    const managed = item.reviewAutomation || null;
+    const currentHead = String(health?.currentPr?.headSha || item.diagnostics?.currentHeadSha || '').toLowerCase();
+    const reviewJob = managed?.latestReviewJob || null;
+    const exactReviewJob = Boolean(reviewJob?.headSha && currentHead && String(reviewJob.headSha).toLowerCase() === currentHead);
+    if (managed?.managedId && item.pullRequest?.number) {
+      const prTitle = document.createElement('div'); prTitle.className = 'lifecycle-actions-group-title'; prTitle.textContent = 'PR recovery'; menu.append(prTitle);
+      menu.append(actionEntry('Reconcile now', 'Re-read GitHub and Paseo state for the current PR and repair stale lifecycle state where supported.', 'reconcile-pr', item));
+      if (exactReviewJob && ['failed', 'cancelled'].includes(String(reviewJob.state || ''))) {
+        menu.append(actionEntry('Retry PR review', 'Queue the exact current PR head for Web ChatGPT review again.', 'retry-pr-review', item));
+      }
+    }
+    const skipped = (statusData?.automation?.skippedIssueNumbers || []).includes(Number(item.issueNumber));
     if (item.stage === 'ready' && !skipped) menu.append(actionEntry('Start issue', 'Begin coding this available issue now.', 'start-issue', item));
     if (isAttention(item)) {
       const recovery = document.createElement('div'); recovery.className = 'lifecycle-recovery-mode';
