@@ -29,7 +29,7 @@ export function markIssueMerged(root, {
   if (state.approvedCommit && String(state.approvedCommit).toLowerCase() !== commit) {
     throw new Error(`Issue #${number} approval is bound to ${state.approvedCommit}, not merged head ${commit}.`);
   }
-  if (state.phase === 'merged'
+  if (['merged', 'completed'].includes(state.phase)
       && Number(state.prNumber) === prNumber
       && String(state.mergedHeadSha || '').toLowerCase() === commit
       && state.issueClosureVerifiedAt) {
@@ -43,8 +43,8 @@ export function markIssueMerged(root, {
     && String(entry.headSha || '').toLowerCase() === commit);
   return saveRun(root, number, {
     ...state,
-    status: 'merged',
-    phase: 'merged',
+    status: 'completed',
+    phase: 'completed',
     reason: null,
     prNumber,
     prUrl: pullRequestUrl || state.prUrl || null,
@@ -62,7 +62,7 @@ export function markIssueMerged(root, {
         at: verifiedAt,
         pullRequestNumber: prNumber,
         headSha: commit,
-        details: `PR #${prNumber} merged at ${effectiveMergedAt}; associated issue closure was verified.`,
+        details: `PR #${prNumber} merged at ${effectiveMergedAt}; associated issue closure was verified and the issue run completed.`,
       },
     ],
   });
