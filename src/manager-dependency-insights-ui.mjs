@@ -49,22 +49,16 @@ export const MANAGER_DEPENDENCY_INSIGHTS_SCRIPT = String.raw`
 
   function capacity(plan) {
     const maxActiveValue = Number(latestStatus?.automation?.maxActive);
-    const maxActive = Number.isFinite(maxActiveValue) && maxActiveValue >= 0 ? maxActiveValue : 0;
+    const maxActive = Number.isFinite(maxActiveValue) && maxActiveValue >= 0 ? maxActiveValue : null;
     const activeValue = Number(latestStatus?.automation?.activeRunCount);
     const active = Number.isFinite(activeValue) && activeValue >= 0 ? activeValue : Number(plan?.active || 0);
     const runnable = (plan?.items || []).filter((item) => item.statusId === 'next' || item.statusId === 'eligible').length;
     const structurallyReady = plan?.graph?.available === false
       ? 'Unknown'
       : Number(plan?.graph?.counts?.readyNow || 0);
-    const availableSlots = Math.max(0, maxActive - active);
-    return {
-      structurallyReady,
-      runnable,
-      active,
-      maxActive,
-      availableSlots,
-      canStartNow: Math.min(runnable, availableSlots),
-    };
+    const availableSlots = maxActive === null ? 'Unknown' : Math.max(0, maxActive - active);
+    const canStartNow = maxActive === null ? 'Unknown' : Math.min(runnable, availableSlots);
+    return { structurallyReady, runnable, active, maxActive, availableSlots, canStartNow };
   }
 
   function metric(label, value, detail) {
@@ -85,9 +79,9 @@ export const MANAGER_DEPENDENCY_INSIGHTS_SCRIPT = String.raw`
     bar.append(
       metric('Structurally ready', snapshot.structurallyReady, snapshot.structurallyReady === 'Unknown' ? 'Native relationship data is incomplete' : 'No unresolved open blockers'),
       metric('Runnable now', snapshot.runnable, 'Also passes issue-selection rules'),
-      metric('Active', snapshot.active + ' / ' + snapshot.maxActive, 'Current issue-processing capacity'),
-      metric('Open slots', snapshot.availableSlots, 'Configured capacity still free'),
-      metric('Can start now', snapshot.canStartNow, 'min(runnable now, open slots)'),
+      metric('Active', snapshot.active + ' / ' + (snapshot.maxActive === null ? '?' : snapshot.maxActive), 'Current issue-processing capacity'),
+      metric('Open slots', snapshot.availableSlots, snapshot.availableSlots === 'Unknown' ? 'Capacity status has not loaded yet' : 'Configured capacity still free'),
+      metric('Can start now', snapshot.canStartNow, snapshot.canStartNow === 'Unknown' ? 'Waiting for capacity status' : 'min(runnable now, open slots)'),
     );
     toolbar.after(bar);
   }
@@ -198,7 +192,10 @@ export const MANAGER_DEPENDENCY_INSIGHTS_SCRIPT = String.raw`
 
   function statusListener(status) {
     latestStatus = status || latestStatus;
-    if (latestPlan) renderCapacity(latestPlan);
+    if (latestPlan) {
+      renderCapacity(latestPlan);
+      applySelection(latestPlan);
+    }
   }
   if (typeof window.addManagerStatusListener === 'function') window.addManagerStatusListener(statusListener);
 
