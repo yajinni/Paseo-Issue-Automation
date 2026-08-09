@@ -85,7 +85,7 @@ export function managerRepositoryStatus(repository, {
   }));
   const workQueue = managerWorkQueue(runs, config);
   const activeRuns = runs.filter((item) =>
-    !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'closed'].includes(String(item?.status || '')),
+    !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'merged', 'closed'].includes(String(item?.status || '')),
   );
   const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
