@@ -49,12 +49,16 @@ export function issueSnapshot(root, issueNumber) {
 }
 
 export function closeAssociatedIssue(root, issueNumber, prNumber) {
-  const comment = `Completed by merged PR #${prNumber}. Paseo verified the explicitly associated pull request was merged.`;
-  const commented = run('gh', ['issue', 'comment', String(issueNumber), '--body', comment], { cwd: root, allowFailure: true });
-  if (!commented.ok) throw new Error(commented.stderr || commented.stdout || 'Could not add the completion issue comment.');
   const closed = run('gh', ['issue', 'close', String(issueNumber), '--reason', 'completed'], { cwd: root, allowFailure: true });
   if (!closed.ok) throw new Error(closed.stderr || closed.stdout || 'Could not close the associated issue.');
-  return { closed: true };
+
+  const comment = `Completed by merged PR #${prNumber}. Paseo verified the explicitly associated pull request was merged.`;
+  const commented = run('gh', ['issue', 'comment', String(issueNumber), '--body', comment], { cwd: root, allowFailure: true });
+  return {
+    closed: true,
+    commentPosted: commented.ok,
+    commentError: commented.ok ? null : (commented.stderr || commented.stdout || 'Could not add the completion issue comment.'),
+  };
 }
 
 export function prHasExplicitIssueAssociation(pr, issueNumber) {
