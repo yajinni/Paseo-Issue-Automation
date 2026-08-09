@@ -212,7 +212,9 @@ function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) 
   if (resolvedResult.result === 'changes_requested') {
     if (!labelNames(pr).has(PR_REVIEW_LABELS.changesRequested)) return null;
     const fixJob = createFixJobInStore(store, managed, reviewJob, resolvedResult.humanMarkdown, {
-      sourceCommentId: resolvedResult.sourceId, now: Date.parse(at),
+      sourceCommentId: resolvedResult.sourceId,
+      reviewResult: 'changes_requested',
+      now: Date.parse(at),
     });
     return {
       result: 'changes_requested',
@@ -231,7 +233,9 @@ function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) 
     }
     if (gate?.repair) {
       const fixJob = createFixJobInStore(store, managed, reviewJob, gate.reason, {
-        sourceCommentId: resolvedResult.sourceId, now: Date.parse(at),
+        sourceCommentId: resolvedResult.sourceId,
+        reviewResult: 'approved',
+        now: Date.parse(at),
       });
       return {
         result: 'approved-gate-failed',
