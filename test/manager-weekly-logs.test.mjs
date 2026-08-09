@@ -28,7 +28,7 @@ test('standalone manager exposes a repository Logs tab for the rolling seven-day
   assert.match(html, /data-manager-weekly-logs/);
   assert.match(MANAGER_WEEKLY_LOGS_SCRIPT, /Last 7 days/);
   assert.match(MANAGER_WEEKLY_LOGS_SCRIPT, /Rolling 7-day window/);
-  assert.match(MANAGER_WEEKLY_LOGS_SCRIPT, /data-manager-view-target.*logs/);
+  assert.match(MANAGER_WEEKLY_LOGS_SCRIPT, /dataset\.managerViewTarget = 'logs'/);
   assert.match(MANAGER_WEEKLY_LOGS_SCRIPT, /\/api\/repositories\/.*\/logs/);
   assert.match(MANAGER_WEEKLY_LOGS_SCRIPT, /weekly-logs-query/);
   assert.match(MANAGER_WEEKLY_LOGS_SCRIPT, /weekly-logs-level/);
