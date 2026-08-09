@@ -91,6 +91,16 @@ function exactMergedApproval(precomputed, mergedHead) {
     && result.reviewRequestId === job.reviewRequestId;
 }
 
+function hasExactApprovedReview(store, managed, mergedHead) {
+  if (!mergedHead || String(managed.lastCompletedReviewSha || '').toLowerCase() !== mergedHead
+      || !managed.lastProcessedReviewRequestId) return false;
+  return store.reviewJobs.some((job) => job.managedPullRequestId === managed.id
+    && job.state === 'completed'
+    && job.result === 'approved'
+    && job.reviewRequestId === managed.lastProcessedReviewRequestId
+    && String(job.headSha || '').toLowerCase() === mergedHead);
+}
+
 function reconcileMergedInStore(store, managed, pr, at, precomputed = {}) {
   const mergedHead = String(pr.headRefOid || managed.currentHeadSha || '').toLowerCase();
   const firstObservation = managed.reviewState !== 'merged';
@@ -112,7 +122,7 @@ function reconcileMergedInStore(store, managed, pr, at, precomputed = {}) {
     });
     terminateManagedJobs(store, managed, 'The pull request reached the terminal merged state.', at);
   }
-  const reviewVerified = Boolean(mergedHead && managed.lastCompletedReviewSha === mergedHead);
+  const reviewVerified = hasExactApprovedReview(store, managed, mergedHead);
   managed.issueClosurePending = store.config.githubActions.verifyIssueClosure;
   managed.lifecycleCompletionPending = true;
   managed.reviewEvidenceMissing = !reviewVerified;
