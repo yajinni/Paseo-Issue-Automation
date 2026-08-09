@@ -94,6 +94,35 @@ export function evaluateApprovedReviewGate(root, managed, reviewJob, pr, {
   return { ok: true, commit: reviewedHead, checks };
 }
 
+export function recordApprovedBrowserReview(root, managed, reviewJob, {
+  findings = 'Browser Reviewer approved this exact validated commit.',
+} = {}) {
+  const state = loadRun(root, managed.issueNumber);
+  if (!state) throw new Error(`No automation state exists for issue #${managed.issueNumber}.`);
+  const existing = (state.events || []).some((event) => event.event === 'review'
+    && event.result === 'APPROVED'
+    && event.commit === reviewJob.headSha
+    && event.source === 'browser-review'
+    && event.reviewRequestId === reviewJob.reviewRequestId);
+  if (existing) return state;
+  const at = new Date().toISOString();
+  return saveRun(root, managed.issueNumber, {
+    ...state,
+    approvedCommit: reviewJob.headSha,
+    events: [...(state.events || []), {
+      event: 'review',
+      result: 'APPROVED',
+      commit: reviewJob.headSha,
+      details: String(findings || ''),
+      source: 'browser-review',
+      reviewRequestId: reviewJob.reviewRequestId,
+      at,
+    }],
+    updatedAt: at,
+    heartbeatAt: at,
+  });
+}
+
 export function finalizeApprovedBrowserReview(root, managed, reviewJob, {
   findings = 'Browser Reviewer approved this exact validated commit.',
   pr = null,
@@ -106,29 +135,6 @@ export function finalizeApprovedBrowserReview(root, managed, reviewJob, {
     error.gate = evaluated;
     throw error;
   }
-  const state = loadRun(root, managed.issueNumber);
-  if (!state) throw new Error(`No automation state exists for issue #${managed.issueNumber}.`);
-  if (state.status === 'human-review' && state.approvedCommit === reviewJob.headSha) return state;
-  const existing = (state.events || []).some((event) => event.event === 'review'
-    && event.result === 'APPROVED'
-    && event.commit === reviewJob.headSha
-    && event.source === 'browser-review');
-  if (!existing) {
-    const at = new Date().toISOString();
-    saveRun(root, managed.issueNumber, {
-      ...state,
-      events: [...(state.events || []), {
-        event: 'review',
-        result: 'APPROVED',
-        commit: reviewJob.headSha,
-        details: String(findings || ''),
-        source: 'browser-review',
-        reviewRequestId: reviewJob.reviewRequestId,
-        at,
-      }],
-      updatedAt: at,
-      heartbeatAt: at,
-    });
-  }
+  recordApprovedBrowserReview(root, managed, reviewJob, { findings });
   return markHumanReview(root, managed.issueNumber, managed.pullRequestNumber);
 }
