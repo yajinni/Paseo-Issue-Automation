@@ -75,15 +75,21 @@ export function evaluateApprovedReviewGate(root, managed, reviewJob, pr, {
     };
   }
 
-  const fetch = runner('git', ['fetch', '--prune', 'origin', config.baseBranch, managed.branchName], {
+  const baseRef = `refs/remotes/origin/${config.baseBranch}`;
+  const branchRef = `refs/remotes/origin/${managed.branchName}`;
+  const fetch = runner('git', [
+    'fetch',
+    '--prune',
+    'origin',
+    `+refs/heads/${config.baseBranch}:${baseRef}`,
+    `+refs/heads/${managed.branchName}:${branchRef}`,
+  ], {
     cwd: root,
     allowFailure: true,
   });
   if (!fetch.ok) {
     return { ok: false, waiting: true, reason: fetch.stderr || fetch.stdout || `Could not refresh ${config.baseBranch} and ${managed.branchName}.` };
   }
-  const baseRef = `refs/remotes/origin/${config.baseBranch}`;
-  const branchRef = `refs/remotes/origin/${managed.branchName}`;
   const fresh = runner('git', ['merge-base', '--is-ancestor', baseRef, branchRef], {
     cwd: root,
     allowFailure: true,
