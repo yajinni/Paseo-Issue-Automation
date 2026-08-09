@@ -80,6 +80,12 @@ function firstString(...values) {
   return null;
 }
 
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function pullRequestFromRun(run = {}) {
   const object = run.pullRequest && typeof run.pullRequest === 'object' ? run.pullRequest : {};
   const pr = run.pr && typeof run.pr === 'object' ? run.pr : {};
@@ -299,7 +305,7 @@ function prAutomationFromStore(run = {}, store = null) {
     lastSubmittedReviewSha: firstString(managed.lastSubmittedReviewSha),
     lastCompletedReviewSha: firstString(managed.lastCompletedReviewSha),
     reviewRound: firstNumber(managed.reviewRound),
-    queuePosition: Number.isFinite(Number(managed.queuePosition)) ? Number(managed.queuePosition) : null,
+    queuePosition: finiteNumber(managed.queuePosition),
     activeReviewRequestId: firstString(managed.activeReviewRequestId),
     lastReviewCommentId: managed.lastReviewCommentId ?? null,
     lastProcessedReviewRequestId: firstString(managed.lastProcessedReviewRequestId),
@@ -315,8 +321,8 @@ function prAutomationFromStore(run = {}, store = null) {
       headSha: firstString(reviewJob.headSha),
       reviewRound: firstNumber(reviewJob.reviewRound),
       reviewRequestId: firstString(reviewJob.reviewRequestId),
-      queuePosition: Number.isFinite(Number(reviewJob.queuePosition)) ? Number(reviewJob.queuePosition) : null,
-      attempts: Number.isFinite(Number(reviewJob.attempts)) ? Number(reviewJob.attempts) : null,
+      queuePosition: finiteNumber(reviewJob.queuePosition),
+      attempts: finiteNumber(reviewJob.attempts),
       conversationUrl: firstString(reviewJob.conversationUrlUsed, reviewJob.conversationUrlOverride),
       submittedAt: firstString(reviewJob.submittedAt),
       completedAt: firstString(reviewJob.completedAt),
@@ -329,7 +335,7 @@ function prAutomationFromStore(run = {}, store = null) {
       reviewedHeadSha: firstString(fixJob.reviewedHeadSha),
       newHeadSha: firstString(fixJob.newHeadSha),
       coderAgentId: firstString(fixJob.coderAgentId),
-      attempts: Number.isFinite(Number(fixJob.attempts)) ? Number(fixJob.attempts) : null,
+      attempts: finiteNumber(fixJob.attempts),
       startedAt: firstString(fixJob.startedAt),
       completedAt: firstString(fixJob.completedAt),
       lastError: firstString(fixJob.lastError),
