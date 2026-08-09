@@ -101,9 +101,6 @@ export async function runFinalReadinessChecks(options = {}) {
         autoMerge: repair?.autoMerge || pullRequest?.autoMerge || null,
         reconciliationError: repair?.reconciliationError || null,
       });
-      // Once Paseo has successfully created or found the reviewed repair PR,
-      // that PR is informational setup follow-up. Normal GitHub merge policy is
-      // allowed to complete it independently and setup itself may finish.
       if (repair?.ready !== true && !pendingRepairPullRequest) blockers.push(blocker(
         'readiness-repository-setup-pending',
         repair?.summary || 'Repository setup fixes could not be queued in a setup pull request.',
@@ -188,8 +185,8 @@ export async function finishSetup({ startAutomation = false } = {}, options = {}
   const repository = findRepository(root, { rootDir: options.rootDir, platform: options.platform });
   if (!repository) throw new Error('The Paseo project checkout is not registered with the standalone manager.');
 
-  // Commit durable setup state before any worker is started. If worker startup
-  // later fails, setup remains complete but automation stays safely paused.
+  // Commit durable setup state before any worker is started. Coding-worker
+  // availability is infrastructure; claims remain the user's automation switch.
   const config = loadConfig(root);
   saveConfig(root, { ...config, setupComplete: true });
   saveRuntime(root, { ...loadRuntime(root), claimsEnabled: false });
@@ -197,13 +194,21 @@ export async function finishSetup({ startAutomation = false } = {}, options = {}
   const completed = completeSetupSession(options);
 
   const workerResults = [];
+  let codingWorkerAvailable = false;
   let started = false;
   let startError = null;
-  if (startAutomation) {
+  try {
+    if (options.workerManager?.start) {
+      workerResults.push({ type: 'coding', result: options.workerManager.start(repository) });
+      codingWorkerAvailable = true;
+    }
+  } catch (error) {
+    startError = String(error?.message || error);
+  }
+
+  if (startAutomation && codingWorkerAvailable) {
     try {
-      // Claims are enabled only after setup session/config commit succeeds.
       saveRuntime(root, { ...loadRuntime(root), claimsEnabled: true });
-      if (options.workerManager?.start) workerResults.push({ type: 'coding', result: options.workerManager.start(repository) });
       if (options.reviewWorkerManager?.start) workerResults.push({ type: 'review', result: options.reviewWorkerManager.start(repository) });
       started = true;
     } catch (error) {
@@ -219,6 +224,7 @@ export async function finishSetup({ startAutomation = false } = {}, options = {}
     setupComplete: loadConfig(root).setupComplete === true,
     claimsEnabled: loadRuntime(root).claimsEnabled === true,
     startRequested: startAutomation === true,
+    codingWorkerAvailable,
     workersStarted: started,
     workerResults,
     startError,
