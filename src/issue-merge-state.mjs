@@ -17,6 +17,18 @@ export function markIssueMerged(root, {
 
   const state = loadRun(root, number);
   if (!state) throw new Error(`No automation state exists for issue #${number}.`);
+  const exactValidation = (state.events || []).some((event) => event.event === 'validation-summary'
+    && event.result === 'PASS'
+    && String(event.commit || '').toLowerCase() === commit);
+  const exactApproval = (state.events || []).some((event) => event.event === 'review'
+    && event.result === 'APPROVED'
+    && String(event.commit || '').toLowerCase() === commit);
+  if (!exactValidation || !exactApproval) {
+    throw new Error(`Issue #${number} cannot be marked merged without exact PASS validation and APPROVED review evidence for ${commit}.`);
+  }
+  if (state.approvedCommit && String(state.approvedCommit).toLowerCase() !== commit) {
+    throw new Error(`Issue #${number} approval is bound to ${state.approvedCommit}, not merged head ${commit}.`);
+  }
   if (state.phase === 'merged'
       && Number(state.prNumber) === prNumber
       && String(state.mergedHeadSha || '').toLowerCase() === commit
@@ -36,7 +48,7 @@ export function markIssueMerged(root, {
     reason: null,
     prNumber,
     prUrl: pullRequestUrl || state.prUrl || null,
-    approvedCommit: state.approvedCommit || commit,
+    approvedCommit: commit,
     mergedHeadSha: commit,
     mergedAt: effectiveMergedAt,
     issueClosureVerifiedAt: verifiedAt,
