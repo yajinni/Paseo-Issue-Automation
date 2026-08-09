@@ -83,13 +83,17 @@ export function managerRepositoryStatus(repository, {
     ...item,
     lifecycle: loadIssueLifecycle(inspected.path, item.issueNumber, { limit: 250 }),
   }));
-  const workQueue = managerWorkQueue(runs, config);
+  let prReviewStore = null;
+  try { prReviewStore = loadPrReviewStore(inspected.path); } catch {}
+  const workQueue = managerWorkQueue(runs, config, prReviewStore);
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'merged', 'closed'].includes(String(item?.status || '')),
   );
   const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
-  const prReviews = managerPrReviewSummary(inspected.path);
+  const prReviews = prReviewStore
+    ? managerPrReviewSummary(inspected.path, { loadStore: () => prReviewStore })
+    : managerPrReviewSummary(inspected.path);
   const externalController = controllerMode === CONTROLLER_MODES.external;
   const embeddedController = controllerMode === CONTROLLER_MODES.embedded;
   const migrationPending = migration?.state === 'open' || (migration?.state === 'merged' && !migration.syncedAt);

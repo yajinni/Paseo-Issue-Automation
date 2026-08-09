@@ -12,7 +12,7 @@ import { dispatchAvailableIssues } from './dispatch-batch.mjs';
 import { queueCodingIssueRestart } from './manager-restart.mjs';
 import { setReviewQueuePaused } from './pr-review-store.mjs';
 import { mergeRepositoryConfig } from './setup-wizard/schema.mjs';
-import { loadConfig, saveConfig } from './state.mjs';
+import { appendIssueLifecycle, loadConfig, saveConfig } from './state.mjs';
 
 const defaultActions = {
   setClaimsEnabled,
@@ -28,6 +28,7 @@ const defaultActions = {
   loadConfig,
   saveConfig,
   appendControllerLog,
+  appendIssueLifecycle,
 };
 
 function issueNumber(body) {
@@ -66,6 +67,37 @@ function safeActionLog(actions, root, input) {
   }
 }
 
+function manualActionLabel(action) {
+  const labels = {
+    'start-issue': 'Start issue',
+    'skip-issue': 'Skip issue',
+    'unskip-issue': 'Unskip issue',
+    'restart-issue': 'Recover issue',
+    'abandon-issue': 'Abandon issue',
+  };
+  return labels[action] || action.replaceAll('-', ' ');
+}
+
+function safeIssueLifecycleAction(actions, root, action, details, status, error = null) {
+  const number = Number(details.issueNumber);
+  if (!Number.isInteger(number) || number <= 0 || typeof actions.appendIssueLifecycle !== 'function') return null;
+  try {
+    return actions.appendIssueLifecycle(root, number, {
+      type: 'operator-action',
+      status,
+      source: 'operator',
+      message: `${manualActionLabel(action)} ${status === 'failed' ? 'failed' : 'completed'}.`,
+      evidence: {
+        action,
+        branchAction: details.branchAction || null,
+        error: error ? String(error.message || error) : null,
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
 function runLoggedAction(root, pathname, body, actions, operation) {
   const action = actionName(pathname);
   const details = actionDetails(pathname, body);
@@ -84,6 +116,7 @@ function runLoggedAction(root, pathname, body, actions, operation) {
       message: `Manager action ${action} completed.`,
       details: { ...details, durationMs: Date.now() - startedAt },
     });
+    safeIssueLifecycleAction(actions, root, action, details, 'success');
     return result;
   } catch (error) {
     safeActionLog(actions, root, {
@@ -93,6 +126,7 @@ function runLoggedAction(root, pathname, body, actions, operation) {
       message: `Manager action ${action} failed: ${error.message || error}`,
       details: { ...details, durationMs: Date.now() - startedAt, error },
     });
+    safeIssueLifecycleAction(actions, root, action, details, 'failed', error);
     throw error;
   }
 }

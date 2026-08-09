@@ -5,10 +5,10 @@ import {
 } from './label-catalog.mjs';
 
 const LIFECYCLE_META = Object.freeze({
-  [PASEO_LABELS.ready]: ['ready', 'Ready'],
-  [PASEO_LABELS.queued]: ['queued', 'Queued'],
+  [PASEO_LABELS.ready]: ['ready', 'Available'],
+  [PASEO_LABELS.queued]: ['queued', 'Claimed'],
   [PASEO_LABELS.coding]: ['coding', 'Coding'],
-  [PASEO_LABELS.reviewQueued]: ['review-queued', 'Review queued'],
+  [PASEO_LABELS.reviewQueued]: ['review-queued', 'PR Review Queued'],
   [PASEO_LABELS.reviewing]: ['reviewing', 'Reviewing'],
   [PASEO_LABELS.changesRequested]: ['changes-requested', 'Changes requested'],
   [PASEO_LABELS.fixing]: ['fixing', 'Fixing'],
@@ -20,13 +20,13 @@ const LIFECYCLE_META = Object.freeze({
 const PHASE_META = Object.freeze({
   'waiting-for-dependencies': ['waiting', 'Waiting for dependencies'],
   'dependency-wait': ['waiting', 'Waiting for dependencies'],
-  ready: ['ready', 'Ready'],
-  queued: ['queued', 'Queued'],
+  ready: ['ready', 'Available'],
+  queued: ['queued', 'Claimed'],
   coding: ['coding', 'Coding'],
   'starting-agent': ['coding', 'Starting coding'],
   'launch-retrying': ['coding', 'Retrying coding launch'],
   'launch-reconciliation-needed': ['needs-attention', 'Launch needs attention'],
-  'review-queued': ['review-queued', 'Review queued'],
+  'review-queued': ['review-queued', 'PR Review Queued'],
   reviewing: ['reviewing', 'Reviewing'],
   review: ['reviewing', 'Reviewing'],
   'changes-requested': ['changes-requested', 'Changes requested'],
@@ -35,6 +35,8 @@ const PHASE_META = Object.freeze({
   failed: ['failed', 'Failed'],
   'launch-failed': ['failed', 'Failed'],
   'invalid-issue': ['needs-attention', 'Needs attention'],
+  merged: ['merged', 'Merged'],
+  'issue-closure-verified': ['closure-verified', 'Issue Closure Verified'],
   completed: ['completed', 'Completed'],
   closed: ['completed', 'Completed'],
 });
@@ -52,6 +54,8 @@ function stageForRun(run = {}) {
     const [id, label] = PHASE_META[phase];
     return { id, label, waiting: id === 'waiting' };
   }
+  if (!phase && run.issueClosureVerifiedAt && !run.completedAt) return { id: 'closure-verified', label: 'Issue Closure Verified', waiting: false };
+  if (!phase && run.mergedAt && !run.completedAt) return { id: 'merged', label: 'Merged', waiting: false };
   const lifecycle = lifecycleForRun(run);
   if (lifecycle && LIFECYCLE_META[lifecycle]) {
     const [id, label] = LIFECYCLE_META[lifecycle];
@@ -74,6 +78,12 @@ function firstString(...values) {
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return null;
+}
+
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function pullRequestFromRun(run = {}) {
@@ -148,11 +158,12 @@ function timelineFromRun(run = {}) {
       type: firstString(event.event, event.type) || 'event',
       at: eventTimestamp(event),
       detail: eventDetail(event),
-      source: 'event',
+      source: firstString(event.source) || 'event',
       stage: event.stage || null,
       round: Number.isInteger(Number(event.round)) ? Number(event.round) : null,
       result: event.result || null,
-      headSha: firstString(event.headSha),
+      headSha: firstString(event.headSha, event.commit),
+      conversationUrl: firstString(event.conversationUrl),
     });
   }
   for (const attempt of run.history || []) {
@@ -172,9 +183,62 @@ function timelineFromRun(run = {}) {
 function latestReviewEvent(run = {}) {
   const candidates = (run.events || [])
     .filter((event) => event && (event.stage || String(event.event || '').includes('review')))
-    .filter((event) => Number.isInteger(Number(event.round)) || event.headSha || event.result)
+    .filter((event) => Number.isInteger(Number(event.round)) || event.headSha || event.commit || event.result || event.source || event.conversationUrl)
     .sort((a, b) => String(eventTimestamp(b) || '').localeCompare(String(eventTimestamp(a) || '')));
   return candidates[0] || null;
+}
+
+function reviewMethod(event, stage, run, config) {
+  const source = firstString(event?.source, run.review?.source);
+  const conversationUrl = firstString(event?.conversationUrl, run.review?.conversationUrl);
+  const sourceKey = String(source || '').toLowerCase();
+  const workflow = String(config.review?.workflow || '');
+  const runtimeStage = firstString(run.reviewRuntimeStage, run.review?.runtimeStage);
+  const webStage = runtimeStage === 'full-web-chatgpt'
+    || workflow === 'quick-web-chatgpt' && stage === 'full';
+  const browserReview = webStage
+    || Boolean(conversationUrl)
+    || sourceKey.includes('browser')
+    || sourceKey.includes('chatgpt')
+    || String(stage || '').toLowerCase() === 'web-chatgpt';
+  if (browserReview) {
+    return {
+      type: 'web-chatgpt',
+      label: 'Web ChatGPT review',
+      model: null,
+      thinking: null,
+      channel: 'Browser conversation',
+      conversationUrl,
+    };
+  }
+  if (stage === 'full' || runtimeStage === 'full-immediate' || workflow === 'full-immediate') {
+    return {
+      type: 'heavy',
+      label: 'Heavy review',
+      model: firstString(event?.model, run.review?.model, config.models?.reviewer),
+      thinking: firstString(event?.thinking, run.review?.thinking, config.models?.reviewerThinking),
+      channel: 'Provider/Coding Harness',
+      conversationUrl: null,
+    };
+  }
+  if (stage === 'quick' || runtimeStage === 'quick' || workflow === 'quick-manual' || workflow === 'quick-web-chatgpt') {
+    return {
+      type: 'light',
+      label: 'Light review',
+      model: firstString(event?.model, run.review?.model, config.models?.reviewer),
+      thinking: firstString(event?.thinking, run.review?.thinking, config.models?.reviewerThinking),
+      channel: 'Provider/Coding Harness',
+      conversationUrl: null,
+    };
+  }
+  return {
+    type: 'review',
+    label: 'Review',
+    model: firstString(event?.model, run.review?.model, config.models?.reviewer),
+    thinking: firstString(event?.thinking, run.review?.thinking, config.models?.reviewerThinking),
+    channel: 'Provider/Coding Harness',
+    conversationUrl: null,
+  };
 }
 
 function reviewFromRun(run = {}, config = {}) {
@@ -183,35 +247,107 @@ function reviewFromRun(run = {}, config = {}) {
   const round = firstNumber(event?.round, run.reviewRound, run.review?.round);
   const limit = stage === 'quick'
     ? Number(config.review?.quickMaxRounds || 0) || null
-    : stage
+    : stage === 'full'
       ? Number(config.review?.fullMaxRounds || config.maxReviewRounds || 0) || null
-      : null;
+      : Number(config.maxReviewRounds || 0) || null;
   const headSha = firstString(
     event?.headSha,
+    event?.commit,
     run.currentHeadSha,
     run.review?.headSha,
     run.validationHeadSha,
     run.approvedHeadSha,
   );
-  if (!stage && !round && !headSha && run.reviewApproved !== true && run.validationApproved !== true) return null;
+  const method = reviewMethod(event, stage, run, config);
+  const phase = String(run.phase || '');
+  const lifecycle = lifecycleForRun(run);
+  const reviewish = ['review-queued', 'reviewing', 'review', 'changes-requested', 'fixing', 'review-failed'].includes(phase)
+    || [PASEO_LABELS.reviewQueued, PASEO_LABELS.reviewing, PASEO_LABELS.changesRequested, PASEO_LABELS.fixing, PASEO_LABELS.reviewFailed].includes(lifecycle);
+  if (!reviewish && !stage && !round && !headSha && run.reviewApproved !== true && run.validationApproved !== true) return null;
   return {
     stage,
     round,
     limit,
     result: event?.result || null,
     headSha,
+    source: firstString(event?.source, run.review?.source),
+    runtimeStage: firstString(run.reviewRuntimeStage, run.review?.runtimeStage),
     validationApproved: run.validationApproved === true,
     validationHeadSha: firstString(run.validationHeadSha),
     reviewApproved: run.reviewApproved === true,
     approvedHeadSha: firstString(run.approvedHeadSha),
+    ...method,
+  };
+}
+
+function prAutomationFromStore(run = {}, store = null) {
+  if (!store || typeof store !== 'object') return null;
+  const issueNumber = firstNumber(run.issueNumber, run.issue?.number);
+  const prNumber = pullRequestFromRun(run)?.number || null;
+  const managed = (store.managedPullRequests || [])
+    .filter((entry) => Number(entry?.issueNumber) === issueNumber)
+    .filter((entry) => !prNumber || Number(entry?.pullRequestNumber) === prNumber)
+    .sort((a, b) => String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || '')))[0] || null;
+  if (!managed) return null;
+  const reviews = (store.reviewJobs || [])
+    .filter((job) => String(job?.managedPullRequestId || '') === String(managed.id))
+    .sort((a, b) => String(b?.updatedAt || b?.createdAt || '').localeCompare(String(a?.updatedAt || a?.createdAt || '')));
+  const fixes = (store.fixJobs || [])
+    .filter((job) => String(job?.managedPullRequestId || '') === String(managed.id))
+    .sort((a, b) => String(b?.updatedAt || b?.createdAt || '').localeCompare(String(a?.updatedAt || a?.createdAt || '')));
+  const reviewJob = reviews[0] || null;
+  const fixJob = fixes[0] || null;
+  return {
+    managedId: firstString(managed.id),
+    reviewState: firstString(managed.reviewState),
+    branchName: firstString(managed.branchName),
+    currentHeadSha: firstString(managed.currentHeadSha),
+    lastSubmittedReviewSha: firstString(managed.lastSubmittedReviewSha),
+    lastCompletedReviewSha: firstString(managed.lastCompletedReviewSha),
+    reviewRound: firstNumber(managed.reviewRound),
+    queuePosition: finiteNumber(managed.queuePosition),
+    activeReviewRequestId: firstString(managed.activeReviewRequestId),
+    lastReviewCommentId: managed.lastReviewCommentId ?? null,
+    lastProcessedReviewRequestId: firstString(managed.lastProcessedReviewRequestId),
+    lastReconciledAt: firstString(managed.lastReconciledAt),
+    lastActivityAt: firstString(managed.lastActivityAt),
+    lastError: firstString(managed.lastError),
+    issueClosurePending: managed.issueClosurePending === true,
+    lifecycleCompletionPending: managed.lifecycleCompletionPending === true,
+    reviewEvidenceMissing: managed.reviewEvidenceMissing === true,
+    latestReviewJob: reviewJob ? {
+      id: firstString(reviewJob.id),
+      state: firstString(reviewJob.state),
+      headSha: firstString(reviewJob.headSha),
+      reviewRound: firstNumber(reviewJob.reviewRound),
+      reviewRequestId: firstString(reviewJob.reviewRequestId),
+      queuePosition: finiteNumber(reviewJob.queuePosition),
+      attempts: finiteNumber(reviewJob.attempts),
+      conversationUrl: firstString(reviewJob.conversationUrlUsed, reviewJob.conversationUrlOverride),
+      submittedAt: firstString(reviewJob.submittedAt),
+      completedAt: firstString(reviewJob.completedAt),
+      lastError: firstString(reviewJob.lastError),
+    } : null,
+    latestFixJob: fixJob ? {
+      id: firstString(fixJob.id),
+      state: firstString(fixJob.state),
+      reviewRequestId: firstString(fixJob.reviewRequestId),
+      reviewedHeadSha: firstString(fixJob.reviewedHeadSha),
+      newHeadSha: firstString(fixJob.newHeadSha),
+      coderAgentId: firstString(fixJob.coderAgentId),
+      attempts: finiteNumber(fixJob.attempts),
+      startedAt: firstString(fixJob.startedAt),
+      completedAt: firstString(fixJob.completedAt),
+      lastError: firstString(fixJob.lastError),
+    } : null,
   };
 }
 
 function nextAction(stage, run = {}) {
   if (run.reason) return String(run.reason);
   const defaults = {
-    ready: 'Ready for the next eligible scheduling turn.',
-    queued: 'Waiting for coding capacity.',
+    ready: 'Available for the next eligible scheduling turn.',
+    queued: 'Claimed and waiting for coding capacity.',
     waiting: 'Waiting for native GitHub dependencies to clear.',
     coding: 'Coding work is in progress.',
     'review-queued': 'Waiting for PR review capacity.',
@@ -222,12 +358,44 @@ function nextAction(stage, run = {}) {
     failed: 'Coding automation needs recovery.',
     'needs-attention': 'Operator attention is required.',
     completed: 'Automation is complete for this recorded run.',
-    unknown: 'Open details to inspect the recorded run state.',
+    unknown: 'Open Details to inspect the recorded run state.',
   };
   return defaults[stage.id] || defaults.unknown;
 }
 
-export function managerWorkQueueItem(run = {}, config = {}) {
+function codingFromRun(run = {}, config = {}) {
+  return {
+    model: firstString(run.coderModel, run.coding?.model, config.models?.coder),
+    thinking: firstString(run.coderThinking, run.coding?.thinking, config.models?.coderThinking),
+    harness: firstString(run.codingHarness, run.coding?.harness, config.codingHarness),
+  };
+}
+
+function diagnosticsFromRun(run = {}) {
+  return {
+    rawStatus: firstString(run.status),
+    phase: firstString(run.phase),
+    branch: firstString(run.branch),
+    worktreePath: firstString(run.worktreePath),
+    workspaceId: firstString(run.workspaceId),
+    coderAgentId: firstString(run.coderAgentId, run.agentId),
+    controllerPid: Number.isInteger(Number(run.controllerPid)) ? Number(run.controllerPid) : null,
+    coderModel: firstString(run.coderModel),
+    coderThinking: firstString(run.coderThinking),
+    codingHarness: firstString(run.codingHarness),
+    reviewRuntimeStage: firstString(run.reviewRuntimeStage, run.review?.runtimeStage),
+    heartbeatAt: firstString(run.heartbeatAt),
+    currentHeadSha: firstString(run.currentHeadSha),
+    validationHeadSha: firstString(run.validationHeadSha),
+    approvedHeadSha: firstString(run.approvedHeadSha),
+    approvedCommit: firstString(run.approvedCommit),
+    mergedHeadSha: firstString(run.mergedHeadSha),
+    mergedAt: firstString(run.mergedAt),
+    issueClosureVerifiedAt: firstString(run.issueClosureVerifiedAt),
+  };
+}
+
+export function managerWorkQueueItem(run = {}, config = {}, prReviewStore = null) {
   const stage = stageForRun(run);
   const lifecycleLabel = lifecycleForRun(run);
   const issueNumber = firstNumber(run.issueNumber, run.issue?.number);
@@ -249,9 +417,12 @@ export function managerWorkQueueItem(run = {}, config = {}) {
     reason: firstString(run.reason),
     nextAction: nextAction(stage, run),
     pullRequest: pullRequestFromRun(run),
+    coding: codingFromRun(run, config),
     review: reviewFromRun(run, config),
     timeline: timelineFromRun(run),
     lifecycle: Array.isArray(run.lifecycle) ? run.lifecycle : [],
+    diagnostics: diagnosticsFromRun(run),
+    reviewAutomation: prAutomationFromStore(run, prReviewStore),
   };
 }
 
@@ -261,17 +432,17 @@ function stageCounts(items) {
   return counts;
 }
 
-export function managerWorkQueue(runs = [], config = {}) {
+export function managerWorkQueue(runs = [], config = {}, prReviewStore = null) {
   const items = (runs || [])
     .filter(Boolean)
-    .map((run) => managerWorkQueueItem(run, config))
+    .map((run) => managerWorkQueueItem(run, config, prReviewStore))
     .filter((item) => item.issueNumber)
     .sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber));
   return {
     items,
     counts: stageCounts(items),
     total: items.length,
-    active: items.filter((item) => !['completed', 'failed', 'review-failed', 'needs-attention'].includes(item.stage)).length,
+    active: items.filter((item) => !['completed', 'failed', 'review-failed', 'needs-attention', 'ready', 'waiting'].includes(item.stage)).length,
     attention: items.filter((item) => ['failed', 'review-failed', 'needs-attention'].includes(item.stage)).length,
   };
 }
