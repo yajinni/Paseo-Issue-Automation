@@ -14,7 +14,7 @@ function firstString(...values) {
 }
 
 function eventHead(event = {}) {
-  return firstString(event.headSha, event.commit);
+  return firstString(event?.headSha, event?.commit);
 }
 
 function sameSha(left, right) {
