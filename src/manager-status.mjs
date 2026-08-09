@@ -2,6 +2,7 @@ import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
 import { inspectExternalMigrationAdoption } from './external-adoption.mjs';
 import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
+import { loadPrReviewStore } from './pr-review-store.mjs';
 import { inspectRepository } from './repository-registry.mjs';
 import { managedRepositoryOperationalSummary } from './repository-health.mjs';
 import { managerReviewProfileStatus } from './manager-review-profile-status.mjs';
@@ -34,6 +35,30 @@ function safeBranch(root, runner = run) {
   return result.ok && result.stdout ? result.stdout : null;
 }
 
+export function managerPrReviewSummary(root, { loadStore = loadPrReviewStore } = {}) {
+  try {
+    const store = loadStore(root);
+    return {
+      available: true,
+      enabled: store.config?.enabled === true,
+      browserReviewEnabled: store.config?.browserReview?.enabled === true,
+      queuePaused: store.config?.reviewQueue?.paused !== false,
+      waitingReviewCount: (store.reviewJobs || []).filter((job) => job?.state === 'queued').length,
+      activeReviewJobId: store.runtime?.activeReviewJobId || null,
+    };
+  } catch (error) {
+    return {
+      available: false,
+      enabled: false,
+      browserReviewEnabled: false,
+      queuePaused: true,
+      waitingReviewCount: 0,
+      activeReviewJobId: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export function managerRepositoryStatus(repository, {
   runner = run,
   platform = process.platform,
@@ -64,6 +89,7 @@ export function managerRepositoryStatus(repository, {
   );
   const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
+  const prReviews = managerPrReviewSummary(inspected.path);
   const externalController = controllerMode === CONTROLLER_MODES.external;
   const embeddedController = controllerMode === CONTROLLER_MODES.embedded;
   const migrationPending = migration?.state === 'open' || (migration?.state === 'merged' && !migration.syncedAt);
@@ -106,6 +132,7 @@ export function managerRepositoryStatus(repository, {
     maintenance,
     workQueue,
     chatGptProfile,
+    prReviews,
     automation: {
       claimsEnabled: runtime.claimsEnabled === true,
       maxActive: config.maxActive,
