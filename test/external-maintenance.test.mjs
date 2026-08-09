@@ -39,18 +39,18 @@ test('completed removal clears inferred mode while a later explicit reinstall wi
   assert.equal(loadControllerMode(root), CONTROLLER_MODES.external);
 });
 
-test('external maintenance refuses active workers and scopes handlers to one path', () => {
+test('external maintenance allows idle coding infrastructure but refuses active coding and running PR review', () => {
   const entry = { id: 'repo-one', path: '/repo-one', name: 'One' };
   const activeCoding = {
-    workerManager: { status: () => ({ running: true }) },
+    workerManager: { status: () => ({ running: true, state: 'active', activeCount: 1 }) },
     reviewWorkerManager: { status: () => ({ running: false }) },
   };
   assert.throws(
     () => repairExternalRepositoryFromManager(entry, { ...activeCoding, repairer: () => null }),
-    /Stop this repository’s coding worker/,
+    /active coding work to finish/,
   );
   const activeReview = {
-    workerManager: { status: () => ({ running: false }) },
+    workerManager: { status: () => ({ running: true, state: 'idle', activeCount: 0 }) },
     reviewWorkerManager: { status: () => ({ running: true }) },
   };
   assert.throws(
@@ -58,13 +58,13 @@ test('external maintenance refuses active workers and scopes handlers to one pat
     /Stop this repository’s PR-review worker/,
   );
   const calls = [];
-  const stopped = {
-    workerManager: { status: () => ({ running: false }) },
+  const idle = {
+    workerManager: { status: () => ({ running: true, state: 'idle', activeCount: 0 }) },
     reviewWorkerManager: { status: () => ({ running: false }) },
   };
-  repairExternalRepositoryFromManager(entry, { ...stopped, repairer: (root) => calls.push(['repair', root]) });
-  removeExternalRepositoryFromManager(entry, { ...stopped, remover: (root) => calls.push(['remove', root]) });
-  reconcileExternalRemovalFromManager(entry, { ...stopped, reconciler: (root) => calls.push(['reconcile', root]) });
+  repairExternalRepositoryFromManager(entry, { ...idle, repairer: (root) => calls.push(['repair', root]) });
+  removeExternalRepositoryFromManager(entry, { ...idle, remover: (root) => calls.push(['remove', root]) });
+  reconcileExternalRemovalFromManager(entry, { ...idle, reconciler: (root) => calls.push(['reconcile', root]) });
   assert.deepEqual(calls, [
     ['repair', '/repo-one'],
     ['remove', '/repo-one'],
