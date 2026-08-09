@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { recordEvent } from './automation.mjs';
 import { appendControllerLog } from './controller-log.mjs';
 import { appendHistory, findFixJob, findManaged, loadPrReviewStore, mutatePrReviewStore, nowIso, transitionManaged } from './pr-review-store.mjs';
 import { enqueueReviewInStore } from './pr-review-queue.mjs';
@@ -21,10 +22,41 @@ function latestPassingValidation(state, commit) {
     .find((event) => event.event === 'validation-summary' && event.result === 'PASS' && event.commit === commit) || null;
 }
 
+function exactWorktreeHead(root, managed, runner) {
+  const cwd = managed.worktreePath || root;
+  const result = runner('git', ['rev-parse', 'HEAD'], { cwd, allowFailure: true });
+  if (!result?.ok) throw new Error(result?.stderr || result?.stdout || 'Could not read the PR fix worktree HEAD.');
+  const head = String(result.stdout || '').trim().toLowerCase();
+  if (!head) throw new Error('The PR fix worktree did not have a readable HEAD.');
+  return { cwd, head };
+}
+
+function requireCleanWorktree(cwd, runner) {
+  const result = runner('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd, allowFailure: true });
+  if (!result?.ok) throw new Error(result?.stderr || result?.stdout || 'Could not inspect the PR fix worktree status.');
+  const changes = String(result.stdout || '').trim();
+  if (changes) throw new Error(`The fix Coder completed with uncommitted worktree changes:\n${changes}`);
+}
+
+function ensureControllerValidation(root, managed, runState, commit, recordValidation) {
+  const existing = latestPassingValidation(runState, commit);
+  if (existing) return existing;
+  const saved = recordValidation(root, managed.issueNumber, {
+    event: 'validation-summary',
+    result: 'PASS',
+    commit,
+    details: 'PR fix worker recorded the exact-head validation handoff after the fix Coder completed with a clean worktree whose local HEAD matched the pushed PR head. Issue-required validation remains subject to the next independent review and GitHub CI.',
+  });
+  const recorded = latestPassingValidation(saved, commit);
+  if (!recorded) throw new Error(`Could not record controller-owned validation for repaired PR head ${commit}.`);
+  return recorded;
+}
+
 export function validateFixedHead(root, managed, job, pr, {
   config = loadConfig(root),
   runState = loadRun(root, managed.issueNumber),
   runner = run,
+  recordValidation = recordEvent,
 } = {}) {
   if (!pr || String(pr.state).toUpperCase() !== 'OPEN') throw new Error('The existing PR is no longer open.');
   if (pr.baseRefName && pr.baseRefName !== config.baseBranch) {
@@ -33,15 +65,23 @@ export function validateFixedHead(root, managed, job, pr, {
   if (pr.mergeable === 'CONFLICTING' || pr.mergeStateStatus === 'DIRTY') {
     throw new Error(`The fixed PR conflicts with ${config.baseBranch}.`);
   }
-  const newHeadSha = String(pr.headRefOid || '').toLowerCase();
-  if (!newHeadSha || newHeadSha === job.reviewedHeadSha) {
+  const newHeadSha = String(pr.headRefOid || '').trim().toLowerCase();
+  if (!newHeadSha || newHeadSha === String(job.reviewedHeadSha || '').toLowerCase()) {
     throw new Error('The fix Coder completed without pushing a new PR head SHA.');
   }
-  const validation = latestPassingValidation(runState, newHeadSha);
-  if (!validation) {
-    throw new Error(`The fix Coder did not record passing validation for the new PR head ${newHeadSha}.`);
+
+  const worktree = exactWorktreeHead(root, managed, runner);
+  if (worktree.head !== newHeadSha) {
+    throw new Error(`The fix worktree HEAD ${worktree.head} does not match the repaired PR head ${newHeadSha}.`);
   }
-  const fetched = runner('git', ['fetch', '--prune', 'origin', config.baseBranch, managed.branchName], {
+  requireCleanWorktree(worktree.cwd, runner);
+  const validation = ensureControllerValidation(root, managed, runState, newHeadSha, recordValidation);
+
+  const fetched = runner('git', [
+    'fetch', '--prune', 'origin',
+    `+refs/heads/${config.baseBranch}:refs/remotes/origin/${config.baseBranch}`,
+    `+refs/heads/${managed.branchName}:refs/remotes/origin/${managed.branchName}`,
+  ], {
     cwd: root,
     allowFailure: true,
   });
