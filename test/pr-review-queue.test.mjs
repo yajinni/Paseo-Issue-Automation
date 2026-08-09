@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { claimNextReview, createFixJobInStore, enqueueManagedReview, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
-import { loadPrReviewStore, savePrAutomationConfig, setReviewQueuePaused } from '../src/pr-review-store.mjs';
+import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig, setReviewQueuePaused } from '../src/pr-review-store.mjs';
 
 function repo(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-review-queue-'));
@@ -47,26 +47,30 @@ test('new head supersedes old queued review and debounces the latest SHA', (t) =
   assert.equal(store.reviewJobs.find((job) => job.headSha === 'abcdef456').dueAt, new Date(2500).toISOString());
 });
 
-test('fix job snapshots immutable review source identity at creation', (t) => {
+test('fix job snapshots immutable review source identity across persistence', (t) => {
   const root = repo(t);
   registerManagedPullRequest(root, managedInput('abcdef123'), { now: 1000 });
-  const store = loadPrReviewStore(root);
-  const managed = store.managedPullRequests[0];
-  const reviewJob = store.reviewJobs[0];
-  const fixJob = createFixJobInStore(store, managed, reviewJob, 'Repair the exact reviewed head.', {
-    sourceCommentId: 7788,
-    now: 2000,
+  let reviewRequestId;
+  mutatePrReviewStore(root, (store) => {
+    const managed = store.managedPullRequests[0];
+    const reviewJob = store.reviewJobs[0];
+    reviewRequestId = reviewJob.reviewRequestId;
+    const fixJob = createFixJobInStore(store, managed, reviewJob, 'Repair the exact reviewed head.', {
+      sourceCommentId: 7788,
+      now: 2000,
+    });
+    assert.equal(fixJob.reviewRequestId, reviewJob.reviewRequestId);
+    assert.equal(fixJob.reviewedHeadSha, reviewJob.headSha);
+    managed.reviewRound = 99;
+    managed.lastReviewCommentId = 9999;
   });
-  assert.equal(fixJob.reviewRequestId, reviewJob.reviewRequestId);
-  assert.equal(fixJob.reviewedHeadSha, reviewJob.headSha);
-  assert.equal(fixJob.sourceReviewRound, reviewJob.reviewRound);
-  assert.equal(fixJob.sourceReviewCommentId, 7788);
-  assert.equal(fixJob.findings, 'Repair the exact reviewed head.');
 
-  managed.reviewRound = 99;
-  managed.lastReviewCommentId = 9999;
-  assert.equal(fixJob.sourceReviewRound, 1);
-  assert.equal(fixJob.sourceReviewCommentId, 7788);
+  const persisted = loadPrReviewStore(root).fixJobs[0];
+  assert.equal(persisted.reviewRequestId, reviewRequestId);
+  assert.equal(persisted.reviewedHeadSha, 'abcdef123');
+  assert.equal(persisted.sourceReviewRound, 1);
+  assert.equal(persisted.sourceReviewCommentId, 7788);
+  assert.equal(persisted.findings, 'Repair the exact reviewed head.');
 });
 
 test('serial queue claims one due review and paused queue claims none', (t) => {
