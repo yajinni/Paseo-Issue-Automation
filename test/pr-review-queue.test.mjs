@@ -47,7 +47,7 @@ test('new head supersedes old queued review and debounces the latest SHA', (t) =
   assert.equal(store.reviewJobs.find((job) => job.headSha === 'abcdef456').dueAt, new Date(2500).toISOString());
 });
 
-test('fix job snapshots immutable review source identity across persistence', (t) => {
+test('fix job snapshots immutable review source identity and verdict across persistence', (t) => {
   const root = repo(t);
   registerManagedPullRequest(root, managedInput('abcdef123'), { now: 1000 });
   let reviewRequestId;
@@ -57,6 +57,7 @@ test('fix job snapshots immutable review source identity across persistence', (t
     reviewRequestId = reviewJob.reviewRequestId;
     const fixJob = createFixJobInStore(store, managed, reviewJob, 'Repair the exact reviewed head.', {
       sourceCommentId: 7788,
+      reviewResult: 'changes_requested',
       now: 2000,
     });
     assert.equal(fixJob.reviewRequestId, reviewJob.reviewRequestId);
@@ -65,12 +66,17 @@ test('fix job snapshots immutable review source identity across persistence', (t
     managed.lastReviewCommentId = 9999;
   });
 
-  const persisted = loadPrReviewStore(root).fixJobs[0];
+  const store = loadPrReviewStore(root);
+  const persisted = store.fixJobs[0];
+  const persistedReview = store.reviewJobs.find((job) => job.reviewRequestId === reviewRequestId);
   assert.equal(persisted.reviewRequestId, reviewRequestId);
   assert.equal(persisted.reviewedHeadSha, 'abcdef123');
   assert.equal(persisted.sourceReviewRound, 1);
   assert.equal(persisted.sourceReviewCommentId, 7788);
   assert.equal(persisted.findings, 'Repair the exact reviewed head.');
+  assert.equal(persistedReview.state, 'completed');
+  assert.equal(persistedReview.result, 'changes_requested');
+  assert.equal(persistedReview.resultSourceId, 7788);
 });
 
 test('serial queue claims one due review and paused queue claims none', (t) => {
