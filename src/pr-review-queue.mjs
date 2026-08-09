@@ -354,7 +354,7 @@ export function cancelQueuedReview(root, jobId) {
     if (managed && managed.activeReviewRequestId === job.reviewRequestId) {
       managed.activeReviewRequestId = null;
       managed.queuePosition = null;
-      const remaining = store.reviewJobs.some((candidate) => candidate.managedPullRequestRequestId === managed.id && ['queued', 'submitting', 'awaiting_result'].includes(candidate.state));
+      const remaining = store.reviewJobs.some((candidate) => candidate.managedPullRequestId === managed.id && ['queued', 'submitting', 'awaiting_result'].includes(candidate.state));
       if (!remaining) transitionManaged(store, managed, 'paused', { reason: 'The last queued review was cancelled by the user.', actor: 'user', at });
     }
     appendHistory(store, { entityType: 'review_job', entityId: job.id, previousState: 'queued', newState: 'cancelled', reason: 'Queued review cancelled by user.', actor: 'user', sha: job.headSha, timestamp: at });
