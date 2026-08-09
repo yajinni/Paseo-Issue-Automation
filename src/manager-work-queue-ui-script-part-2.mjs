@@ -62,6 +62,39 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_2 = String.raw`    const patterns = 
     root.append(name, result); return root;
   }
 
+  function prHealthRow(title, message, severity) {
+    const row = document.createElement('div'); row.className = 'pr-health-row ' + (severity || 'info');
+    const icon = document.createElement('span'); icon.className = 'pr-health-row-icon'; icon.textContent = severity === 'blocking' ? '!' : severity === 'attention' ? '!' : severity === 'waiting' ? '◷' : '✓';
+    const copy = document.createElement('div'); const heading = document.createElement('strong'); heading.textContent = title; const detail = document.createElement('span'); detail.textContent = message || ''; copy.append(heading, detail); row.append(icon, copy); return row;
+  }
+
+  function prHealthCard(item) {
+    const health = prHealthFor(item);
+    if (!health || !item.pullRequest?.number) return null;
+    const card = document.createElement('section'); card.className = 'pr-health-card ' + (health.status || 'unknown');
+    const heading = document.createElement('h3'); heading.className = 'lifecycle-section-title'; heading.textContent = 'PR Health';
+    const header = document.createElement('div'); header.className = 'pr-health-header';
+    const identity = document.createElement('div'); identity.className = 'pr-health-identity';
+    const pr = item.pullRequest?.url ? document.createElement('a') : document.createElement('strong'); pr.textContent = 'PR #' + item.pullRequest.number; if (item.pullRequest?.url) { pr.href = item.pullRequest.url; pr.target = '_blank'; pr.rel = 'noreferrer'; }
+    const state = document.createElement('span'); state.className = 'pr-health-state'; state.textContent = health.currentPr?.isDraft ? 'Draft' : text(health.currentPr?.state, 'Recorded');
+    const badge = document.createElement('span'); badge.className = 'pr-health-badge ' + (health.tone || 'neutral'); badge.textContent = health.label || 'Unknown';
+    identity.append(pr, state, badge); header.append(identity); card.append(heading, header);
+
+    const list = document.createElement('div'); list.className = 'pr-health-list';
+    if (health.status === 'healthy') {
+      if (health.checks?.total) list.append(prHealthRow('Required checks passed', health.checks.passingCount + ' of ' + health.checks.total + ' checks are passing.', 'healthy'));
+      if (health.currentPr?.headSha) list.append(prHealthRow('Current head verified', 'GitHub reports head ' + String(health.currentPr.headSha).slice(0, 12) + '.', 'healthy'));
+      if (health.currentPr?.issueAssociation === true) list.append(prHealthRow('Issue association present', 'The current PR explicitly closes issue #' + item.issueNumber + '.', 'healthy'));
+      if (!list.children.length) list.append(prHealthRow('Current PR is healthy', 'No current PR blockers or wait conditions are recorded.', 'healthy'));
+    } else {
+      for (const problem of health.problems || []) list.append(prHealthRow(problem.title || problem.code, problem.message, problem.severity));
+      if (!list.children.length) list.append(prHealthRow('PR health needs review', 'No detailed PR health evidence is available.', 'attention'));
+    }
+    card.append(list);
+    if (health.currentPr?.url || item.pullRequest?.url) { const link = document.createElement('a'); link.className = 'pr-health-link'; link.href = health.currentPr?.url || item.pullRequest.url; link.target = '_blank'; link.rel = 'noreferrer'; link.textContent = 'View PR #' + item.pullRequest.number + ' on GitHub ↗'; card.append(link); }
+    return card;
+  }
+
   function inlineDetails(item) {
     const card = document.createElement('section'); card.className = 'lifecycle-detail-card';
     const heading = document.createElement('h3'); heading.className = 'lifecycle-section-title';
@@ -147,7 +180,9 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_2 = String.raw`    const patterns = 
 
   function expandedPanel(item) {
     const panel = document.createElement('div'); panel.className = 'lifecycle-expanded'; panel.dataset.lifecycleExpanded = String(item.issueNumber);
-    const main = document.createElement('div'); main.className = 'lifecycle-main'; main.append(lifecycleFlow(item), inlineDetails(item));
+    const main = document.createElement('div'); main.className = 'lifecycle-main'; main.append(lifecycleFlow(item));
+    const health = prHealthCard(item); if (health) main.append(health);
+    main.append(inlineDetails(item));
     panel.append(main, activityTimeline(item));
     return panel;
   }
