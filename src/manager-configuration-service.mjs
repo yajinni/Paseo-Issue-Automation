@@ -79,8 +79,29 @@ function githubHostFromRemote(remote) {
   return scpMatch?.[1] || 'github.com';
 }
 
+function githubRepositoryFromRemote(remote) {
+  const value = String(remote || '').trim();
+  if (!value) return null;
+
+  const scpMatch = value.match(/^[^@\s]+@[^:\s]+:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (scpMatch) return `${scpMatch[1]}/${scpMatch[2]}`;
+
+  try {
+    const parsed = new URL(value);
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length !== 2) return null;
+    const [owner, rawRepository] = parts;
+    const repository = rawRepository.replace(/\.git$/i, '');
+    return owner && repository ? `${owner}/${repository}` : null;
+  } catch {
+    return null;
+  }
+}
+
 function managerBranchCatalog(context, options = {}) {
-  const repository = String(context.repository?.repository || '').trim();
+  const repository = String(
+    context.repository?.repository || githubRepositoryFromRemote(context.repository?.remote) || '',
+  ).trim();
   if (!repository) throw new Error('The registered repository does not have a GitHub owner/name identity.');
   const loadBranches = options.branchLoader || listAllGitHubBranches;
   const result = loadBranches(repository, {
