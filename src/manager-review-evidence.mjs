@@ -44,8 +44,8 @@ function currentManaged(run = {}, store = null) {
 function currentReviewJob(store, managed, currentHeadSha) {
   if (!store || !managed) return null;
   const jobs = (store.reviewJobs || []).filter((job) => String(job?.managedPullRequestId) === String(managed.id));
-  const exact = currentHeadSha ? jobs.filter((job) => sameSha(job.headSha, currentHeadSha)) : jobs;
-  return byUpdatedAt(exact.length ? exact : jobs)[0] || null;
+  if (!currentHeadSha) return byUpdatedAt(jobs)[0] || null;
+  return byUpdatedAt(jobs.filter((job) => sameSha(job.headSha, currentHeadSha)))[0] || null;
 }
 
 function normalizedFinding(finding = {}) {
