@@ -33,8 +33,17 @@ export function queuedFixJobs(store) {
 }
 
 export function codingFixPrompt(managed, job) {
-  return `A Paseo-managed pull request has blocking review findings that must be fixed.
+  const findings = String(job.findings || '').trim();
+  const sourceReviewRound = Number(job.sourceReviewRound);
+  if (!Number.isInteger(sourceReviewRound) || sourceReviewRound < 1) {
+    throw new Error('The PR fix job is missing its immutable source review round; refusing to launch an incomplete repair handoff.');
+  }
+  const sourceComment = job.sourceReviewCommentId !== null && job.sourceReviewCommentId !== undefined
+    ? `Matching PR review comment ID: ${job.sourceReviewCommentId}`
+    : 'Matching PR review comment ID: not recorded';
+  return `A Paseo-managed pull request has an authoritative repair handoff that must be completed.
 
+Repair identity
 Repository: ${managed.repository}
 Pull request: #${managed.pullRequestNumber}
 Pull request URL: ${managed.pullRequestUrl}
@@ -43,23 +52,29 @@ Issue URL: ${managed.issueUrl || ''}
 Existing branch: ${managed.branchName}
 Reviewed head SHA: ${job.reviewedHeadSha}
 Review request ID: ${job.reviewRequestId}
+Review round: ${sourceReviewRound}
+${sourceComment}
+
+Paseo already matched this repair job to the exact managed pull request, review request, and reviewed head. The repair instructions embedded below are authoritative. Do not search repository files, issue prose, PR reviewDecision, or unrelated PR reviews/comments to discover what changes were requested. Inspect surrounding code only as needed to implement and validate these instructions safely.
+
+If source verification is necessary, inspect top-level comments on PR #${managed.pullRequestNumber} and use only a paseo-review:v1 marker whose reviewRequestId is ${job.reviewRequestId} and headSha is ${job.reviewedHeadSha}. Do not treat any other review comment as repair instructions for this job.
+
+Authoritative repair instructions:
+---
+${findings || '[No repair instructions were recorded. Stop without changing code and report the empty authoritative handoff.]'}
+---
 
 Update the existing PR branch.
 Do not create a new branch or PR.
-Resolve the listed review findings.
-Add or update tests.
+Fix only the authoritative instructions above without broadening the associated issue.
+Preserve unrelated correct work.
+Add or update tests that prove the fixes.
 Run changed-area validation and every validation required by the issue.
-Push the fixes to the existing branch.
-After pushing, record one exact passing validation summary for the new head SHA:
+Commit all intended changes, push the exact current branch head, and leave the worktree clean.
+Do not call Paseo hooks, search for a validation-summary command, or invent a validation-summary API. The Paseo fix worker owns internal exact-head validation bookkeeping after it verifies the clean worktree and matching pushed PR head.
+Do not report completion until the worktree HEAD and PR head are the same exact SHA and the worktree is clean.
 
-npx --no-install paseo-issue-automation record --issue ${managed.issueNumber} --event validation-summary --result PASS --commit <new-head-sha> --details '<commands and results>'
-
-Do not report completion until the PR head, worktree HEAD, and recorded validation commit are the same exact SHA.
-
-Review findings:
-${job.findings}
-
-Before changing code, confirm that the workspace is on ${managed.branchName} and that PR #${managed.pullRequestNumber} still uses that branch. Stop if the PR was merged, closed, or moved to another branch. Do not broaden the associated issue.`;
+Before changing code, confirm that the workspace is on ${managed.branchName} and that PR #${managed.pullRequestNumber} still uses that branch. Stop if the PR was merged, closed, or moved to another branch.`;
 }
 
 function issueCodingCount(root, { jsonRunner = runJson } = {}) {
@@ -84,7 +99,7 @@ function launchFixAgent(root, managed, job) {
   const payload = runJson('paseo', [
     'run', '--background', '--json', '--provider', config.models.coder,
     '--workspace', String(managed.workspaceId),
-    '--title', `PR #${managed.pullRequestNumber} fixes (round ${managed.reviewRound})`,
+    '--title', `PR #${managed.pullRequestNumber} fixes (round ${job.sourceReviewRound})`,
     codingFixPrompt(managed, job),
   ], { cwd: root });
   const coderAgentId = findFirstKey(payload, ['agentId', 'agent_id', 'id']);

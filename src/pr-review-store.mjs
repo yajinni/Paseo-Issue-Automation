@@ -216,6 +216,8 @@ export function normalizeManagedPullRequest(record) {
     lastActivityAt: record.lastActivityAt || record.updatedAt || null,
     lastError: record.lastError || null,
     issueClosurePending: record.issueClosurePending === true,
+    lifecycleCompletionPending: record.lifecycleCompletionPending === true,
+    reviewEvidenceMissing: record.reviewEvidenceMissing === true,
     diagnosticScreenshot: record.diagnosticScreenshot || null,
   };
 }
@@ -239,6 +241,8 @@ export function normalizeReviewJob(job) {
     conversationUrlUsed: job.conversationUrlUsed || null,
     submittedAt: job.submittedAt || null,
     completedAt: job.completedAt || null,
+    result: job.result || null,
+    resultSourceId: job.resultSourceId ?? null,
     lastError: job.lastError || null,
     diagnosticScreenshot: job.diagnosticScreenshot || null,
     createdAt: job.createdAt || nowIso(),
@@ -252,6 +256,10 @@ export function normalizeFixJob(job) {
     managedPullRequestId: String(job.managedPullRequestId),
     reviewJobId: String(job.reviewJobId),
     reviewRequestId: String(job.reviewRequestId),
+    sourceReviewRound: Number.isInteger(Number(job.sourceReviewRound)) && Number(job.sourceReviewRound) > 0
+      ? Number(job.sourceReviewRound)
+      : null,
+    sourceReviewCommentId: job.sourceReviewCommentId ?? null,
     repository: String(job.repository),
     pullRequestNumber: Number(job.pullRequestNumber),
     issueNumber: Number(job.issueNumber),

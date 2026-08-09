@@ -71,6 +71,8 @@ export function enqueueReviewInStore(store, managed, {
     existing.lastError = null;
     existing.diagnosticScreenshot = null;
     existing.completedAt = null;
+    existing.result = null;
+    existing.resultSourceId = null;
     if (conversationUrlOverride) existing.conversationUrlOverride = conversationUrlOverride;
     existing.dueAt = immediate ? at : nowIso(now + store.config.browserReview.reviewDebounceMs);
     existing.queuePosition = nextQueuePosition(store);
@@ -101,6 +103,8 @@ export function enqueueReviewInStore(store, managed, {
     conversationUrlUsed: null,
     submittedAt: null,
     completedAt: null,
+    result: null,
+    resultSourceId: null,
     lastError: null,
     diagnosticScreenshot: null,
     createdAt: at,
@@ -255,7 +259,11 @@ export function markReviewSubmissionFailed(root, jobId, error, diagnostics = {})
   });
 }
 
-export function createFixJobInStore(store, managed, reviewJob, findings, { sourceCommentId = null, now = Date.now() } = {}) {
+export function createFixJobInStore(store, managed, reviewJob, findings, {
+  sourceCommentId = null,
+  reviewResult = null,
+  now = Date.now(),
+} = {}) {
   const existing = store.fixJobs.find((job) => job.reviewRequestId === reviewJob.reviewRequestId);
   if (existing) return existing;
   const at = nowIso(now);
@@ -264,6 +272,8 @@ export function createFixJobInStore(store, managed, reviewJob, findings, { sourc
     managedPullRequestId: managed.id,
     reviewJobId: reviewJob.id,
     reviewRequestId: reviewJob.reviewRequestId,
+    sourceReviewRound: reviewJob.reviewRound,
+    sourceReviewCommentId: sourceCommentId,
     repository: managed.repository,
     pullRequestNumber: managed.pullRequestNumber,
     issueNumber: managed.issueNumber,
@@ -286,6 +296,8 @@ export function createFixJobInStore(store, managed, reviewJob, findings, { sourc
   reviewJob.state = 'completed';
   reviewJob.completedAt = at;
   reviewJob.updatedAt = at;
+  reviewJob.result = reviewResult || reviewJob.result || null;
+  reviewJob.resultSourceId = sourceCommentId ?? reviewJob.resultSourceId ?? null;
   managed.lastCompletedReviewSha = reviewJob.headSha;
   managed.lastReviewCommentId = sourceCommentId;
   managed.lastProcessedReviewRequestId = reviewJob.reviewRequestId;
@@ -391,7 +403,10 @@ export function applyManualReviewResult(root, managedId, { result, findings = ''
     return mutatePrReviewStore(root, (store) => {
       const managed = findManaged(store, managedId);
       const job = findReviewJob(store, selected.job.id);
-      return clone(createFixJobInStore(store, managed, job, findings, { now: Date.now() }));
+      return clone(createFixJobInStore(store, managed, job, findings, {
+        reviewResult: 'changes_requested',
+        now: Date.now(),
+      }));
     });
   }
   if (result !== 'approved') throw new Error('Manual result must be approved or changes_requested.');
@@ -410,6 +425,8 @@ export function applyManualReviewResult(root, managedId, { result, findings = ''
     job.state = 'completed';
     job.completedAt = at;
     job.updatedAt = at;
+    job.result = 'approved';
+    job.resultSourceId = null;
     managed.lastCompletedReviewSha = job.headSha;
     managed.lastProcessedReviewRequestId = job.reviewRequestId;
     managed.lastError = null;
