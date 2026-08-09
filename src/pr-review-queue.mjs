@@ -264,6 +264,8 @@ export function createFixJobInStore(store, managed, reviewJob, findings, { sourc
     managedPullRequestId: managed.id,
     reviewJobId: reviewJob.id,
     reviewRequestId: reviewJob.reviewRequestId,
+    sourceReviewRound: reviewJob.reviewRound,
+    sourceReviewCommentId: sourceCommentId,
     repository: managed.repository,
     pullRequestNumber: managed.pullRequestNumber,
     issueNumber: managed.issueNumber,
