@@ -40,12 +40,6 @@ function issueNumber(body) {
   return value;
 }
 
-function pullRequestNumber(body) {
-  const value = Number(body?.pullRequestNumber);
-  if (!Number.isInteger(value) || value <= 0) throw new Error('A positive pullRequestNumber is required.');
-  return value;
-}
-
 function actionName(pathname) {
   return String(pathname || '/api/action').replace(/^\/api\//, '').replaceAll('/', '-');
 }
@@ -172,12 +166,12 @@ export function managerRepositoryAction(root, pathname, body = {}, actions = def
   }
   if (pathname === '/api/reconcile-pr') {
     return runLoggedAction(root, pathname, body, actions, () => actions.reconcileIssuePullRequest(root, issueNumber(body), {
-      pullRequestNumber: pullRequestNumber(body),
+      pullRequestNumber: body.pullRequestNumber || null,
     }));
   }
   if (pathname === '/api/retry-pr-review') {
     return runLoggedAction(root, pathname, body, actions, () => actions.retryIssuePullRequestReview(root, issueNumber(body), {
-      pullRequestNumber: pullRequestNumber(body),
+      pullRequestNumber: body.pullRequestNumber || null,
       expectedHeadSha: body.expectedHeadSha || null,
     }));
   }
