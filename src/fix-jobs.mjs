@@ -34,8 +34,12 @@ export function queuedFixJobs(store) {
 
 export function codingFixPrompt(managed, job) {
   const findings = String(job.findings || '').trim();
-  const sourceComment = managed.lastReviewCommentId
-    ? `Matching PR review comment ID: ${managed.lastReviewCommentId}`
+  const sourceReviewRound = Number(job.sourceReviewRound);
+  if (!Number.isInteger(sourceReviewRound) || sourceReviewRound < 1) {
+    throw new Error('The PR fix job is missing its immutable source review round; refusing to launch an incomplete repair handoff.');
+  }
+  const sourceComment = job.sourceReviewCommentId !== null && job.sourceReviewCommentId !== undefined
+    ? `Matching PR review comment ID: ${job.sourceReviewCommentId}`
     : 'Matching PR review comment ID: not recorded';
   return `A Paseo-managed pull request has an authoritative repair handoff that must be completed.
 
@@ -48,7 +52,7 @@ Issue URL: ${managed.issueUrl || ''}
 Existing branch: ${managed.branchName}
 Reviewed head SHA: ${job.reviewedHeadSha}
 Review request ID: ${job.reviewRequestId}
-Review round: ${managed.reviewRound}
+Review round: ${sourceReviewRound}
 ${sourceComment}
 
 Paseo already matched this repair job to the exact managed pull request, review request, and reviewed head. The repair instructions embedded below are authoritative. Do not search repository files, issue prose, PR reviewDecision, or unrelated PR reviews/comments to discover what changes were requested. Inspect surrounding code only as needed to implement and validate these instructions safely.
@@ -95,7 +99,7 @@ function launchFixAgent(root, managed, job) {
   const payload = runJson('paseo', [
     'run', '--background', '--json', '--provider', config.models.coder,
     '--workspace', String(managed.workspaceId),
-    '--title', `PR #${managed.pullRequestNumber} fixes (round ${managed.reviewRound})`,
+    '--title', `PR #${managed.pullRequestNumber} fixes (round ${job.sourceReviewRound})`,
     codingFixPrompt(managed, job),
   ], { cwd: root });
   const coderAgentId = findFirstKey(payload, ['agentId', 'agent_id', 'id']);
