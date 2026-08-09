@@ -9,7 +9,11 @@ import {
   transitionManaged,
 } from './pr-review-store.mjs';
 import { createFixJobInStore, enqueueReviewInStore } from './pr-review-queue.mjs';
-import { evaluateApprovedReviewGate, finalizeApprovedBrowserReview } from './pr-review-finalize.mjs';
+import {
+  evaluateApprovedReviewGate,
+  finalizeApprovedBrowserReview,
+  recordApprovedBrowserReview,
+} from './pr-review-finalize.mjs';
 import {
   closeAssociatedIssue,
   issueSnapshot,
@@ -18,6 +22,7 @@ import {
   PR_REVIEW_LABELS,
   setPrReviewLabels,
 } from './pr-review-github.mjs';
+import { markIssueMerged } from './issue-merge-state.mjs';
 import { matchingReviewResult } from './review-result.mjs';
 
 function labelNames(pr) {
@@ -77,31 +82,59 @@ function terminateManagedJobs(store, managed, reason, at) {
   managed.queuePosition = null;
 }
 
-function reconcileMergedInStore(store, managed, pr, at) {
-  transitionManaged(store, managed, 'merged', {
-    reason: `PR #${managed.pullRequestNumber} merged.`,
-    actor: 'reconciliation',
-    sha: pr.headRefOid || managed.currentHeadSha,
-    at,
-  });
-  terminateManagedJobs(store, managed, 'The pull request reached the terminal merged state.', at);
+function exactMergedApproval(precomputed, mergedHead) {
+  const job = precomputed?.reviewJob;
+  const result = precomputed?.result;
+  if (!job || !result || result.result !== 'approved') return false;
+  return String(job.headSha || '').toLowerCase() === mergedHead
+    && String(result.headSha || '').toLowerCase() === mergedHead
+    && result.reviewRequestId === job.reviewRequestId;
+}
+
+function reconcileMergedInStore(store, managed, pr, at, precomputed = {}) {
+  const mergedHead = String(pr.headRefOid || managed.currentHeadSha || '').toLowerCase();
+  const firstObservation = managed.reviewState !== 'merged';
+  if (exactMergedApproval(precomputed, mergedHead)) {
+    const reviewJob = store.reviewJobs.find((job) => job.id === precomputed.reviewJob.id);
+    if (reviewJob && reviewJob.state !== 'completed') {
+      completeReviewJob(store, reviewJob, 'approved', precomputed.result.sourceId, at);
+    }
+    managed.lastCompletedReviewSha = mergedHead;
+    managed.lastReviewCommentId = precomputed.result.sourceId || managed.lastReviewCommentId;
+    managed.lastProcessedReviewRequestId = precomputed.reviewJob.reviewRequestId;
+  }
+  if (firstObservation) {
+    transitionManaged(store, managed, 'merged', {
+      reason: `PR #${managed.pullRequestNumber} merged.`,
+      actor: 'reconciliation',
+      sha: mergedHead,
+      at,
+    });
+    terminateManagedJobs(store, managed, 'The pull request reached the terminal merged state.', at);
+  }
+  const reviewVerified = Boolean(mergedHead && managed.lastCompletedReviewSha === mergedHead);
   managed.issueClosurePending = store.config.githubActions.verifyIssueClosure;
-  managed.lastError = null;
-  return {
-    state: 'merged',
-    effects: [
-      { type: 'clear-review-labels', pullRequestNumber: managed.pullRequestNumber },
-      {
-        type: 'verify-merged-issue',
-        managedId: managed.id,
-        issueNumber: managed.issueNumber,
-        pullRequestNumber: managed.pullRequestNumber,
-        verifyIssueClosure: store.config.githubActions.verifyIssueClosure,
-        allowClosureFallback: store.config.githubActions.allowPaseoIssueClosureFallback,
-        explicitAssociation: prHasExplicitIssueAssociation(pr, managed.issueNumber),
-      },
-    ],
-  };
+  managed.lifecycleCompletionPending = true;
+  managed.reviewEvidenceMissing = !reviewVerified;
+  managed.lastError = reviewVerified
+    ? null
+    : `PR #${managed.pullRequestNumber} merged at ${mergedHead}, but Paseo has no exact approved review evidence for that merged head.`;
+  const effects = [];
+  if (firstObservation) effects.push({ type: 'clear-review-labels', pullRequestNumber: managed.pullRequestNumber });
+  effects.push({
+    type: 'verify-merged-issue',
+    managedId: managed.id,
+    issueNumber: managed.issueNumber,
+    pullRequestNumber: managed.pullRequestNumber,
+    pullRequestUrl: managed.pullRequestUrl,
+    headSha: mergedHead,
+    mergedAt: pr.mergedAt || at,
+    reviewVerified,
+    verifyIssueClosure: store.config.githubActions.verifyIssueClosure,
+    allowClosureFallback: store.config.githubActions.allowPaseoIssueClosureFallback,
+    explicitAssociation: prHasExplicitIssueAssociation(pr, managed.issueNumber),
+  });
+  return { state: 'merged', reviewVerified, effects };
 }
 
 function reconcileClosedUnmergedInStore(store, managed, at) {
@@ -250,29 +283,63 @@ function updateMergedIssueStatus(root, effect, patch) {
   });
 }
 
+function completeMergedLifecycle(root, effect) {
+  const completed = markIssueMerged(root, {
+    issueNumber: effect.issueNumber,
+    pullRequestNumber: effect.pullRequestNumber,
+    pullRequestUrl: effect.pullRequestUrl,
+    headSha: effect.headSha,
+    mergedAt: effect.mergedAt,
+  });
+  updateMergedIssueStatus(root, effect, {
+    issueClosurePending: false,
+    lifecycleCompletionPending: false,
+    reviewEvidenceMissing: false,
+    lastError: null,
+  });
+  return completed;
+}
+
 function applyMergedIssueEffect(root, effect) {
+  if (!effect.reviewVerified) {
+    const message = `PR #${effect.pullRequestNumber} merged, but exact approved review evidence for ${effect.headSha} was not recorded.`;
+    updateMergedIssueStatus(root, effect, {
+      lifecycleCompletionPending: false,
+      reviewEvidenceMissing: true,
+      lastError: message,
+    });
+    return { issueClosed: false, needsOperator: true, reviewEvidenceMissing: true };
+  }
   if (!effect.verifyIssueClosure) {
-    updateMergedIssueStatus(root, effect, { issueClosurePending: false, lastError: null });
+    completeMergedLifecycle(root, effect);
     return { issueClosed: true, verificationSkipped: true };
   }
   const issue = issueSnapshot(root, effect.issueNumber);
   if (!issue) throw new Error(`Could not verify associated issue #${effect.issueNumber} after merge.`);
   if (String(issue.state).toUpperCase() === 'CLOSED') {
-    updateMergedIssueStatus(root, effect, { issueClosurePending: false, lastError: null });
+    completeMergedLifecycle(root, effect);
     return { issueClosed: true };
   }
   if (!effect.allowClosureFallback) {
     const message = `PR merged, but associated issue #${effect.issueNumber} remains open.`;
-    updateMergedIssueStatus(root, effect, { issueClosurePending: true, lastError: message });
+    updateMergedIssueStatus(root, effect, {
+      issueClosurePending: true,
+      lifecycleCompletionPending: true,
+      lastError: message,
+    });
     return { issueClosed: false, needsOperator: true };
   }
   if (!effect.explicitAssociation) {
     const message = `PR merged, but issue association for #${effect.issueNumber} is ambiguous.`;
-    updateMergedIssueStatus(root, effect, { issueClosurePending: true, lastError: message });
+    updateMergedIssueStatus(root, effect, {
+      issueClosurePending: true,
+      lifecycleCompletionPending: true,
+      lastError: message,
+    });
     return { issueClosed: false, needsOperator: true };
   }
   closeAssociatedIssue(root, effect.issueNumber, effect.pullRequestNumber);
-  updateMergedIssueStatus(root, effect, { issueClosurePending: false, lastError: null });
+  completeMergedLifecycle(root, effect);
   return { issueClosed: true, closedByPaseo: true };
 }
 
@@ -314,15 +381,27 @@ export function reconcileManagedPullRequest(root, managedId, {
   if (!pr) throw new Error(`Could not reconcile PR #${currentManaged.pullRequestNumber}.`);
 
   const precomputed = reviewResultForSnapshot(current, currentManaged, pr);
+  const mergedSnapshot = Boolean(pr.mergedAt || String(pr.state).toUpperCase() === 'MERGED');
   if (precomputed.result?.result === 'approved' && precomputed.reviewJob
       && currentManaged.currentHeadSha === precomputed.result.headSha) {
-    precomputed.gate = evaluateApprovedReviewGate(root, currentManaged, precomputed.reviewJob, pr);
-    if (precomputed.gate.ok && !current.config.githubActions.allowChatGPTMerge) {
-      finalizeApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
-        findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
-        pr,
-        gate: precomputed.gate,
+    if (mergedSnapshot && exactMergedApproval(precomputed, String(pr.headRefOid || '').toLowerCase())) {
+      recordApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
+        findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact commit before merge.',
       });
+    } else if (!mergedSnapshot) {
+      precomputed.gate = evaluateApprovedReviewGate(root, currentManaged, precomputed.reviewJob, pr);
+      if (precomputed.gate.ok) {
+        recordApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
+          findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
+        });
+        if (!current.config.githubActions.allowChatGPTMerge) {
+          finalizeApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
+            findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
+            pr,
+            gate: precomputed.gate,
+          });
+        }
+      }
     }
   }
 
@@ -330,8 +409,8 @@ export function reconcileManagedPullRequest(root, managedId, {
     const managed = findManaged(store, managedId);
     if (!managed) throw new Error(`Managed PR ${managedId} disappeared during reconciliation.`);
     managed.lastReconciledAt = at;
-    if (pr.mergedAt || String(pr.state).toUpperCase() === 'MERGED') {
-      return reconcileMergedInStore(store, managed, pr, at);
+    if (mergedSnapshot) {
+      return reconcileMergedInStore(store, managed, pr, at, precomputed);
     }
     if (String(pr.state).toUpperCase() === 'CLOSED') {
       return reconcileClosedUnmergedInStore(store, managed, at);
@@ -351,7 +430,12 @@ export function reconcileManagedPullRequest(root, managedId, {
 
 export function reconcileManagedPullRequests(root, options = {}) {
   const store = loadPrReviewStore(root);
-  const records = store.managedPullRequests.filter((managed) => managed.reviewState !== 'paused' && !TERMINAL_PR_STATES.has(managed.reviewState));
+  const records = store.managedPullRequests.filter((managed) => {
+    if (managed.reviewState === 'paused') return false;
+    const pendingMergedCompletion = managed.reviewState === 'merged'
+      && (managed.issueClosurePending || managed.lifecycleCompletionPending);
+    return !TERMINAL_PR_STATES.has(managed.reviewState) || pendingMergedCompletion;
+  });
   const result = { checked: 0, changed: 0, errors: [] };
   for (const managed of records) {
     try {
