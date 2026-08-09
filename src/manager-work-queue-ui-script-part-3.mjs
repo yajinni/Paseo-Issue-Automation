@@ -6,9 +6,10 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_3 = String.raw`    const skipped = (
       const select = document.createElement('select'); if (openActionsIssue === item.issueNumber) select.id = 'branch-action'; else select.dataset.branchActionFor = String(item.issueNumber); select.innerHTML = '<option value="keep">Recover existing work first</option><option value="delete">Start fresh and delete old branch</option>';
       recovery.append(label, select); menu.append(recovery, actionEntry('Recover issue', 'Retry the interrupted or failed coding attempt.', 'restart-issue', item));
     }
-    if (skipped) menu.append(actionEntry('Unskip', 'Allow automatic selection of this issue again.', 'unskip-issue', item));
-    else menu.append(actionEntry('Skip', 'Stop automatically selecting this issue for now.', 'skip-issue', item));
-    if (isActive(item)) {
+    const mutable = !['completed', 'merged', 'closure-verified'].includes(item.stage);
+    if (mutable && skipped) menu.append(actionEntry('Unskip', 'Allow automatic selection of this issue again.', 'unskip-issue', item));
+    else if (mutable) menu.append(actionEntry('Skip', 'Stop automatically selecting this issue for now.', 'skip-issue', item));
+    if (mutable && isActive(item)) {
       const separator = document.createElement('div'); separator.className = 'lifecycle-actions-separator'; menu.append(separator);
       menu.append(actionEntry('Abandon', 'Stop this active automation attempt and record a reason.', 'abandon-issue', item, { danger: true }));
     }
