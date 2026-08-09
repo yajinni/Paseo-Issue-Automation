@@ -11,6 +11,7 @@ import {
   registerManagedPullRequest,
 } from '../src/pr-review-queue.mjs';
 import {
+  applyMergedIssueEffect,
   reconcileManagedPullRequest,
   reconcileManagedPullRequests,
 } from '../src/pr-review-reconcile.mjs';
@@ -75,6 +76,38 @@ function managedInput() {
   };
 }
 
+function prepareMergedManaged(root) {
+  configureReviews(root);
+  seedRun(root);
+  const registered = registerManagedPullRequest(root, managedInput(), { now: 1000 });
+  mutatePrReviewStore(root, (store) => {
+    const managed = store.managedPullRequests[0];
+    managed.reviewState = 'merged';
+    managed.lastCompletedReviewSha = head;
+    managed.lastProcessedReviewRequestId = 'review-seed';
+    managed.issueClosurePending = true;
+    managed.lifecycleCompletionPending = true;
+    managed.reviewEvidenceMissing = false;
+  });
+  return registered.managed;
+}
+
+function mergedEffect(managed, overrides = {}) {
+  return {
+    type: 'verify-merged-issue',
+    managedId: managed.id,
+    issueNumber: 101,
+    pullRequestNumber: 45,
+    pullRequestUrl: 'https://github.com/owner/repo/pull/45',
+    headSha: head,
+    mergedAt: '2026-08-09T01:02:00.000Z',
+    reviewVerified: true,
+    verifyIssueClosure: true,
+    explicitAssociation: true,
+    ...overrides,
+  };
+}
+
 test('review prompt leaves repair dispatch to Paseo and requires approval evidence before merge', () => {
   const prompt = renderReviewPrompt({
     repository: 'owner/repo',
@@ -108,8 +141,8 @@ test('issue merge completion requires exact validation and approval evidence and
     mergedAt: '2026-08-09T01:02:00.000Z',
     issueClosureVerifiedAt: '2026-08-09T01:03:00.000Z',
   });
-  assert.equal(first.status, 'merged');
-  assert.equal(first.phase, 'merged');
+  assert.equal(first.status, 'completed');
+  assert.equal(first.phase, 'completed');
   assert.equal(first.approvedCommit, head);
   assert.equal(first.mergedHeadSha, head);
   assert.equal(first.mergedAt, '2026-08-09T01:02:00.000Z');
@@ -137,6 +170,75 @@ test('issue merge completion fails closed without exact approved review evidence
     mergedAt: '2026-08-09T01:02:00.000Z',
   }), /without exact PASS validation and APPROVED review evidence/);
   assert.equal(loadRun(root, 101).phase, 'review-queued');
+});
+
+test('merged integration-branch PR closes an explicitly associated open issue without the legacy fallback opt-in', (t) => {
+  const root = repo(t);
+  const managed = prepareMergedManaged(root);
+  assert.equal(loadPrReviewStore(root).config.githubActions.allowPaseoIssueClosureFallback, false);
+
+  let issueState = 'OPEN';
+  let closeCalls = 0;
+  const result = applyMergedIssueEffect(root, mergedEffect(managed), {
+    issueReader() { return { number: 101, state: issueState }; },
+    issueCloser(_root, issueNumber, prNumber) {
+      assert.equal(issueNumber, 101);
+      assert.equal(prNumber, 45);
+      closeCalls += 1;
+      issueState = 'CLOSED';
+      return { closed: true };
+    },
+  });
+
+  assert.deepEqual(result, { issueClosed: true, closedByPaseo: true });
+  assert.equal(closeCalls, 1);
+  const run = loadRun(root, 101);
+  assert.equal(run.status, 'completed');
+  assert.equal(run.phase, 'completed');
+  assert.equal(run.reason, null);
+  assert.equal(run.mergedHeadSha, head);
+  const stored = loadPrReviewStore(root).managedPullRequests[0];
+  assert.equal(stored.issueClosurePending, false);
+  assert.equal(stored.lifecycleCompletionPending, false);
+  assert.equal(stored.lastError, null);
+});
+
+test('merged issue completion stays fail-closed when the PR association is ambiguous', (t) => {
+  const root = repo(t);
+  const managed = prepareMergedManaged(root);
+  let closeCalls = 0;
+  const result = applyMergedIssueEffect(root, mergedEffect(managed, { explicitAssociation: false }), {
+    issueReader() { return { number: 101, state: 'OPEN' }; },
+    issueCloser() { closeCalls += 1; },
+  });
+
+  assert.equal(result.issueClosed, false);
+  assert.equal(result.needsOperator, true);
+  assert.equal(closeCalls, 0);
+  assert.equal(loadRun(root, 101).phase, 'review-queued');
+  const stored = loadPrReviewStore(root).managedPullRequests[0];
+  assert.equal(stored.issueClosurePending, true);
+  assert.equal(stored.lifecycleCompletionPending, true);
+  assert.match(stored.lastError, /association.*ambiguous/i);
+});
+
+test('merged issue completion does not terminalize until closure readback is confirmed', (t) => {
+  const root = repo(t);
+  const managed = prepareMergedManaged(root);
+  let closeCalls = 0;
+  const result = applyMergedIssueEffect(root, mergedEffect(managed), {
+    issueReader() { return { number: 101, state: 'OPEN' }; },
+    issueCloser() { closeCalls += 1; return { closed: true }; },
+  });
+
+  assert.equal(result.issueClosed, false);
+  assert.equal(result.retryPending, true);
+  assert.equal(closeCalls, 1);
+  assert.equal(loadRun(root, 101).phase, 'review-queued');
+  const stored = loadPrReviewStore(root).managedPullRequests[0];
+  assert.equal(stored.issueClosurePending, true);
+  assert.equal(stored.lifecycleCompletionPending, true);
+  assert.match(stored.lastError, /still reports it open/i);
 });
 
 test('merged snapshot preserves an exact approval that arrives in the same poll as merge', (t) => {
