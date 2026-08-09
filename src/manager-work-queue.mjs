@@ -274,6 +274,69 @@ function reviewFromRun(run = {}, config = {}) {
   };
 }
 
+function prAutomationFromStore(run = {}, store = null) {
+  if (!store || typeof store !== 'object') return null;
+  const issueNumber = firstNumber(run.issueNumber, run.issue?.number);
+  const prNumber = pullRequestFromRun(run)?.number || null;
+  const managed = (store.managedPullRequests || [])
+    .filter((entry) => Number(entry?.issueNumber) === issueNumber)
+    .filter((entry) => !prNumber || Number(entry?.pullRequestNumber) === prNumber)
+    .sort((a, b) => String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || '')))[0] || null;
+  if (!managed) return null;
+  const reviews = (store.reviewJobs || [])
+    .filter((job) => String(job?.managedPullRequestId || '') === String(managed.id))
+    .sort((a, b) => String(b?.updatedAt || b?.createdAt || '').localeCompare(String(a?.updatedAt || a?.createdAt || '')));
+  const fixes = (store.fixJobs || [])
+    .filter((job) => String(job?.managedPullRequestId || '') === String(managed.id))
+    .sort((a, b) => String(b?.updatedAt || b?.createdAt || '').localeCompare(String(a?.updatedAt || a?.createdAt || '')));
+  const reviewJob = reviews[0] || null;
+  const fixJob = fixes[0] || null;
+  return {
+    managedId: firstString(managed.id),
+    reviewState: firstString(managed.reviewState),
+    branchName: firstString(managed.branchName),
+    currentHeadSha: firstString(managed.currentHeadSha),
+    lastSubmittedReviewSha: firstString(managed.lastSubmittedReviewSha),
+    lastCompletedReviewSha: firstString(managed.lastCompletedReviewSha),
+    reviewRound: firstNumber(managed.reviewRound),
+    queuePosition: Number.isFinite(Number(managed.queuePosition)) ? Number(managed.queuePosition) : null,
+    activeReviewRequestId: firstString(managed.activeReviewRequestId),
+    lastReviewCommentId: managed.lastReviewCommentId ?? null,
+    lastProcessedReviewRequestId: firstString(managed.lastProcessedReviewRequestId),
+    lastReconciledAt: firstString(managed.lastReconciledAt),
+    lastActivityAt: firstString(managed.lastActivityAt),
+    lastError: firstString(managed.lastError),
+    issueClosurePending: managed.issueClosurePending === true,
+    lifecycleCompletionPending: managed.lifecycleCompletionPending === true,
+    reviewEvidenceMissing: managed.reviewEvidenceMissing === true,
+    latestReviewJob: reviewJob ? {
+      id: firstString(reviewJob.id),
+      state: firstString(reviewJob.state),
+      headSha: firstString(reviewJob.headSha),
+      reviewRound: firstNumber(reviewJob.reviewRound),
+      reviewRequestId: firstString(reviewJob.reviewRequestId),
+      queuePosition: Number.isFinite(Number(reviewJob.queuePosition)) ? Number(reviewJob.queuePosition) : null,
+      attempts: Number.isFinite(Number(reviewJob.attempts)) ? Number(reviewJob.attempts) : null,
+      conversationUrl: firstString(reviewJob.conversationUrlUsed, reviewJob.conversationUrlOverride),
+      submittedAt: firstString(reviewJob.submittedAt),
+      completedAt: firstString(reviewJob.completedAt),
+      lastError: firstString(reviewJob.lastError),
+    } : null,
+    latestFixJob: fixJob ? {
+      id: firstString(fixJob.id),
+      state: firstString(fixJob.state),
+      reviewRequestId: firstString(fixJob.reviewRequestId),
+      reviewedHeadSha: firstString(fixJob.reviewedHeadSha),
+      newHeadSha: firstString(fixJob.newHeadSha),
+      coderAgentId: firstString(fixJob.coderAgentId),
+      attempts: Number.isFinite(Number(fixJob.attempts)) ? Number(fixJob.attempts) : null,
+      startedAt: firstString(fixJob.startedAt),
+      completedAt: firstString(fixJob.completedAt),
+      lastError: firstString(fixJob.lastError),
+    } : null,
+  };
+}
+
 function nextAction(stage, run = {}) {
   if (run.reason) return String(run.reason);
   const defaults = {
@@ -326,7 +389,7 @@ function diagnosticsFromRun(run = {}) {
   };
 }
 
-export function managerWorkQueueItem(run = {}, config = {}) {
+export function managerWorkQueueItem(run = {}, config = {}, prReviewStore = null) {
   const stage = stageForRun(run);
   const lifecycleLabel = lifecycleForRun(run);
   const issueNumber = firstNumber(run.issueNumber, run.issue?.number);
@@ -353,6 +416,7 @@ export function managerWorkQueueItem(run = {}, config = {}) {
     timeline: timelineFromRun(run),
     lifecycle: Array.isArray(run.lifecycle) ? run.lifecycle : [],
     diagnostics: diagnosticsFromRun(run),
+    reviewAutomation: prAutomationFromStore(run, prReviewStore),
   };
 }
 
@@ -362,10 +426,10 @@ function stageCounts(items) {
   return counts;
 }
 
-export function managerWorkQueue(runs = [], config = {}) {
+export function managerWorkQueue(runs = [], config = {}, prReviewStore = null) {
   const items = (runs || [])
     .filter(Boolean)
-    .map((run) => managerWorkQueueItem(run, config))
+    .map((run) => managerWorkQueueItem(run, config, prReviewStore))
     .filter((item) => item.issueNumber)
     .sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber));
   return {
