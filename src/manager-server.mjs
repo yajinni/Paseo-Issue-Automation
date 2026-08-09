@@ -2,6 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
 import { enhanceManagerWithAutomationReviews } from './manager-automation-reviews-ui.mjs';
+import { enhanceManagerWithCodingWorkerStatus } from './manager-coding-worker-status-ui.mjs';
 import { enhanceManagerWithConfigIntegrationMaintenance } from './manager-config-integration-maintenance-ui.mjs';
 import { managerConfigurationApiRequest } from './manager-configuration-service.mjs';
 import { enhanceManagerWithConfigurationTabs } from './manager-configuration-tabs-ui.mjs';
@@ -126,7 +127,8 @@ ${manualForm}
   const issueFlow = enhanceManagerWithIssueProcessingFlow(issueAndReviewViews);
   const issueInsights = enhanceManagerWithDependencyInsights(issueFlow);
   const issueDiagnostics = enhanceManagerWithDependencyDiagnostics(issueInsights);
-  return enhanceManagerWithInteractionPolish(issueDiagnostics);
+  const polished = enhanceManagerWithInteractionPolish(issueDiagnostics);
+  return enhanceManagerWithCodingWorkerStatus(polished);
 }
 
 export async function startManagerServer({
