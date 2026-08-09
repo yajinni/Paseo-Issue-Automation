@@ -19,18 +19,25 @@ function repository() {
   return root;
 }
 
-test('manager migration requires stopped coding and PR-review workers', () => {
+test('manager migration allows an idle coding worker but still blocks active coding or a running PR-review worker', () => {
   const entry = { id: 'repo-one', path: '/repo-one' };
-  assert.throws(
-    () => migrateEmbeddedRepositoryFromManager(entry, {
-      workerManager: { status: () => ({ running: true }) },
+  assert.deepEqual(
+    migrateEmbeddedRepositoryFromManager(entry, {
+      workerManager: { status: () => ({ running: true, state: 'idle', activeCount: 0 }) },
       migrator: () => ({ created: true }),
     }),
-    /Stop this repository’s coding worker/,
+    { created: true },
+  );
+  assert.throws(
+    () => migrateEmbeddedRepositoryFromManager(entry, {
+      workerManager: { status: () => ({ running: true, state: 'active', activeCount: 1 }) },
+      migrator: () => ({ created: true }),
+    }),
+    /active coding work to finish/,
   );
   assert.throws(
     () => reconcileEmbeddedMigrationFromManager(entry, {
-      workerManager: { status: () => ({ running: false }) },
+      workerManager: { status: () => ({ running: true, state: 'idle', activeCount: 0 }) },
       reviewWorkerManager: { status: () => ({ running: true }) },
       reconciler: () => ({ completed: true }),
     }),
@@ -82,5 +89,7 @@ test('manager UI explains reviewed migration and exposes both actions', () => {
   assert.match(html, /Reconcile migration PR/);
   assert.match(html, /migrate\/external/);
   assert.match(html, /migrate\/reconcile/);
+  assert.match(html, /Wait for coding work to finish/);
+  assert.doesNotMatch(html, /Stop repository workers before migration/);
   assert.match(html, /Controller mode changes only after that PR merges/);
 });
