@@ -263,6 +263,69 @@ test('deep troubleshooting diagnostics expose recorded execution and exact-head 
   assert.equal(item.diagnostics.mergedHeadSha, 'head-merged');
 });
 
+test('deep troubleshooting joins the matching PR automation store record and latest jobs', () => {
+  const store = {
+    managedPullRequests: [{
+      id: 'managed-44',
+      issueNumber: 44,
+      pullRequestNumber: 144,
+      branchName: 'ai/issue-44',
+      currentHeadSha: 'head-current',
+      lastSubmittedReviewSha: 'head-submitted',
+      lastCompletedReviewSha: 'head-completed',
+      reviewRound: 3,
+      reviewState: 'changes_requested',
+      queuePosition: null,
+      activeReviewRequestId: 'request-active',
+      lastReviewCommentId: 991,
+      lastProcessedReviewRequestId: 'request-previous',
+      lastReconciledAt: '2026-08-09T13:00:00.000Z',
+      lastActivityAt: '2026-08-09T13:01:00.000Z',
+      lastError: 'stored mismatch',
+      issueClosurePending: true,
+      lifecycleCompletionPending: false,
+      reviewEvidenceMissing: true,
+      updatedAt: '2026-08-09T13:01:00.000Z',
+    }],
+    reviewJobs: [{
+      id: 'review-44-3',
+      managedPullRequestId: 'managed-44',
+      state: 'completed',
+      headSha: 'head-current',
+      reviewRound: 3,
+      reviewRequestId: 'request-active',
+      queuePosition: 7,
+      attempts: 2,
+      conversationUrlUsed: 'https://chatgpt.com/c/44',
+      lastError: null,
+      updatedAt: '2026-08-09T13:02:00.000Z',
+    }],
+    fixJobs: [{
+      id: 'fix-44-3',
+      managedPullRequestId: 'managed-44',
+      state: 'fixing',
+      reviewRequestId: 'request-active',
+      reviewedHeadSha: 'head-current',
+      coderAgentId: 'fix-agent',
+      attempts: 1,
+      updatedAt: '2026-08-09T13:03:00.000Z',
+    }],
+  };
+  const item = managerWorkQueueItem({ issueNumber: 44, phase: 'fixing', prNumber: 144 }, {}, store);
+  assert.equal(item.reviewAutomation.managedId, 'managed-44');
+  assert.equal(item.reviewAutomation.reviewState, 'changes_requested');
+  assert.equal(item.reviewAutomation.queuePosition, null);
+  assert.equal(item.reviewAutomation.currentHeadSha, 'head-current');
+  assert.equal(item.reviewAutomation.lastError, 'stored mismatch');
+  assert.equal(item.reviewAutomation.issueClosurePending, true);
+  assert.equal(item.reviewAutomation.reviewEvidenceMissing, true);
+  assert.equal(item.reviewAutomation.latestReviewJob.id, 'review-44-3');
+  assert.equal(item.reviewAutomation.latestReviewJob.queuePosition, 7);
+  assert.equal(item.reviewAutomation.latestReviewJob.conversationUrl, 'https://chatgpt.com/c/44');
+  assert.equal(item.reviewAutomation.latestFixJob.id, 'fix-44-3');
+  assert.equal(item.reviewAutomation.latestFixJob.coderAgentId, 'fix-agent');
+});
+
 test('completed merged issue runs remain recorded but do not count as active work', () => {
   const queue = managerWorkQueue([{
     issueNumber: 274,
