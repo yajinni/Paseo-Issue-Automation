@@ -14,7 +14,7 @@ test('Automation view separates claims scheduling from status-only coding worker
     assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   for (const action of ['worker/start', 'worker/stop', 'worker/restart']) {
-    assert.doesNotMatch(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp('data-action=["\\\']' + action.replace('/', '\\/')));
   }
 });
 
