@@ -216,6 +216,8 @@ export function normalizeManagedPullRequest(record) {
     lastActivityAt: record.lastActivityAt || record.updatedAt || null,
     lastError: record.lastError || null,
     issueClosurePending: record.issueClosurePending === true,
+    lifecycleCompletionPending: record.lifecycleCompletionPending === true,
+    reviewEvidenceMissing: record.reviewEvidenceMissing === true,
     diagnosticScreenshot: record.diagnosticScreenshot || null,
   };
 }
@@ -239,6 +241,8 @@ export function normalizeReviewJob(job) {
     conversationUrlUsed: job.conversationUrlUsed || null,
     submittedAt: job.submittedAt || null,
     completedAt: job.completedAt || null,
+    result: job.result || null,
+    resultSourceId: job.resultSourceId ?? null,
     lastError: job.lastError || null,
     diagnosticScreenshot: job.diagnosticScreenshot || null,
     createdAt: job.createdAt || nowIso(),
@@ -252,6 +256,10 @@ export function normalizeFixJob(job) {
     managedPullRequestId: String(job.managedPullRequestId),
     reviewJobId: String(job.reviewJobId),
     reviewRequestId: String(job.reviewRequestId),
+    sourceReviewRound: Number.isInteger(Number(job.sourceReviewRound)) && Number(job.sourceReviewRound) > 0
+      ? Number(job.sourceReviewRound)
+      : null,
+    sourceReviewCommentId: job.sourceReviewCommentId ?? null,
     repository: String(job.repository),
     pullRequestNumber: Number(job.pullRequestNumber),
     issueNumber: Number(job.issueNumber),
@@ -391,66 +399,48 @@ export function appendHistory(store, {
     entityId,
     previousState,
     newState,
-    reason: String(reason || ''),
-    actor: String(actor || 'controller'),
-    sha: sha || null,
-    timestamp,
+    reason: String(reason),
+    actor: String(actor),
+    sha,
     error: error ? String(error) : null,
+    timestamp,
   });
   if (store.history.length > HISTORY_LIMIT) store.history.splice(0, store.history.length - HISTORY_LIMIT);
 }
 
-export function transitionManaged(store, record, nextState, {
-  reason,
-  actor = 'controller',
-  sha,
-  error,
-  at = nowIso(),
-} = {}) {
-  if (!MANAGED_PR_STATES.includes(nextState)) throw new Error(`Unknown managed PR state: ${nextState}`);
-  const previousState = record.reviewState;
-  record.reviewState = nextState;
-  record.updatedAt = at;
-  record.lastActivityAt = at;
-  record.lastError = error ? String(error) : null;
-  appendHistory(store, {
-    entityType: 'managed_pull_request',
-    entityId: record.id,
-    previousState,
-    newState: nextState,
-    reason,
-    actor,
-    sha: sha || record.currentHeadSha,
-    error,
-    timestamp: at,
-  });
+export function nextQueuePosition(store) {
+  const position = store.runtime.nextQueuePosition;
+  store.runtime.nextQueuePosition += 1;
+  return position;
 }
 
 export function findManaged(store, id) {
-  return store.managedPullRequests.find((record) => record.id === id) || null;
+  return store.managedPullRequests.find((item) => item.id === id) || null;
 }
 
 export function findReviewJob(store, id) {
-  return store.reviewJobs.find((job) => job.id === id) || null;
+  return store.reviewJobs.find((item) => item.id === id) || null;
 }
 
 export function findFixJob(store, id) {
-  return store.fixJobs.find((job) => job.id === id) || null;
+  return store.fixJobs.find((item) => item.id === id) || null;
 }
 
-export function managedPullRequestId(repository, pullRequestNumber) {
-  const normalizedRepository = String(repository || '').trim().toLowerCase();
-  const normalizedPr = Number(pullRequestNumber);
-  if (!normalizedRepository || !Number.isInteger(normalizedPr) || normalizedPr < 1) {
-    throw new Error('Repository and pull request number are required.');
-  }
-  return `${normalizedRepository}#${normalizedPr}`;
+export function transitionManaged(store, managed, nextState, { reason, actor, sha = managed.currentHeadSha, error = null, at = nowIso() }) {
+  if (!MANAGED_PR_STATES.includes(nextState)) throw new Error(`Unknown managed PR state ${nextState}.`);
+  const previous = managed.reviewState;
+  managed.reviewState = nextState;
+  managed.updatedAt = at;
+  managed.lastActivityAt = at;
+  if (error) managed.lastError = String(error);
+  appendHistory(store, {
+    entityType: 'managed_pull_request', entityId: managed.id, previousState: previous, newState: nextState,
+    reason, actor, sha, error, timestamp: at,
+  });
 }
 
-export function nextQueuePosition(store) {
-  const value = store.runtime.nextQueuePosition;
-  store.runtime.nextQueuePosition += 1;
-  return value;
+export function loadPrAutomationConfig(root) {
+  return loadPrReviewStore(root).config;
 }
 
 export function savePrAutomationConfig(root, input) {
@@ -463,24 +453,26 @@ export function savePrAutomationConfig(root, input) {
       reconciliation: { ...store.config.reconciliation, ...(input.reconciliation || {}) },
       githubActions: { ...store.config.githubActions, ...(input.githubActions || {}) },
     });
-    appendHistory(store, {
-      entityType: 'configuration',
-      entityId: 'pr-automation',
-      reason: 'PR automation configuration updated.',
-      actor: 'user',
-    });
     return clone(store.config);
   });
 }
 
-export function setReviewQueuePaused(root, paused) {
-  return savePrAutomationConfig(root, { reviewQueue: { paused: paused === true } });
+export function setReviewQueuePaused(root, paused, actor = 'user') {
+  return mutatePrReviewStore(root, (store) => {
+    const at = nowIso();
+    const previous = store.config.reviewQueue.paused;
+    store.config.reviewQueue.paused = Boolean(paused);
+    appendHistory(store, {
+      entityType: 'review_queue', entityId: 'global', previousState: previous ? 'paused' : 'running',
+      newState: paused ? 'paused' : 'running', reason: paused ? 'Review queue paused.' : 'Review queue resumed.', actor, timestamp: at,
+    });
+    return clone(store.config.reviewQueue);
+  });
 }
 
 export function recordReconciliation(root, result, { now = Date.now() } = {}) {
   return mutatePrReviewStore(root, (store) => {
     store.runtime.lastReconciledAt = nowIso(now);
-    store.runtime.lastReconciliationResult = result || null;
-    return clone(store.runtime);
+    store.runtime.lastReconciliationResult = clone(result);
   });
 }
