@@ -46,9 +46,14 @@ test('unchanged issue plans do not rebuild the Issues list or dependency map', (
 });
 
 test('entering Issues reuses the cached snapshot instead of forcing a reload', () => {
-  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /function onViewChanged\(\) \{\s*patchVisibleHeader\(\);\s*if \(activeView\(\) === 'automation'\) loadIssuePlan\(\)/);
-  assert.match(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /if \(activeView\(\) === 'automation'\) loadIssuePlan\(\);\s*\}/);
-  assert.doesNotMatch(MANAGER_ISSUES_PR_REVIEWS_SCRIPT, /function onViewChanged[\s\S]*?loadIssuePlan\(\{ force: true \}\)/);
+  assert.match(
+    MANAGER_ISSUES_PR_REVIEWS_SCRIPT,
+    /function onViewChanged\(\) \{\s*patchVisibleHeader\(\);\s*if \(activeView\(\) === 'automation'\) loadIssuePlan\(\);\s*else clearIssuePlanRefreshTimer\(\);\s*\}/,
+  );
+  assert.match(
+    MANAGER_ISSUES_PR_REVIEWS_SCRIPT,
+    /try \{ if \(typeof currentStatus !== 'undefined' && currentStatus\) render\(currentStatus\); \} catch \{\}\s*if \(activeView\(\) === 'automation'\) loadIssuePlan\(\);/,
+  );
 });
 
 test('a cache hit schedules one deferred revalidation instead of leaving the issue plan stale indefinitely', () => {
