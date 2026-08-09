@@ -9,11 +9,13 @@ import {
 import { dispatchSpecificCodingIssue } from './coding-dispatch.mjs';
 import { dispatchAvailableIssues } from './dispatch-batch.mjs';
 import { queueCodingIssueRestart } from './manager-restart.mjs';
+import { setReviewQueuePaused } from './pr-review-store.mjs';
 import { mergeRepositoryConfig } from './setup-wizard/schema.mjs';
 import { loadConfig, saveConfig } from './state.mjs';
 
 const defaultActions = {
   setClaimsEnabled,
+  setReviewQueuePaused,
   abandonAttempt,
   reconcileDependencies,
   skipIssue,
@@ -35,6 +37,8 @@ function issueNumber(body) {
 export function managerRepositoryAction(root, pathname, body = {}, actions = defaultActions) {
   if (pathname === '/api/pause') return actions.setClaimsEnabled(root, false);
   if (pathname === '/api/resume') return actions.setClaimsEnabled(root, true);
+  if (pathname === '/api/pr-review/pause') return actions.setReviewQueuePaused(root, true);
+  if (pathname === '/api/pr-review/resume') return actions.setReviewQueuePaused(root, false);
   if (pathname === '/api/run-now') {
     const result = actions.dispatchAvailableIssues(root);
     actions.updateManagedDispatch(root, result);
