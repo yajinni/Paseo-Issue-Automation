@@ -25,6 +25,14 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_3 = String.raw`    const skipped = (
     actions.append(details, toggle, chevron, actionMenu(item)); return actions;
   }
 
+  function compactPrHealth(item) {
+    const health = prHealthFor(item);
+    if (!health) return null;
+    const badge = document.createElement('span'); badge.className = 'lifecycle-pr-health ' + (health.tone || 'neutral'); badge.textContent = health.label || 'Unknown';
+    badge.title = (health.problems || []).map(function(problem) { return problem.title; }).filter(Boolean).join(' · ') || 'Current PR health';
+    return badge;
+  }
+
   function renderRow(item) {
     const article = document.createElement('article'); article.className = 'lifecycle-item' + (expandedIssue === item.issueNumber ? ' expanded' : ''); article.dataset.issueNumber = String(item.issueNumber);
     const head = document.createElement('div'); head.className = 'lifecycle-row-head'; head.tabIndex = 0; head.setAttribute('role', 'button'); head.setAttribute('aria-expanded', expandedIssue === item.issueNumber ? 'true' : 'false');
@@ -37,7 +45,11 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_3 = String.raw`    const skipped = (
     title.append(heading, subtitle);
     const stage = document.createElement('div'); stage.className = 'lifecycle-stage-current ' + stageTone(item); stage.textContent = item.stageLabel || item.stage || 'Unknown';
     const summaryData = runSummary(item); const summary = document.createElement('div'); summary.className = 'lifecycle-run-summary'; const summaryTitle = document.createElement('strong'); summaryTitle.textContent = summaryData.title; const summaryCopy = document.createElement('span'); summaryCopy.textContent = summaryData.secondary; summary.append(summaryTitle, summaryCopy);
-    const pr = document.createElement('div'); pr.className = 'lifecycle-pr'; if (item.pullRequest?.number) { const link = document.createElement('a'); link.textContent = '#' + item.pullRequest.number; if (item.pullRequest.url) { link.href = item.pullRequest.url; link.target = '_blank'; link.rel = 'noreferrer'; } pr.append(link); } else pr.textContent = '—';
+    const pr = document.createElement('div'); pr.className = 'lifecycle-pr';
+    if (item.pullRequest?.number) {
+      const link = document.createElement('a'); link.textContent = '#' + item.pullRequest.number; if (item.pullRequest.url) { link.href = item.pullRequest.url; link.target = '_blank'; link.rel = 'noreferrer'; } pr.append(link);
+      const health = compactPrHealth(item); if (health) pr.append(health);
+    } else pr.textContent = '—';
     const started = document.createElement('div'); started.className = 'lifecycle-date'; started.textContent = formatDate(item.startedAt);
     const updated = document.createElement('div'); updated.className = 'lifecycle-date'; updated.textContent = formatDate(item.updatedAt || item.completedAt);
     const duration = document.createElement('div'); duration.className = 'lifecycle-elapsed'; duration.textContent = elapsed(item);
@@ -82,8 +94,9 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_3 = String.raw`    const skipped = (
     const startIndex = matching.length ? (page - 1) * PAGE_SIZE : 0;
     const items = matching.slice(startIndex, startIndex + PAGE_SIZE);
     const endIndex = startIndex + items.length;
-    const count = document.getElementById('work-queue-count'); if (count) count.textContent = matching.length + ' matching · ' + (queueData.total || 0) + ' recorded';
-    const footer = document.getElementById('work-queue-footer-summary'); if (footer) footer.textContent = matching.length ? 'Showing ' + (startIndex + 1) + '–' + endIndex + ' of ' + matching.length + ' matching issues. Click a row to expand lifecycle and activity.' : 'No matching issues.';
+    const prProblems = Number(queueData?.prHealth?.counts?.blocking || 0) + Number(queueData?.prHealth?.counts?.attention || 0) + Number(queueData?.prHealth?.counts?.unavailable || 0);
+    const count = document.getElementById('work-queue-count'); if (count) count.textContent = matching.length + ' matching · ' + (queueData.total || 0) + ' recorded' + (prProblems ? ' · ' + prProblems + ' PR problem' + (prProblems === 1 ? '' : 's') : '');
+    const footer = document.getElementById('work-queue-footer-summary'); if (footer) footer.textContent = matching.length ? 'Showing ' + (startIndex + 1) + '–' + endIndex + ' of ' + matching.length + ' matching issues. Click a row to expand lifecycle, PR health, and activity.' : 'No matching issues.';
     renderPagination(matching.length);
     if (expandedIssue && !items.some(function(item) { return item.issueNumber === expandedIssue; })) expandedIssue = null;
     list.textContent = '';
