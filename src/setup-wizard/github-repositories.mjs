@@ -268,6 +268,48 @@ export function listGitHubBranchPage(repository, {
   };
 }
 
+export function listAllGitHubBranches(repository, { maxPages = 100, ...options } = {}) {
+  const branches = [];
+  let after = null;
+  let recommended = null;
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = listGitHubBranchPage(repository, { ...options, after });
+    if (result.recommended) recommended = result.recommended;
+    if (!result.ok) return { ...result, branches, recommended };
+    branches.push(...result.branches);
+    if (!result.pageInfo.hasNextPage) {
+      return { ok: true, repository: result.repository, branches, recommended, pageInfo: result.pageInfo, blocker: null };
+    }
+    if (!result.pageInfo.endCursor || result.pageInfo.endCursor === after) {
+      return {
+        ok: false,
+        repository: result.repository,
+        branches,
+        recommended,
+        pageInfo: result.pageInfo,
+        blocker: {
+          code: 'github-branch-pagination-stalled',
+          message: 'GitHub branch pagination did not advance.',
+          recoveryAction: 'Refresh branches.',
+        },
+      };
+    }
+    after = result.pageInfo.endCursor;
+  }
+  return {
+    ok: false,
+    repository: parseRepositoryIdentity(repository).nameWithOwner,
+    branches,
+    recommended,
+    pageInfo: { hasNextPage: true, endCursor: after },
+    blocker: {
+      code: 'github-branch-pagination-limit',
+      message: 'Branch discovery exceeded its safety page limit.',
+      recoveryAction: 'Refresh branches.',
+    },
+  };
+}
+
 export function filterRepositoryCatalog(repositories, query) {
   const needle = String(query || '').trim().toLowerCase();
   if (!needle) return [...(repositories || [])];
