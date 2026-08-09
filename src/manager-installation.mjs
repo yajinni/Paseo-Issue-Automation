@@ -16,10 +16,10 @@ function requireRegisteredRepository(repository, action) {
   }
 }
 
-function requireStoppedWorkers(repository, { workerManager = null, reviewWorkerManager = null } = {}) {
+function requireSafeWorkers(repository, { workerManager = null, reviewWorkerManager = null } = {}) {
   const codingWorker = workerManager?.status?.(repository.id);
-  if (codingWorker?.running) {
-    throw new Error('Stop this repository’s coding worker before changing its controller installation.');
+  if (codingWorker?.state === 'active' || Number(codingWorker?.activeCount || 0) > 0 || codingWorker?.ticking === true) {
+    throw new Error('Wait for this repository’s active coding work to finish before changing its controller installation.');
   }
   const reviewWorker = reviewWorkerManager?.status?.(repository.id);
   if (reviewWorker?.running) {
@@ -29,7 +29,7 @@ function requireStoppedWorkers(repository, { workerManager = null, reviewWorkerM
 
 function guarded(repository, options, action, handler) {
   requireRegisteredRepository(repository, action);
-  requireStoppedWorkers(repository, options);
+  requireSafeWorkers(repository, options);
   return handler(repository.path);
 }
 
@@ -79,7 +79,7 @@ export function finalizeExistingMigrationFromManager(repository, {
   refresher = setupSnapshot,
 } = {}) {
   requireRegisteredRepository(repository, 'finalize the existing external-controller migration');
-  requireStoppedWorkers(repository, { workerManager, reviewWorkerManager });
+  requireSafeWorkers(repository, { workerManager, reviewWorkerManager });
   const adoption = adopter(repository.path);
   const setup = refresher(repository.path, {
     forceDiscovery: true,
