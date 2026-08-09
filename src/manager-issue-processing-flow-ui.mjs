@@ -40,9 +40,19 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
 (function managerIssueProcessingFlow() {
   let latestStatus = null;
   let latestPlan = null;
+  let latestPlanFingerprint = null;
+  let latestPlanRepositoryId = null;
   let built = false;
   let edgeFrame = null;
   let mapResizeObserver = null;
+
+  function currentRepositoryId() {
+    return document.getElementById('repository-select')?.value || null;
+  }
+
+  function issuePlanFingerprint(plan) {
+    return JSON.stringify(plan || null);
+  }
 
   function findCard(root, heading) {
     for (const card of root?.querySelectorAll('section.card') || []) {
@@ -66,6 +76,13 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
     if (claims && worker) return { label: 'Running', className: 'running' };
     if (!claims && !worker) return { label: 'Paused', className: 'paused' };
     return { label: claims ? 'Needs attention — worker stopped' : 'Needs attention — worker running while paused', className: 'attention' };
+  }
+
+  function updateFlowLimit() {
+    const limit = document.querySelector('.manager-issue-flow-limit');
+    if (!limit) return;
+    const maxActive = Number(latestStatus?.automation?.maxActive || 1);
+    limit.textContent = 'Up to ' + maxActive + ' active at once';
   }
 
   function renderProcessing(data) {
@@ -92,7 +109,7 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
     const pause = document.getElementById('manager-pause-issue-processing');
     if (start) start.disabled = state.className === 'running';
     if (pause) pause.disabled = state.className === 'paused';
-    if (latestPlan) renderFlow(latestPlan);
+    updateFlowLimit();
   }
 
   async function runAction(button, action) {
@@ -310,8 +327,10 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
     }
   }
 
-  function renderFlow(plan) {
+  function renderFlow(plan, repositoryId = currentRepositoryId()) {
     latestPlan = plan;
+    latestPlanFingerprint = issuePlanFingerprint(plan);
+    latestPlanRepositoryId = repositoryId;
     const shell = document.getElementById('manager-issue-flow-shell'); if (!shell) return;
     const previousScroll = shell.querySelector('.manager-dependency-map-scroll');
     const scrollState = { left: previousScroll?.scrollLeft || 0, top: previousScroll?.scrollTop || 0 };
@@ -322,11 +341,22 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
     }
     const toolbar = document.createElement('div'); toolbar.className = 'manager-issue-flow-toolbar';
     const copy = document.createElement('div'); copy.innerHTML = '<strong>Dependency map</strong><p>Every open issue is placed by real native GitHub dependency depth. Automatic-processing state is shown on each card but does not define the graph.</p>';
-    const maxActive = Number(latestStatus?.automation?.maxActive || 1);
-    const limit = document.createElement('span'); limit.className = 'manager-issue-flow-limit'; limit.textContent = 'Up to ' + maxActive + ' active at once';
+    const limit = document.createElement('span'); limit.className = 'manager-issue-flow-limit';
     toolbar.append(copy, limit); shell.append(toolbar);
+    updateFlowLimit();
     renderMapBody(plan, shell, scrollState);
   }
+
+  window.renderManagerIssueDependencyMap = function renderManagerIssueDependencyMap(plan, repositoryId = currentRepositoryId()) {
+    const fingerprint = issuePlanFingerprint(plan);
+    if (repositoryId === latestPlanRepositoryId && fingerprint === latestPlanFingerprint) {
+      latestPlan = plan;
+      updateFlowLimit();
+      return false;
+    }
+    renderFlow(plan, repositoryId);
+    return true;
+  };
 
   function build() {
     if (built) return; built = true;
@@ -341,7 +371,9 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
   if (typeof previousJsonRequest === 'function') {
     window.jsonRequest = async function unifiedIssueProcessingJsonRequest(url, options) {
       const body = await previousJsonRequest(url, options);
-      if (String(url || '').includes('/issues-plan') && body?.issuePlan) renderFlow(body.issuePlan);
+      if (String(url || '').includes('/issues-plan') && body?.issuePlan) {
+        window.renderManagerIssueDependencyMap(body.issuePlan, currentRepositoryId());
+      }
       return body;
     };
   }

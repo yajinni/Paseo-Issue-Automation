@@ -90,6 +90,22 @@ test('dependency map preserves scroll position across issue-plan refresh and red
   assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /requestAnimationFrame/);
 });
 
+test('dependency map skips unchanged plan rerenders but can restore another repository from cache', () => {
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /let latestPlanFingerprint = null/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /let latestPlanRepositoryId = null/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /function issuePlanFingerprint\(plan\)/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /window\.renderManagerIssueDependencyMap = function renderManagerIssueDependencyMap/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /repositoryId === latestPlanRepositoryId && fingerprint === latestPlanFingerprint/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /renderFlow\(plan, repositoryId\)/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /window\.renderManagerIssueDependencyMap\(body\.issuePlan, currentRepositoryId\(\)\)/);
+});
+
+test('status polling updates capacity text without rebuilding the dependency map', () => {
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /function updateFlowLimit\(\)/);
+  assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /updateFlowLimit\(\);/);
+  assert.doesNotMatch(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /if \(latestPlan\) renderFlow\(latestPlan\)/);
+});
+
 test('Issue map changes remain scoped inside the existing Issues workload card', () => {
   assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /document\.querySelector\('\[data-manager-view="automation"\]'\)/);
   assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /findCard\(view, 'Issue workload'\)/);
