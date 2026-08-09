@@ -8,7 +8,12 @@ const managed = {
   pullRequestNumber: 34,
   branchName: 'ai/issue-12-test',
 };
-const job = { reviewedHeadSha: 'abcdef123', reviewRequestId: 'review-1' };
+const job = {
+  reviewedHeadSha: 'abcdef123',
+  reviewRequestId: 'review-1',
+  sourceReviewRound: 1,
+  sourceReviewCommentId: 12345,
+};
 const config = { baseBranch: 'main' };
 const pr = {
   state: 'OPEN',
@@ -17,26 +22,49 @@ const pr = {
   mergeable: 'MERGEABLE',
   mergeStateStatus: 'CLEAN',
 };
-const successfulRunner = () => ({ ok: true, stdout: '', stderr: '' });
+const successfulRunner = (_command, args) => {
+  if (args[0] === 'rev-parse') return { ok: true, stdout: `${pr.headRefOid}\n`, stderr: '' };
+  if (args[0] === 'status') return { ok: true, stdout: '', stderr: '' };
+  if (args[0] === 'fetch') return { ok: true, stdout: '', stderr: '' };
+  if (args[0] === 'merge-base') return { ok: true, stdout: '', stderr: '' };
+  throw new Error(`Unexpected git command: ${args.join(' ')}`);
+};
 
-test('fix prompt requires an exact validation-summary record', () => {
+test('fix prompt assigns exact-head validation bookkeeping to the controller', () => {
   const prompt = codingFixPrompt({
     ...managed,
     repository: 'owner/repo',
     pullRequestUrl: 'https://github.com/owner/repo/pull/34',
     issueUrl: 'https://github.com/owner/repo/issues/12',
   }, { ...job, findings: 'Repair the edge case.' });
-  assert.match(prompt, /validation-summary/);
-  assert.match(prompt, /--commit <new-head-sha>/);
-  assert.match(prompt, /worktree HEAD, and recorded validation commit are the same exact SHA/);
+  assert.match(prompt, /fix worker owns internal exact-head validation bookkeeping/i);
+  assert.match(prompt, /worktree HEAD and PR head are the same exact SHA/i);
+  assert.match(prompt, /Run changed-area validation and every validation required by the issue/);
+  assert.doesNotMatch(prompt, /--commit <new-head-sha>/);
+  assert.doesNotMatch(prompt, /paseo-issue-automation record/);
 });
 
-test('fixed head is rejected without validation for its exact SHA', () => {
-  assert.throws(() => validateFixedHead('/repo', managed, job, pr, {
+test('fixed head records controller validation for its exact SHA after worktree verification', () => {
+  let recorded = null;
+  const result = validateFixedHead('/repo', managed, job, pr, {
     config,
     runState: { events: [{ event: 'validation-summary', result: 'PASS', commit: 'eeeeeee11' }] },
     runner: successfulRunner,
-  }), /did not record passing validation/);
+    recordValidation(_root, issueNumber, event) {
+      recorded = { issueNumber, event };
+      return {
+        events: [
+          { event: 'validation-summary', result: 'PASS', commit: 'eeeeeee11' },
+          event,
+        ],
+      };
+    },
+  });
+  assert.equal(result.newHeadSha, pr.headRefOid);
+  assert.equal(result.validation.commit, pr.headRefOid);
+  assert.equal(recorded.issueNumber, managed.issueNumber);
+  assert.equal(recorded.event.commit, pr.headRefOid);
+  assert.equal(recorded.event.result, 'PASS');
 });
 
 test('fixed head is rejected when it is stale or conflicts with base', () => {
