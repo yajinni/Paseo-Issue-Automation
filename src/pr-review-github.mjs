@@ -42,6 +42,13 @@ export function managedPrSnapshot(root, prNumber) {
   ], { cwd: root, allowFailure: true });
 }
 
+export function managerPrHealthSnapshot(root, prNumber) {
+  return runJson('gh', [
+    'pr', 'view', String(prNumber), '--json',
+    'number,url,state,isDraft,headRefOid,headRefName,baseRefName,mergedAt,closedAt,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,body,closingIssuesReferences',
+  ], { cwd: root, allowFailure: true });
+}
+
 export function issueSnapshot(root, issueNumber) {
   return runJson('gh', ['issue', 'view', String(issueNumber), '--json', 'number,url,state,stateReason,title,body,comments'], {
     cwd: root, allowFailure: true,

@@ -2,6 +2,8 @@ import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
 import { inspectExternalMigrationAdoption } from './external-adoption.mjs';
 import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
+import { managerPrHealthSummary } from './manager-pr-health.mjs';
+import { managerPrHealthSnapshot } from './pr-review-github.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { inspectRepository } from './repository-registry.mjs';
 import { managedRepositoryOperationalSummary } from './repository-health.mjs';
@@ -65,6 +67,7 @@ export function managerRepositoryStatus(repository, {
   workerManager = null,
   reviewWorkerManager = null,
   rootDir = undefined,
+  prSnapshotLoader = managerPrHealthSnapshot,
 } = {}) {
   if (!repository?.path) throw new Error('A registered repository path is required.');
   const inspected = inspectRepository(repository.path, { runner, platform });
@@ -85,7 +88,13 @@ export function managerRepositoryStatus(repository, {
   }));
   let prReviewStore = null;
   try { prReviewStore = loadPrReviewStore(inspected.path); } catch {}
-  const workQueue = managerWorkQueue(runs, config, prReviewStore);
+  const prHealth = managerPrHealthSummary(runs, prReviewStore, {
+    loadSnapshot: (prNumber) => prSnapshotLoader(inspected.path, prNumber),
+  });
+  const workQueue = {
+    ...managerWorkQueue(runs, config, prReviewStore),
+    prHealth,
+  };
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'merged', 'closed'].includes(String(item?.status || '')),
   );
