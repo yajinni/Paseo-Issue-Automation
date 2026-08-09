@@ -15,7 +15,8 @@ export const MANAGER_CONFIGURATION_TABS_STYLE = String.raw`
 .manager-auto-merge-switch{position:relative;width:46px;height:26px;flex:0 0 auto}.manager-auto-merge-switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:2}.manager-auto-merge-switch input:disabled{cursor:not-allowed}.manager-auto-merge-track{position:absolute;inset:0;border:1px solid #526074;border-radius:999px;background:#202b39;transition:background .15s ease,border-color .15s ease}.manager-auto-merge-track::after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#c8d3e0;transition:transform .15s ease,background .15s ease}.manager-auto-merge-switch input:checked + .manager-auto-merge-track{background:#2f6fed;border-color:#5f8ff3}.manager-auto-merge-switch input:checked + .manager-auto-merge-track::after{transform:translateX(20px);background:#fff}.manager-auto-merge-switch input:focus-visible + .manager-auto-merge-track{outline:2px solid #8ab8ff;outline-offset:3px}.manager-auto-merge-setting[aria-disabled="true"] .manager-auto-merge-track{opacity:.55}
 .manager-model-catalog-note{grid-column:1/-1;color:var(--paseo-muted);font-size:11px;line-height:1.4;margin-top:2px}.manager-model-catalog-note.error{color:#ffaca5}
 .manager-integration-summary{display:grid;gap:14px;padding:15px;border:1px solid #334156;border-radius:11px;background:#101925}.manager-integration-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.manager-integration-state{display:flex;align-items:center;gap:9px}.manager-integration-state-dot{width:11px;height:11px;border-radius:999px;background:#718097;box-shadow:0 0 0 3px #71809722}.manager-integration-state.connected .manager-integration-state-dot{background:#55bd78;box-shadow:0 0 0 3px #55bd7822}.manager-integration-state.attention .manager-integration-state-dot{background:#e2ad45;box-shadow:0 0 0 3px #e2ad4522}.manager-integration-state.blocked .manager-integration-state-dot{background:#e06f78;box-shadow:0 0 0 3px #e06f7822}.manager-integration-state strong{display:block;font-size:15px}.manager-integration-state small{display:block;color:var(--paseo-muted);font-size:11px;margin-top:3px}.manager-integration-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.manager-integration-fact{border:1px solid #2d394b;border-radius:9px;background:#111a26;padding:10px}.manager-integration-fact span{display:block;color:var(--paseo-muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}.manager-integration-fact strong{font-size:12px;line-height:1.4;overflow-wrap:anywhere}.manager-integration-actions{display:flex;gap:8px;flex-wrap:wrap}.manager-integration-advanced{margin-top:12px;border-top:1px solid #2c3849;padding-top:12px}.manager-integration-advanced>summary{cursor:pointer;color:#aebed1;font-weight:650;font-size:12px}.manager-integration-advanced-body{display:grid;gap:12px;margin-top:12px}.manager-integration-advanced-body>p{margin:0;color:var(--paseo-muted);line-height:1.45}.manager-integration-advanced-body .facts{margin:0}.manager-integration-advanced-body .actions{margin-top:0!important}
-@media(max-width:820px){.manager-integration-facts{grid-template-columns:1fr}.manager-integration-head{display:block}.manager-integration-actions{margin-top:10px}}
+.manager-readiness-card{display:grid;gap:14px}.manager-readiness-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px;border:1px solid #334156;border-radius:11px;background:#101925}.manager-readiness-state{display:flex;gap:10px;align-items:flex-start}.manager-readiness-dot{width:12px;height:12px;margin-top:4px;border-radius:999px;background:#718097;box-shadow:0 0 0 3px #71809722}.manager-readiness-state.ready .manager-readiness-dot{background:#55bd78;box-shadow:0 0 0 3px #55bd7822}.manager-readiness-state.attention .manager-readiness-dot{background:#e2ad45;box-shadow:0 0 0 3px #e2ad4522}.manager-readiness-state.blocked .manager-readiness-dot{background:#e06f78;box-shadow:0 0 0 3px #e06f7822}.manager-readiness-state strong{display:block;font-size:17px}.manager-readiness-state p{margin:4px 0 0;color:var(--paseo-muted);font-size:12px;line-height:1.45}.manager-readiness-list{display:grid;gap:8px}.manager-readiness-check{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 12px;border:1px solid #2d394b;border-radius:9px;background:#111a26}.manager-readiness-check.bad{border-color:#74424b;background:#28191e}.manager-readiness-check.pending{border-color:#6c5b35;background:#272214}.manager-readiness-check-dot{width:20px;height:20px;border-radius:999px;display:grid;place-items:center;border:1px solid #526074;color:#c6d2e1;font-size:11px}.manager-readiness-check.ok .manager-readiness-check-dot{border-color:#2f8d55;background:#163424;color:#b9e9ca}.manager-readiness-check.bad .manager-readiness-check-dot{border-color:#98514b;background:#5f302d;color:#ffd2d0}.manager-readiness-check.pending .manager-readiness-check-dot{border-color:#80672c;background:#3b3015;color:#f1d38a}.manager-readiness-check-copy strong{display:block;font-size:12px}.manager-readiness-check-copy small{display:block;color:var(--paseo-muted);font-size:11px;margin-top:3px;line-height:1.4}.manager-readiness-passed,.manager-readiness-advanced{border-top:1px solid #2c3849;padding-top:12px}.manager-readiness-passed>summary,.manager-readiness-advanced>summary{cursor:pointer;color:#aebed1;font-weight:650;font-size:12px}.manager-readiness-passed-list{display:grid;gap:6px;margin-top:10px}.manager-readiness-passed-row{display:flex;align-items:center;gap:8px;color:#aebed1;font-size:11px}.manager-readiness-passed-row span{color:#65c987}.manager-readiness-advanced-body{display:grid;gap:12px;margin-top:12px}.manager-readiness-advanced-body>.card{margin:0!important}.manager-readiness-empty{padding:12px;border:1px solid #356b4a;border-radius:9px;background:#12261a;color:#b9e9ca;font-size:12px}
+@media(max-width:820px){.manager-integration-facts{grid-template-columns:1fr}.manager-integration-head,.manager-readiness-hero{display:block}.manager-integration-actions,.manager-readiness-hero>button{margin-top:10px}.manager-readiness-check{grid-template-columns:22px minmax(0,1fr)}.manager-readiness-check button{grid-column:2}}
 @media(max-width:720px){.manager-config-tabs{margin-inline:-2px}.manager-config-fields .manager-auto-merge-setting{grid-template-columns:minmax(0,1fr) auto!important;padding:13px!important}}
 `;
 
@@ -27,7 +28,7 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     ['repository', 'GitHub repository'],
     ['issues', 'Issues setup'],
     ['review', 'Review setup'],
-    ['readiness', 'Final readiness'],
+    ['readiness', 'Readiness'],
   ];
   const GROUP_STEP = new Map([
     ['Coder model', 'harness'],
@@ -44,6 +45,7 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
   let activeStep = localStorage.getItem('paseo-manager-config-tab') || 'paseo';
   let modelCatalog = null;
   let modelCatalogLoading = false;
+  let modelCatalogError = null;
 
   function moveViewCards(source, target, step) {
     if (!source || !target) return;
@@ -228,10 +230,12 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
   }
 
   async function loadModelCatalog(force = false) {
-    if (modelCatalogLoading || modelCatalog && !force) { renderModelCatalog(); return; }
-    if (typeof selectedPath !== 'function') { modelCatalogNote('Model catalog is unavailable in this view.', true); return; }
+    if (modelCatalogLoading || modelCatalog && !force) { renderModelCatalog(); renderCurrentReadiness(); return; }
+    if (typeof selectedPath !== 'function') { modelCatalogError = 'Model catalog is unavailable in this view.'; modelCatalogNote(modelCatalogError, true); renderCurrentReadiness(); return; }
     modelCatalogLoading = true;
+    modelCatalogError = null;
     modelCatalogNote('Loading models and thinking levels from Paseo…');
+    renderCurrentReadiness();
     try {
       const response = await fetch(selectedPath('configuration/harnesses'), { headers: { accept: 'application/json' } });
       const body = await response.json();
@@ -239,13 +243,15 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
       modelCatalog = body;
       renderModelCatalog();
     } catch (error) {
-      modelCatalogNote(error?.message || String(error), true);
+      modelCatalogError = error?.message || String(error);
+      modelCatalogNote(modelCatalogError, true);
       syncModelSelect('coder-model', 'Coder model');
       syncModelSelect('reviewer-model', 'Reviewer model');
       syncThinkingSelect('coder-model', 'coder-thinking', 'Coder thinking level');
       syncThinkingSelect('reviewer-model', 'reviewer-thinking', 'Reviewer thinking level');
     } finally {
       modelCatalogLoading = false;
+      renderCurrentReadiness();
     }
   }
 
@@ -254,11 +260,12 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     ensureSelect('coder-thinking', 'Coder thinking level');
     ensureSelect('reviewer-model', 'Reviewer model');
     ensureSelect('reviewer-thinking', 'Reviewer thinking level');
-    document.getElementById('coder-model')?.addEventListener('change', () => syncThinkingSelect('coder-model', 'coder-thinking', 'Coder thinking level'));
-    document.getElementById('reviewer-model')?.addEventListener('change', () => syncThinkingSelect('reviewer-model', 'reviewer-thinking', 'Reviewer thinking level'));
-    document.getElementById('coding-harness')?.addEventListener('change', () => renderModelCatalog());
+    document.getElementById('coder-model')?.addEventListener('change', () => { syncThinkingSelect('coder-model', 'coder-thinking', 'Coder thinking level'); renderCurrentReadiness(); });
+    document.getElementById('reviewer-model')?.addEventListener('change', () => { syncThinkingSelect('reviewer-model', 'reviewer-thinking', 'Reviewer thinking level'); renderCurrentReadiness(); });
+    document.getElementById('coding-harness')?.addEventListener('change', () => { renderModelCatalog(); renderCurrentReadiness(); });
     document.getElementById('manager-refresh-harnesses')?.addEventListener('click', () => {
       modelCatalog = null;
+      modelCatalogError = null;
       setTimeout(() => loadModelCatalog(true), 0);
     });
   }
@@ -376,6 +383,134 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     migrationAction.disabled = migrationTarget ? document.getElementById(migrationTarget)?.disabled === true : true;
   }
 
+  function buildReadiness(configuration) {
+    if (!configuration || document.getElementById('manager-readiness-card')) return;
+    const legacy = [...configuration.children].filter((child) => child.dataset.configStep === 'readiness');
+    const card = document.createElement('section');
+    card.className = 'card wide manager-readiness-card';
+    card.id = 'manager-readiness-card';
+    card.dataset.configStep = 'readiness';
+    card.innerHTML = '<div><h2>Readiness</h2><p class="muted">Can Paseo autonomously claim, code, review, and complete work for this repository?</p></div><div class="manager-readiness-hero"><div class="manager-readiness-state" id="manager-readiness-state"><span class="manager-readiness-dot"></span><div><strong>Checking readiness…</strong><p>Reading current configuration and service availability.</p></div></div><button type="button" class="secondary" id="manager-readiness-recheck">Recheck</button></div><div class="manager-readiness-list" id="manager-readiness-problems"></div><details class="manager-readiness-passed" id="manager-readiness-passed"><summary>Passed checks</summary><div class="manager-readiness-passed-list" id="manager-readiness-passed-list"></div></details>';
+
+    const advanced = document.createElement('details');
+    advanced.className = 'manager-readiness-advanced';
+    const summary = document.createElement('summary');
+    summary.textContent = 'Advanced maintenance and diagnostics';
+    const body = document.createElement('div');
+    body.className = 'manager-readiness-advanced-body';
+    for (const item of legacy) body.append(item);
+    advanced.append(summary, body);
+    card.append(advanced);
+    configuration.append(card);
+
+    document.getElementById('manager-readiness-recheck')?.addEventListener('click', () => {
+      modelCatalog = null;
+      modelCatalogError = null;
+      loadModelCatalog(true);
+      document.getElementById('refresh-button')?.click();
+    });
+  }
+
+  function readinessCheck(id, label, ok, detail, step, pending = false) {
+    return { id, label, ok: ok === true, detail, step, pending: pending === true };
+  }
+
+  function readinessChecks(data) {
+    const setup = data?.setup || {};
+    const config = data?.configuration || {};
+    const automation = data?.automation || {};
+    const models = data?.models || {};
+    const external = setup.externalController === true || setup.controllerMode === 'external-manager';
+    const provider = providerForHarness();
+    const catalogKnown = Boolean(modelCatalog);
+    const catalogPending = modelCatalogLoading || (!catalogKnown && !modelCatalogError);
+    const coderConfigured = Boolean(String(models.coder || document.getElementById('coder-model')?.value || '').trim());
+    const reviewerConfigured = Boolean(String(models.reviewer || document.getElementById('reviewer-model')?.value || '').trim());
+    const coderValue = String(document.getElementById('coder-model')?.value || models.coder || '').trim();
+    const reviewerValue = String(document.getElementById('reviewer-model')?.value || models.reviewer || '').trim();
+    const workerRequired = data?.capabilities?.backgroundWorkers !== false;
+    const checks = [];
+
+    checks.push(readinessCheck('setup', 'Repository setup', setup.complete === true, setup.complete === true ? 'Required setup is complete.' : 'Repository setup has not completed.', 'repository'));
+    checks.push(readinessCheck('integration', 'Standalone repository integration', external && setup.migrationPending !== true, external ? (setup.migrationPending ? 'Migration is still pending.' : 'Standalone-manager integration is active.') : 'Repository is not using the standalone manager.', 'repository'));
+    checks.push(readinessCheck('github', 'GitHub base branch', Boolean(setup.baseBranch), setup.baseBranch ? 'Base branch: ' + setup.baseBranch : 'Choose a base branch.', 'repository'));
+
+    if (catalogPending) checks.push(readinessCheck('paseo-catalog', 'Paseo coding catalog', false, 'Checking available harnesses and models…', 'harness', true));
+    else checks.push(readinessCheck('paseo-catalog', 'Paseo coding catalog', !modelCatalogError && Boolean(provider), modelCatalogError || (provider ? 'Paseo currently reports the selected coding harness.' : 'The selected coding harness is not currently reported by Paseo.'), 'harness'));
+
+    const coderAvailable = catalogKnown ? Boolean(modelByValue(coderValue)) : coderConfigured;
+    checks.push(readinessCheck('coder-model', 'Coder model', coderConfigured && coderAvailable, !coderConfigured ? 'Choose a coder model.' : coderAvailable ? 'Configured coder model is currently available.' : 'Configured coder model is not currently reported by Paseo.', 'harness', catalogPending));
+    const reviewerAvailable = catalogKnown ? Boolean(modelByValue(reviewerValue)) : reviewerConfigured;
+    checks.push(readinessCheck('reviewer-model', 'Reviewer model', reviewerConfigured && reviewerAvailable, !reviewerConfigured ? 'Choose a reviewer model.' : reviewerAvailable ? 'Configured reviewer model is currently available.' : 'Configured reviewer model is not currently reported by Paseo.', 'harness', catalogPending));
+
+    checks.push(readinessCheck('issues', 'Issue automation configuration', Number(automation.maxActive || 0) > 0, Number(automation.maxActive || 0) > 0 ? 'Issue concurrency is configured.' : 'Configure issue-processing capacity.', 'issues'));
+    const workflow = String(config.review?.workflow || '').trim();
+    checks.push(readinessCheck('review', 'Review workflow', Boolean(workflow), workflow ? 'Review workflow is configured.' : 'Choose a review workflow.', 'review'));
+    if (data?.chatGptProfile?.required === true) checks.push(readinessCheck('chatgpt', 'ChatGPT review profile', data.chatGptProfile.ready === true, data.chatGptProfile.summary || 'Complete the ChatGPT review profile.', 'review'));
+    checks.push(readinessCheck('coding-worker', 'Coding worker availability', !workerRequired || data?.worker?.running === true, !workerRequired || data?.worker?.running === true ? 'Automatic coding worker is available.' : 'Automatic coding worker is unavailable.', 'harness'));
+    checks.push(readinessCheck('review-state', 'PR review state', data?.prReviews?.available !== false, data?.prReviews?.available === false ? (data.prReviews.error || 'PR review state could not be read.') : 'PR review state is available. The review queue may be intentionally stopped without affecting readiness.', 'review'));
+    return checks;
+  }
+
+  function readinessCheckElement(check) {
+    const row = document.createElement('div');
+    row.className = 'manager-readiness-check ' + (check.pending ? 'pending' : check.ok ? 'ok' : 'bad');
+    const dot = document.createElement('span'); dot.className = 'manager-readiness-check-dot'; dot.textContent = check.pending ? '…' : check.ok ? '✓' : '!';
+    const copy = document.createElement('div'); copy.className = 'manager-readiness-check-copy';
+    const strong = document.createElement('strong'); strong.textContent = check.label;
+    const small = document.createElement('small'); small.textContent = check.detail || '';
+    copy.append(strong, small); row.append(dot, copy);
+    if (!check.ok && !check.pending && check.step) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary'; button.textContent = 'Open ' + (check.step === 'harness' ? 'Coding' : check.step === 'repository' ? 'GitHub' : check.step === 'issues' ? 'Issues' : check.step === 'review' ? 'Reviews' : 'settings');
+      button.addEventListener('click', () => showStep(check.step)); row.append(button);
+    }
+    return row;
+  }
+
+  function renderReadiness(data) {
+    const card = document.getElementById('manager-readiness-card');
+    if (!card || !data) return;
+    const checks = readinessChecks(data);
+    const failed = checks.filter((check) => !check.ok && !check.pending);
+    const pending = checks.filter((check) => check.pending);
+    const passed = checks.filter((check) => check.ok && !check.pending);
+    const state = document.getElementById('manager-readiness-state');
+    const problems = document.getElementById('manager-readiness-problems');
+    const passedDetails = document.getElementById('manager-readiness-passed');
+    const passedList = document.getElementById('manager-readiness-passed-list');
+    const recheck = document.getElementById('manager-readiness-recheck');
+    if (!state || !problems || !passedDetails || !passedList || !recheck) return;
+
+    const ready = failed.length === 0 && pending.length === 0;
+    state.className = 'manager-readiness-state ' + (ready ? 'ready' : failed.length ? 'blocked' : 'attention');
+    state.querySelector('strong').textContent = ready ? 'Ready for autonomous work' : failed.length ? (failed.length + ' thing' + (failed.length === 1 ? '' : 's') + ' need attention') : 'Checking readiness…';
+    state.querySelector('p').textContent = ready
+      ? 'Paseo has the configuration and services it needs to process this repository.'
+      : failed.length ? 'Fix the items below before relying on autonomous issue processing.' : 'Verifying the current Paseo coding catalog.';
+    recheck.disabled = modelCatalogLoading;
+    recheck.textContent = modelCatalogLoading ? 'Checking…' : 'Recheck';
+
+    problems.textContent = '';
+    if (ready) {
+      const empty = document.createElement('div'); empty.className = 'manager-readiness-empty'; empty.textContent = 'All required configuration checks are passing.'; problems.append(empty);
+    } else {
+      for (const check of [...failed, ...pending]) problems.append(readinessCheckElement(check));
+    }
+
+    passedDetails.querySelector('summary').textContent = passed.length + ' check' + (passed.length === 1 ? '' : 's') + ' passed';
+    passedList.textContent = '';
+    for (const check of passed) {
+      const row = document.createElement('div'); row.className = 'manager-readiness-passed-row';
+      const mark = document.createElement('span'); mark.textContent = '✓';
+      const label = document.createElement('div'); label.textContent = check.label;
+      row.append(mark, label); passedList.append(row);
+    }
+  }
+
+  function renderCurrentReadiness() {
+    try { if (typeof currentStatus !== 'undefined' && currentStatus) renderReadiness(currentStatus); } catch {}
+  }
+
   function showStep(step, { focus = false } = {}) {
     if (!STEPS.some(([id]) => id === step)) step = 'paseo';
     activeStep = step;
@@ -401,11 +536,14 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
       }
     }
     if (step === 'harness') loadModelCatalog(false);
-    if (step === 'repository') {
-      try { if (typeof currentStatus !== 'undefined' && currentStatus) renderRepositoryIntegration(currentStatus); } catch {}
-    }
+    if (step === 'repository') renderCurrentIntegration();
+    if (step === 'readiness') { renderCurrentReadiness(); loadModelCatalog(false); }
     document.dispatchEvent(new CustomEvent('paseo:configuration-tab', { detail: { step } }));
     if (focus) document.querySelector('.manager-config-tab[aria-selected="true"]')?.focus();
+  }
+
+  function renderCurrentIntegration() {
+    try { if (typeof currentStatus !== 'undefined' && currentStatus) renderRepositoryIntegration(currentStatus); } catch {}
   }
 
   function redirectLegacyViews() {
@@ -461,12 +599,13 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     moveViewCards(integration, configuration, 'repository');
     moveViewCards(maintenance, configuration, 'readiness');
     simplifyRepositoryIntegration();
+    buildReadiness(configuration);
     patchOverview();
     showStep(activeStep);
     redirectLegacyViews();
 
     document.getElementById('review-workflow')?.addEventListener('change', () => {
-      queueMicrotask(() => { syncAutoMergeSetting(); showStep(activeStep); });
+      queueMicrotask(() => { syncAutoMergeSetting(); showStep(activeStep); renderCurrentReadiness(); });
     });
 
     const title = document.getElementById('manager-view-title');
@@ -477,7 +616,7 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
         const current = document.querySelector('[data-manager-view-target][aria-current="page"]')?.dataset.managerViewTarget;
         if (current === 'configuration') {
           if (title) title.textContent = 'Configuration';
-          if (description) description.textContent = 'Setup-aligned repository settings, integration, health, and recovery.';
+          if (description) description.textContent = 'Current repository settings and readiness for autonomous work.';
           showStep(activeStep);
         } else if (current === 'integration' || current === 'maintenance') redirectLegacyViews();
       }).observe(navObserver, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
@@ -488,6 +627,7 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     window.addManagerStatusListener((data) => {
       syncAutoMergeSetting();
       renderRepositoryIntegration(data);
+      renderReadiness(data);
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true });
