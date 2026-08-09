@@ -163,21 +163,21 @@ test('adoption fails closed when embedded files, active issues, or unsafe local 
   assert.equal(loadControllerMode(activeRoot), CONTROLLER_MODES.embedded);
 });
 
-test('manager finalization requires stopped workers and refreshes normal setup readiness', () => {
+test('manager finalization allows an idle coding worker but refuses active coding and refreshes setup readiness', () => {
   const repositoryEntry = { id: 'julie', path: '/julie', name: 'Julie' };
   assert.throws(
     () => finalizeExistingMigrationFromManager(repositoryEntry, {
-      workerManager: { status: () => ({ running: true }) },
+      workerManager: { status: () => ({ running: true, state: 'active', activeCount: 1 }) },
       reviewWorkerManager: { status: () => ({ running: false }) },
       adopter: () => ({ adopted: true }),
       refresher: () => ({ checks: { ready: true }, config: { setupComplete: true } }),
     }),
-    /Stop this repository’s coding worker/,
+    /active coding work to finish/,
   );
 
   const calls = [];
   const result = finalizeExistingMigrationFromManager(repositoryEntry, {
-    workerManager: { status: () => ({ running: false }) },
+    workerManager: { status: () => ({ running: true, state: 'idle', activeCount: 0 }) },
     reviewWorkerManager: { status: () => ({ running: false }) },
     adopter: (root) => { calls.push(['adopt', root]); return { adopted: true }; },
     refresher: (root, options) => {
