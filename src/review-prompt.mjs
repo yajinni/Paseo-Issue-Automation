@@ -73,10 +73,7 @@ If changes are required:
 4. Add one detailed review comment using the marker above and result
    "changes_requested". That comment is the authoritative repair handoff, so it
    must contain the complete blocking findings and required changes.
-5. Do not launch, contact, or independently instruct a coding agent. Paseo
-   reconciliation owns creation of the repair job and will pass this exact
-   review request, reviewed SHA, review round, source comment, and findings to
-   the existing coding workspace.
+5. Do not launch, contact, or independently instruct a coding agent. Paseo reconciliation owns creation of the repair job and will pass this exact review request, reviewed SHA, review round, source comment, and findings to the existing coding workspace.
 
 If the pull request passes:
 
@@ -131,11 +128,12 @@ export function renderReviewPrompt({
   ...values
 }) {
   const normalized = normalizeTemplate(template);
+  const expectedHeadSha = String(values.headSha || '');
   const reviewResultInstruction = allowChatGPTMerge
     ? [
         '1. Add the structured review comment using result "approved". This comment is Paseo\'s authoritative approval evidence and must be posted before merge.',
-        '2. Re-fetch the PR and confirm its current head still equals {{headSha}}.',
-        '3. Merge the PR using an allowed repository merge method and an expected-head-SHA guard when supported.',
+        `2. Re-fetch the PR and confirm its current head still equals ${expectedHeadSha}.`,
+        `3. Merge the PR using an allowed repository merge method with ${expectedHeadSha} as the expected head SHA when the API supports that guard.`,
         '4. Identify only the issue explicitly associated with this PR.',
         '5. Check whether merging closed that issue automatically.',
         allowIssueClosure
