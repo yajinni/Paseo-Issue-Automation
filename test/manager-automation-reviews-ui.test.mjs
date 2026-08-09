@@ -6,12 +6,15 @@ import {
   MANAGER_AUTOMATION_REVIEWS_STYLE,
 } from '../src/manager-automation-reviews-ui.mjs';
 
-test('Automation view separates claims scheduling from coding worker controls', () => {
-  for (const text of ['Claims & scheduling', 'Coding worker', 'Manager-wide capacity remains under Manager Settings']) {
+test('Automation view separates claims scheduling from status-only coding worker state', () => {
+  for (const text of ['Claims & scheduling', 'Coding worker', 'Automatically available for new issue coding and review fixes', "['Status', worker.state === 'active' ? 'Active' : 'Idle']"]) {
     assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
-  for (const action of ['resume', 'pause', 'run-now', 'reconcile', 'worker/start', 'worker/stop', 'worker/restart']) {
+  for (const action of ['resume', 'pause', 'run-now', 'reconcile']) {
     assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  for (const action of ['worker/start', 'worker/stop', 'worker/restart']) {
+    assert.doesNotMatch(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 });
 
