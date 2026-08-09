@@ -6,11 +6,17 @@ import {
   MANAGER_CONFIG_INTEGRATION_STYLE,
 } from '../src/manager-config-integration-maintenance-ui.mjs';
 
-test('Connect Paseo is configured directly in the manager without obsolete setup-link cleanup', () => {
+test('Connect Paseo is configured directly without source or compatibility detail rows', () => {
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['Paseo connection'/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /configuration\/paseo-connection/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Connect & check/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Paseo host/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /paseoSummaryRow\(summary, 'Connection'/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /paseoSummaryRow\(summary, 'CLI'/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /paseoSummaryRow\(summary, 'Daemon'/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /paseoSummaryRow\(summary, 'Authentication'/);
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /paseoSummaryRow\(summary, 'Source'/);
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /paseoSummaryRow\(summary, 'Compatibility'/);
   assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /removeSetupLinkCards/);
   assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /manager-config-step-link/);
 });
@@ -34,10 +40,21 @@ test('Coding harness configuration uses separate coder review and harness boxes 
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Choose a Paseo coding harness/);
 });
 
-test('issue processing owns repository polling cadence', () => {
+test('GitHub repository base branch uses a live GitHub-backed dropdown', () => {
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /ensureBaseBranchSelect/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /configuration\/branches/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Choose a GitHub branch/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Refresh branches/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Loading branches from GitHub/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /step === 'repository'[^]*loadBranchCatalog/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /currently configured; not reported by GitHub/);
+});
+
+test('issue processing owns repository polling cadence and uses requested label wording', () => {
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['Issue processing'.*'poll-interval'\]/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['GitHub repository'.*\['base-branch'\]\]/);
   assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /\['GitHub repository'.*'poll-interval'/);
+  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Labels \(Recommended\)/);
 });
 
 test('manager configuration uses the same review workflow wording as setup', () => {
@@ -70,12 +87,11 @@ test('Configuration shows dirty state inline validation Save and Discard without
   assert.match(MANAGER_CONFIG_INTEGRATION_STYLE, /position:sticky/);
 });
 
-test('Integration adds a concise ownership summary and collapses repository setup diagnostics', () => {
-  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Integration summary/);
+test('GitHub repository keeps managed integration and technical details without the obsolete Integration summary', () => {
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Integration summary/);
+  assert.doesNotMatch(MANAGER_CONFIG_INTEGRATION_SCRIPT, /manager-integration-summary/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Managed repository integration/);
   assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Repository and setup technical details/);
-  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /Integration actions only change manager-owned components/);
-  assert.match(MANAGER_CONFIG_INTEGRATION_SCRIPT, /reviewed pull requests/);
 });
 
 test('Maintenance starts with health and recovery summary based on existing operational blockers', () => {
