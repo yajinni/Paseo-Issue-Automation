@@ -21,8 +21,8 @@ function normalizedRemote(value) {
 function repositoryNameFromRemote(remote) {
   const value = normalizedRemote(remote);
   if (!value) return null;
-  const matched = value.match(/(?:github\.com[/:])([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
-  return matched ? `${matched[1]}/${matched[2]}` : null;
+  const match = value.match(/(?:github\.com[/:])([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  return match ? `${match[1]}/${match[2]}` : null;
 }
 
 function slug(value) {
