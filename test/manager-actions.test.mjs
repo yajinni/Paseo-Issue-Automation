@@ -39,6 +39,8 @@ function fakeActions(calls) {
       calls.push(['restart-queued', root, issue, options]);
       return { queued: true, issueNumber: issue, phase: 'queued' };
     },
+    appendControllerLog: (root, entry) => { calls.push(['controller-log', root, entry]); return entry; },
+    appendIssueLifecycle: (root, issue, entry) => { calls.push(['lifecycle', root, issue, entry]); return entry; },
   };
 }
 
@@ -49,7 +51,7 @@ test('manager actions map pause, resume, dispatch, and reconciliation to one roo
   assert.deepEqual(managerRepositoryAction('/repo-a', '/api/resume', {}, actions), { claimsEnabled: true });
   assert.deepEqual(managerRepositoryAction('/repo-a', '/api/run-now', {}, actions), { claimed: false, reason: 'none' });
   assert.deepEqual(managerRepositoryAction('/repo-a', '/api/reconcile', {}, actions), { changed: 0 });
-  assert.deepEqual(calls.slice(0, 2), [
+  assert.deepEqual(calls.filter((entry) => entry[0] === 'claims').slice(0, 2), [
     ['claims', '/repo-a', false],
     ['claims', '/repo-a', true],
   ]);
@@ -97,4 +99,34 @@ test('manager issue actions validate issue numbers and queue restart without run
     /positive issueNumber/,
   );
   assert.equal(managerRepositoryAction('/repo-c', '/api/not-allowed', {}, actions), null);
+});
+
+test('manual issue actions append readable operator lifecycle entries for the Activity Timeline', () => {
+  const calls = [];
+  const actions = fakeActions(calls);
+  managerRepositoryAction('/repo-d', '/api/skip-issue', { issueNumber: 27 }, actions);
+  managerRepositoryAction('/repo-d', '/api/restart-issue', { issueNumber: 27, branchAction: 'keep' }, actions);
+  managerRepositoryAction('/repo-d', '/api/abandon-issue', { issueNumber: 27, reason: 'operator stop' }, actions);
+
+  const lifecycle = calls.filter((entry) => entry[0] === 'lifecycle');
+  assert.equal(lifecycle.length, 3);
+  assert.equal(lifecycle[0][2], 27);
+  assert.equal(lifecycle[0][3].type, 'operator-action');
+  assert.equal(lifecycle[0][3].source, 'operator');
+  assert.match(lifecycle[0][3].message, /Skip issue completed/i);
+  assert.equal(lifecycle[1][3].evidence.action, 'restart-issue');
+  assert.equal(lifecycle[1][3].evidence.branchAction, 'keep');
+  assert.equal(lifecycle[2][3].evidence.action, 'abandon-issue');
+});
+
+test('failed manual issue actions append failed lifecycle evidence before rethrowing', () => {
+  const calls = [];
+  const actions = fakeActions(calls);
+  actions.skipIssue = () => { throw new Error('skip failed'); };
+  assert.throws(() => managerRepositoryAction('/repo-e', '/api/skip-issue', { issueNumber: 28 }, actions), /skip failed/);
+  const lifecycle = calls.find((entry) => entry[0] === 'lifecycle');
+  assert.equal(lifecycle[2], 28);
+  assert.equal(lifecycle[3].status, 'failed');
+  assert.match(lifecycle[3].message, /Skip issue failed/i);
+  assert.match(lifecycle[3].evidence.error, /skip failed/i);
 });
