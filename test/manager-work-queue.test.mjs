@@ -108,6 +108,24 @@ test('queue timeline combines recorded activity, review events, and prior attemp
   assert.equal(item.timeline[2].type, 'attempt-history');
 });
 
+test('completed merged issue runs remain recorded but do not count as active work', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 274,
+    issueTitle: 'Reconcile accepted OpenSpec and rewrite status',
+    status: 'completed',
+    phase: 'completed',
+    prNumber: 383,
+    mergedHeadSha: '0298d691a043ce5c0bff81678edbb67b1ff5306c',
+    completedAt: '2026-08-09T04:06:31.000Z',
+  }]);
+
+  assert.equal(queue.total, 1);
+  assert.equal(queue.active, 0);
+  assert.equal(queue.items[0].stage, 'completed');
+  assert.equal(queue.items[0].stageLabel, 'Completed');
+  assert.deepEqual(queue.items[0].pullRequest, { number: 383, url: null });
+});
+
 test('queue is issue-number ordered and reports stage/attention counts', () => {
   const queue = managerWorkQueue([
     { issueNumber: 12, status: PASEO_LABELS.failed },

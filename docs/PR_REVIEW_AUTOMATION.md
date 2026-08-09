@@ -216,9 +216,11 @@ Tracking query parameters and fragments are removed. Paseo stops on login, home,
 
 Automatic merge is disabled by default. Enable it only with explicit project configuration. When disabled, an approved result transitions to human review.
 
-When ChatGPT merge is enabled, the prompt requires an exact-head recheck and an expected-head guard where supported. Paseo independently verifies the PR merged and then checks the explicitly associated issue. Safe Paseo issue-closure fallback is a separate opt-in and requires an unambiguous `Closes #N` association.
+When ChatGPT merge is enabled, the prompt requires an exact-head recheck and an expected-head guard where supported. Regardless of who performs the merge, Paseo independently reconciles the persisted managed PR by its recorded PR number and verifies the exact merged head has both PASS validation evidence and APPROVED review evidence.
 
-A PR closed without merge becomes `closed_unmerged`. It never closes or completes the issue automatically. The dashboard offers operator actions to reopen the PR, return the issue to coding, return it to backlog, cancel it, or mark it manually resolved.
+After that evidence is established, Paseo verifies the explicitly associated issue. If GitHub already closed it, Paseo records the local issue run completed. If the issue is still open but the merged PR has an unambiguous closing association such as `Closes #N`, `Fixes #N`, or `Resolves #N`, Paseo closes that exact issue and reads it back before recording completion. This is required for non-default integration branches, where GitHub may merge the PR without applying the closing keyword to the issue. The legacy `allowPaseoIssueClosureFallback` setting is retained in stored configuration for compatibility but no longer gates this safe post-merge completion path.
+
+If the association is missing or ambiguous, Paseo does not close anything and keeps post-merge completion pending for operator attention. If the closure request cannot be confirmed by readback, reconciliation retries instead of recording a false terminal state. A PR closed without merge becomes `closed_unmerged` and never closes or completes the issue automatically.
 
 ## Restart recovery
 
@@ -302,5 +304,6 @@ These commands do not uninstall Paseo Issue Automation or delete repository code
 - prompt templates cannot execute dashboard JavaScript;
 - GitHub and ChatGPT destinations are validated;
 - process arguments are passed as arrays rather than shell-concatenated commands;
-- automatic merge and issue closure require explicit configuration;
+- automatic merge requires explicit configuration;
+- automatic post-merge issue closure requires exact PASS + APPROVED evidence and an explicit association to that exact issue;
 - final state is independently reconciled from GitHub.
