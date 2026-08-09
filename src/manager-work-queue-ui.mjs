@@ -8,6 +8,7 @@ import {
   MANAGER_LIFECYCLE_STAGE_FOCUS_STYLE,
 } from './manager-lifecycle-stage-focus-ui.mjs';
 import { MANAGER_PR_HEALTH_STYLE } from './manager-pr-health-ui-style.mjs';
+import { MANAGER_PR_RECOVERY_STYLE } from './manager-pr-recovery-ui-style.mjs';
 import { MANAGER_WORK_QUEUE_STYLE as BASE_MANAGER_WORK_QUEUE_STYLE } from './manager-work-queue-ui-style.mjs';
 import { MANAGER_WORK_QUEUE_SCRIPT_PART_1 } from './manager-work-queue-ui-script-part-1.mjs';
 import { MANAGER_WORK_QUEUE_SCRIPT_PART_2 } from './manager-work-queue-ui-script-part-2.mjs';
@@ -17,7 +18,8 @@ import { MANAGER_WORK_QUEUE_SCRIPT_PART_4 } from './manager-work-queue-ui-script
 export const MANAGER_WORK_QUEUE_STYLE = BASE_MANAGER_WORK_QUEUE_STYLE
   + MANAGER_PR_HEALTH_STYLE
   + MANAGER_LIFECYCLE_STAGE_FOCUS_STYLE
-  + MANAGER_EXPANDED_REVIEW_STYLE;
+  + MANAGER_EXPANDED_REVIEW_STYLE
+  + MANAGER_PR_RECOVERY_STYLE;
 export const MANAGER_WORK_QUEUE_SCRIPT = [
   MANAGER_WORK_QUEUE_SCRIPT_PART_1,
   MANAGER_WORK_QUEUE_SCRIPT_PART_2,

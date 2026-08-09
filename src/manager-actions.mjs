@@ -9,6 +9,7 @@ import {
 import { appendControllerLog } from './controller-log.mjs';
 import { dispatchSpecificCodingIssue } from './coding-dispatch.mjs';
 import { dispatchAvailableIssues } from './dispatch-batch.mjs';
+import { reconcileIssuePullRequest, retryIssuePullRequestReview } from './manager-pr-actions.mjs';
 import { queueCodingIssueRestart } from './manager-restart.mjs';
 import { setReviewQueuePaused } from './pr-review-store.mjs';
 import { mergeRepositoryConfig } from './setup-wizard/schema.mjs';
@@ -19,6 +20,8 @@ const defaultActions = {
   setReviewQueuePaused,
   abandonAttempt,
   reconcileDependencies,
+  reconcileIssuePullRequest,
+  retryIssuePullRequestReview,
   skipIssue,
   unskipIssue,
   updateManagedDispatch,
@@ -44,6 +47,8 @@ function actionName(pathname) {
 function actionDetails(pathname, body = {}) {
   const details = {};
   if (body.issueNumber !== undefined) details.issueNumber = Number(body.issueNumber) || body.issueNumber;
+  if (body.pullRequestNumber !== undefined) details.pullRequestNumber = Number(body.pullRequestNumber) || body.pullRequestNumber;
+  if (body.expectedHeadSha) details.expectedHeadSha = String(body.expectedHeadSha);
   if (body.branchAction) details.branchAction = body.branchAction;
   if (pathname === '/api/config') {
     details.baseBranch = body.baseBranch || null;
@@ -74,6 +79,8 @@ function manualActionLabel(action) {
     'unskip-issue': 'Unskip issue',
     'restart-issue': 'Recover issue',
     'abandon-issue': 'Abandon issue',
+    'reconcile-pr': 'Reconcile PR',
+    'retry-pr-review': 'Retry PR review',
   };
   return labels[action] || action.replaceAll('-', ' ');
 }
@@ -89,6 +96,8 @@ function safeIssueLifecycleAction(actions, root, action, details, status, error 
       message: `${manualActionLabel(action)} ${status === 'failed' ? 'failed' : 'completed'}.`,
       evidence: {
         action,
+        pullRequestNumber: details.pullRequestNumber || null,
+        expectedHeadSha: details.expectedHeadSha || null,
         branchAction: details.branchAction || null,
         error: error ? String(error.message || error) : null,
       },
@@ -153,6 +162,17 @@ export function managerRepositoryAction(root, pathname, body = {}, actions = def
   if (pathname === '/api/start-issue') {
     return runLoggedAction(root, pathname, body, actions, () => actions.dispatchSpecificCodingIssue(root, issueNumber(body), {
       branchAction: body.branchAction || 'keep',
+    }));
+  }
+  if (pathname === '/api/reconcile-pr') {
+    return runLoggedAction(root, pathname, body, actions, () => actions.reconcileIssuePullRequest(root, issueNumber(body), {
+      pullRequestNumber: body.pullRequestNumber || null,
+    }));
+  }
+  if (pathname === '/api/retry-pr-review') {
+    return runLoggedAction(root, pathname, body, actions, () => actions.retryIssuePullRequestReview(root, issueNumber(body), {
+      pullRequestNumber: body.pullRequestNumber || null,
+      expectedHeadSha: body.expectedHeadSha || null,
     }));
   }
   if (pathname === '/api/skip-issue') return runLoggedAction(root, pathname, body, actions, () => actions.skipIssue(root, issueNumber(body)));
