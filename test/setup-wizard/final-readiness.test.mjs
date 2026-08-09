@@ -183,19 +183,23 @@ test('final readiness reports a repair failure and remains retryable', async (t)
   assert.equal(result.check.blockers.some((item) => item.code === 'readiness-repository-setup-repair-failed'), true);
 });
 
-test('Finish setup commits durable state before workers and only then enables claims', async (t) => {
+test('Finish setup commits durable state, makes coder available while claims are paused, then enables requested automation', async (t) => {
   const { rootDir, repo } = fixture(t, { eligibleIssueCount: 1 });
   await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null, setupInstallationPreviewBuilder: readySetupPreview });
   const observed = [];
-  const workerManager = { start(repository) { observed.push({ type: 'coding', setup: loadConfig(repo).setupComplete, claims: loadRuntime(repo).claimsEnabled, repository }); return { running: true }; } };
+  const workerManager = { start(repository) { observed.push({ type: 'coding', setup: loadConfig(repo).setupComplete, claims: loadRuntime(repo).claimsEnabled, repository }); return { running: true, state: 'idle' }; } };
   const reviewWorkerManager = { start(repository) { observed.push({ type: 'review', setup: loadConfig(repo).setupComplete, claims: loadRuntime(repo).claimsEnabled, repository }); return { running: true }; } };
   const result = await finishSetup({ startAutomation: true }, { rootDir, workerManager, reviewWorkerManager });
   assert.equal(result.completed, true);
+  assert.equal(result.codingWorkerAvailable, true);
   assert.equal(result.workersStarted, true);
   assert.equal(loadConfig(repo).setupComplete, true);
   assert.equal(loadRuntime(repo).claimsEnabled, true);
   assert.equal(observed.length, 2);
-  assert.ok(observed.every((entry) => entry.setup === true && entry.claims === true));
+  assert.deepEqual(observed.map((entry) => [entry.type, entry.setup, entry.claims]), [
+    ['coding', true, false],
+    ['review', true, true],
+  ]);
   assert.equal(loadSetupSessionStore({ rootDir }).activeSession, null);
 });
 
@@ -207,6 +211,7 @@ test('worker startup failure is recoverable and returns automation to paused sta
     workerManager: { start() { throw new Error('worker unavailable'); } },
   });
   assert.equal(result.completed, true);
+  assert.equal(result.codingWorkerAvailable, false);
   assert.equal(result.workersStarted, false);
   assert.match(result.startError, /worker unavailable/);
   assert.equal(loadConfig(repo).setupComplete, true);
@@ -214,13 +219,20 @@ test('worker startup failure is recoverable and returns automation to paused sta
   assert.equal(result.recoverable, true);
 });
 
-test('unchecked Finish setup completes configuration but leaves claims paused', async (t) => {
+test('unchecked Finish setup still makes the coder available while claims stay paused', async (t) => {
   const { rootDir, repo } = fixture(t);
   await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null, setupInstallationPreviewBuilder: readySetupPreview });
-  const result = await finishSetup({ startAutomation: false }, { rootDir });
+  const observed = [];
+  const result = await finishSetup({ startAutomation: false }, {
+    rootDir,
+    workerManager: { start(repository) { observed.push({ repository, claims: loadRuntime(repo).claimsEnabled }); return { running: true, state: 'idle' }; } },
+  });
   assert.equal(result.setupComplete, true);
   assert.equal(result.claimsEnabled, false);
+  assert.equal(result.codingWorkerAvailable, true);
   assert.equal(result.workersStarted, false);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].claims, false);
   assert.equal(loadRuntime(repo).claimsEnabled, false);
 });
 
