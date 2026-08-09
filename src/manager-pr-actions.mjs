@@ -2,6 +2,7 @@ import { managerPrHealthSnapshot } from './pr-review-github.mjs';
 import { enqueueManagedReview } from './pr-review-queue.mjs';
 import { reconcileManagedPullRequest } from './pr-review-reconcile.mjs';
 import { loadPrReviewStore, TERMINAL_PR_STATES } from './pr-review-store.mjs';
+import { loadRun } from './state.mjs';
 
 function positiveNumber(value, label) {
   const number = Number(value);
@@ -9,11 +10,32 @@ function positiveNumber(value, label) {
   return number;
 }
 
+function optionalPositiveNumber(value, label) {
+  if (value == null || value === '') return null;
+  return positiveNumber(value, label);
+}
+
 function expectedSha(value) {
   const sha = String(value || '').trim().toLowerCase();
   if (!sha) return null;
   if (!/^[0-9a-f]{7,64}$/.test(sha)) throw new Error('expectedHeadSha must be a valid Git commit SHA.');
   return sha;
+}
+
+function currentPullRequestNumber(root, issueNumber, explicit, runLoader = loadRun) {
+  const requested = optionalPositiveNumber(explicit, 'pullRequestNumber');
+  const recorded = runLoader(root, issueNumber);
+  const current = Number(recorded?.prNumber || recorded?.pullRequestNumber || recorded?.pullRequest?.number);
+  if (requested) {
+    if (Number.isInteger(current) && current > 0 && current !== requested) {
+      throw new Error(`Issue #${issueNumber} currently records PR #${current}, not PR #${requested}. Refresh before acting.`);
+    }
+    return requested;
+  }
+  if (!Number.isInteger(current) || current <= 0) {
+    throw new Error(`Issue #${issueNumber} does not record a current pull request.`);
+  }
+  return current;
 }
 
 function managedForIssue(store, issueNumber, pullRequestNumber) {
@@ -50,12 +72,13 @@ function exactHeadReviewJob(store, managed, head) {
 }
 
 export function reconcileIssuePullRequest(root, issueNumber, {
-  pullRequestNumber,
+  pullRequestNumber = null,
   loadStore = loadPrReviewStore,
+  runLoader = loadRun,
   reconcile = reconcileManagedPullRequest,
 } = {}) {
   const issue = positiveNumber(issueNumber, 'issueNumber');
-  const pr = positiveNumber(pullRequestNumber, 'pullRequestNumber');
+  const pr = currentPullRequestNumber(root, issue, pullRequestNumber, runLoader);
   const store = loadStore(root);
   const managed = managedForIssue(store, issue, pr);
   const result = reconcile(root, managed.id);
@@ -69,14 +92,15 @@ export function reconcileIssuePullRequest(root, issueNumber, {
 }
 
 export function retryIssuePullRequestReview(root, issueNumber, {
-  pullRequestNumber,
+  pullRequestNumber = null,
   expectedHeadSha: expectedHead = null,
   loadStore = loadPrReviewStore,
+  runLoader = loadRun,
   snapshotLoader = managerPrHealthSnapshot,
   enqueue = enqueueManagedReview,
 } = {}) {
   const issue = positiveNumber(issueNumber, 'issueNumber');
-  const pr = positiveNumber(pullRequestNumber, 'pullRequestNumber');
+  const pr = currentPullRequestNumber(root, issue, pullRequestNumber, runLoader);
   const store = loadStore(root);
   if (store.config?.enabled !== true || store.config?.browserReview?.enabled !== true) {
     throw new Error('Web ChatGPT PR-review automation is not enabled for this repository.');
