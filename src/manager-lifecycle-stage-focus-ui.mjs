@@ -128,7 +128,13 @@ export const MANAGER_LIFECYCLE_STAGE_FOCUS_SCRIPT = String.raw`
     const name = document.createElement('strong'); name.textContent = STAGES.find(function(entry) { return entry[0] === stage; })?.[1] || stage;
     copy.append(prefix, name);
     const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'secondary lifecycle-focus-clear'; clear.textContent = 'Show all';
-    clear.addEventListener('click', function(event) { event.stopPropagation(); focusedStage = null; apply(); });
+    clear.addEventListener('click', function(event) {
+      event.stopPropagation();
+      const issueNumber = focusedIssue;
+      focusedStage = null;
+      apply();
+      queueMicrotask(function() { document.querySelector('.lifecycle-item[data-issue-number="' + issueNumber + '"] .lifecycle-row-head')?.focus?.(); });
+    });
     bar.append(copy, clear);
     const lifecycle = main.firstElementChild; if (lifecycle) lifecycle.after(bar); else main.prepend(bar);
   }
@@ -148,12 +154,15 @@ export const MANAGER_LIFECYCLE_STAGE_FOCUS_SCRIPT = String.raw`
     updateTimeline(panel, stage);
   }
 
-  function activateStage(issueNumber, stage, button) {
+  function activateStage(issueNumber, stage) {
     focusedIssue = Number(issueNumber);
     focusedStage = focusedStage === stage ? null : stage;
+    const activeStage = focusedStage;
     apply();
-    const selector = focusedStage ? '[data-lifecycle-focus="' + focusedStage + '"]' : '.lifecycle-focus-clear';
-    queueMicrotask(function() { document.querySelector('.lifecycle-item[data-issue-number="' + focusedIssue + '"] ' + selector)?.focus?.(); });
+    queueMicrotask(function() {
+      const selector = '[data-lifecycle-focus="' + (activeStage || stage) + '"]';
+      document.querySelector('.lifecycle-item[data-issue-number="' + focusedIssue + '"] ' + selector)?.focus?.();
+    });
   }
 
   function wirePanel(panel) {
@@ -168,8 +177,8 @@ export const MANAGER_LIFECYCLE_STAGE_FOCUS_SCRIPT = String.raw`
       step.classList.toggle('stage-focused', focusedIssue === issueNumber && focusedStage === stage);
       if (step.dataset.stageFocusReady === 'true') return;
       step.dataset.stageFocusReady = 'true';
-      step.addEventListener('click', function(event) { event.stopPropagation(); activateStage(issueNumber, stage, step); });
-      step.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); activateStage(issueNumber, stage, step); } });
+      step.addEventListener('click', function(event) { event.stopPropagation(); activateStage(issueNumber, stage); });
+      step.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); activateStage(issueNumber, stage); } });
     });
     const activeStage = focusedIssue === issueNumber ? focusedStage : null;
     applyPanelFocus(panel, item, activeStage);
@@ -186,10 +195,17 @@ export const MANAGER_LIFECYCLE_STAGE_FOCUS_SCRIPT = String.raw`
     } finally { applying = false; }
   }
 
+  function containsLifecyclePanel(node) {
+    return node?.nodeType === 1 && (node.matches?.('.lifecycle-expanded,.lifecycle-item') || node.querySelector?.('.lifecycle-expanded'));
+  }
+
   function start() {
     apply();
     if (observer) return;
-    observer = new MutationObserver(function() { queueMicrotask(apply); });
+    observer = new MutationObserver(function(records) {
+      const lifecycleChanged = records.some(function(record) { return [...record.addedNodes].some(containsLifecyclePanel); });
+      if (lifecycleChanged) queueMicrotask(apply);
+    });
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
