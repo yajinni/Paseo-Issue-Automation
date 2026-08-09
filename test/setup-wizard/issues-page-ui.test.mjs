@@ -4,7 +4,8 @@ import { enhanceSetupWizardWithIssuesPage, ISSUES_PAGE_SCRIPT } from '../../src/
 import { setupWizardHtml } from '../../src/setup-wizard/ui.mjs';
 
 test('issues page UI exposes approved selection, advanced options, and resource previews', () => {
-  assert.match(ISSUES_PAGE_SCRIPT, /Recommended labels/);
+  assert.match(ISSUES_PAGE_SCRIPT, /Labels \(Recommended\)/);
+  assert.doesNotMatch(ISSUES_PAGE_SCRIPT, /> Recommended labels/);
   assert.match(ISSUES_PAGE_SCRIPT, /All open issues/);
   assert.match(ISSUES_PAGE_SCRIPT, /Maximum simultaneous issues/);
   assert.match(ISSUES_PAGE_SCRIPT, /Temporary failure retries/);
