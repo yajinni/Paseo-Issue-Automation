@@ -43,6 +43,8 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
   let paseoLoading = false;
   let harnessCatalog = null;
   let harnessLoading = false;
+  let branchCatalog = null;
+  let branchLoading = false;
   let chatGptState = null;
   let chatGptLoading = false;
 
@@ -81,6 +83,12 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
 
   function activeConfigTab() {
     return document.querySelector('.manager-config-tab[aria-selected="true"]')?.dataset.configTab || null;
+  }
+
+  function syncIssueSelectionPresentation() {
+    const select = document.getElementById('issue-selection-mode');
+    const recommended = [...(select?.options || [])].find((option) => option.value === 'recommended-labels');
+    if (recommended) recommended.textContent = 'Labels (Recommended)';
   }
 
   function syncReviewWorkflowPresentation(data = null) {
@@ -183,11 +191,9 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     if (paseoState) {
       const summary = document.createElement('div'); summary.className = 'manager-paseo-status';
       paseoSummaryRow(summary, 'Connection', paseoState.ok ? 'Ready' : 'Needs attention');
-      paseoSummaryRow(summary, 'Source', paseoState.source || 'Unknown');
       paseoSummaryRow(summary, 'CLI', paseoState.cli?.path || paseoState.cli?.resolvedCommand || (paseoState.cli?.ok ? 'Available' : 'Unavailable'));
       paseoSummaryRow(summary, 'Daemon', paseoState.daemon?.reachable ? (paseoState.daemon?.version || 'Reachable') : 'Not reachable');
       paseoSummaryRow(summary, 'Authentication', paseoState.authentication?.required ? (paseoState.authentication?.ok ? 'Accepted' : 'Required') : 'Not required');
-      paseoSummaryRow(summary, 'Compatibility', paseoState.compatibility?.ok ? 'Compatible' : paseoState.compatibility?.reason || 'Not verified');
       target.append(summary);
     }
     connect.addEventListener('click', connectPaseo);
@@ -294,6 +300,80 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     actions.append(refresh, status); group.append(actions);
   }
 
+  function ensureBaseBranchSelect() {
+    const existing = document.getElementById('base-branch');
+    if (!existing || existing.tagName === 'SELECT') return existing;
+    const select = document.createElement('select');
+    select.id = existing.id;
+    select.setAttribute('aria-label', 'Base branch');
+    const current = String(existing.value || '').trim();
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Choose a GitHub branch'; select.append(placeholder);
+    if (current) {
+      const option = document.createElement('option'); option.value = current; option.textContent = current; select.append(option); select.value = current;
+    }
+    existing.replaceWith(select);
+    return select;
+  }
+
+  function ensureBaseBranchCurrentOption(value) {
+    const select = document.getElementById('base-branch');
+    const current = String(value || '').trim();
+    if (!select || select.tagName !== 'SELECT' || !current) return;
+    if (![...select.options].some((option) => option.value === current)) {
+      const option = document.createElement('option'); option.value = current; option.textContent = current + ' (currently configured)'; select.append(option);
+    }
+    select.value = current;
+  }
+
+  function renderBranchCatalog() {
+    const select = document.getElementById('base-branch');
+    const status = document.getElementById('manager-branch-status');
+    if (!select || !status || !branchCatalog) return;
+    const current = String(select.value || currentStatus?.setup?.baseBranch || '').trim();
+    select.textContent = '';
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Choose a GitHub branch'; select.append(placeholder);
+    for (const branch of branchCatalog.branches || []) {
+      const option = document.createElement('option');
+      option.value = branch.name;
+      option.textContent = branch.name + (branch.recommended ? ' — recommended' : '');
+      select.append(option);
+    }
+    if (current && ![...select.options].some((option) => option.value === current)) {
+      const option = document.createElement('option'); option.value = current; option.textContent = current + ' (currently configured; not reported by GitHub)'; select.append(option);
+    }
+    select.value = current;
+    if (branchCatalog.blocker) {
+      status.className = 'manager-config-inline-status error';
+      status.textContent = branchCatalog.blocker.message || 'GitHub branches could not be loaded.';
+    } else {
+      const count = branchCatalog.branches?.length || 0;
+      status.className = 'manager-config-inline-status';
+      status.textContent = 'Found ' + count + ' branch' + (count === 1 ? '' : 'es') + ' from GitHub' + (branchCatalog.recommendedBranch ? '. Default: ' + branchCatalog.recommendedBranch + '.' : '.');
+    }
+    renderDirtyState();
+  }
+
+  async function loadBranchCatalog(force = false) {
+    if (branchLoading || branchCatalog && !force) { renderBranchCatalog(); return; }
+    const status = document.getElementById('manager-branch-status');
+    if (status) { status.className = 'manager-config-inline-status'; status.textContent = 'Loading branches from GitHub…'; }
+    branchLoading = true;
+    try {
+      branchCatalog = await jsonRequest(selectedPath('configuration/branches'));
+      renderBranchCatalog();
+    } catch (error) {
+      if (status) { status.className = 'manager-config-inline-status error'; status.textContent = error.message || String(error); }
+    } finally { branchLoading = false; }
+  }
+
+  function addBranchTools(group) {
+    const actions = document.createElement('div'); actions.className = 'manager-config-inline-actions';
+    const refresh = document.createElement('button'); refresh.type = 'button'; refresh.className = 'secondary'; refresh.id = 'manager-refresh-branches'; refresh.textContent = 'Refresh branches';
+    const status = document.createElement('span'); status.id = 'manager-branch-status'; status.className = 'manager-config-inline-status'; status.textContent = 'Open this tab to load branches from GitHub.';
+    refresh.addEventListener('click', () => loadBranchCatalog(true));
+    actions.append(refresh, status); group.append(actions);
+  }
+
   function addPaseoTools(group) {
     group.dataset.configStepGroup = 'paseo';
     const target = document.createElement('div'); target.id = 'manager-paseo-connection'; group.append(target);
@@ -393,6 +473,8 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     if (!view || !existing || !form) return;
     existing.querySelector('h2').textContent = 'Repository configuration';
     ensureHarnessSelect();
+    ensureBaseBranchSelect();
+    syncIssueSelectionPresentation();
     const oldGrid = form.querySelector('.field-grid');
     const groups = document.createElement('div'); groups.className = 'manager-config-groups';
     for (const [title, description, ids] of CONFIG_GROUPS) {
@@ -413,6 +495,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
       if (ids.length || title === 'Review workflow') group.append(fields);
       if (title === 'Paseo connection') addPaseoTools(group);
       if (title === 'Provider/Coding Harness') addHarnessTools(group);
+      if (title === 'GitHub repository') addBranchTools(group);
       if (title === 'ChatGPT Profile') {
         group.dataset.configConditionalHidden = 'true';
         const profile = document.createElement('div'); profile.id = 'manager-chatgpt-profile'; group.append(profile);
@@ -447,15 +530,11 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     const repository = cardByHeading(view, 'Repository');
     const setup = cardByHeading(view, 'Setup');
     const integration = cardByHeading(view, 'Repository integration');
-    const summary = document.createElement('section'); summary.className = 'card'; summary.id = 'manager-integration-summary-card';
-    summary.innerHTML = '<h2>Integration summary</h2><p class="muted">Repository ownership, controller mode, setup state, and managed changes at a glance.</p><div id="manager-integration-summary" class="manager-context-summary"></div>';
-    const note = document.createElement('div'); note.className = 'manager-context-note'; note.textContent = 'Integration actions only change manager-owned components. Embedded migration and removal continue to use reviewed pull requests before local ownership state changes.'; summary.append(note);
     if (integration) integration.querySelector('h2').textContent = 'Managed repository integration';
     const details = document.createElement('details'); details.className = 'card manager-detail-disclosure';
     const detailSummary = document.createElement('summary'); detailSummary.textContent = 'Repository and setup technical details';
     const body = document.createElement('div'); body.className = 'manager-detail-disclosure-body';
     if (repository) body.append(repository); if (setup) body.append(setup); details.append(detailSummary, body);
-    view.prepend(summary);
     view.append(details);
   }
 
@@ -467,22 +546,6 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     view.prepend(summary);
     const registration = view.querySelector('[data-manager-manual-registration]');
     if (registration) registration.classList.add('manager-detail-disclosure');
-  }
-
-  function renderIntegration(data) {
-    const target = document.getElementById('manager-integration-summary');
-    if (!target) return;
-    const setup = data.setup || {};
-    const changes = setup.repositoryChanges || {};
-    target.textContent = '';
-    summaryRow(target, 'Controller mode', setup.externalController ? 'Standalone manager' : setup.embeddedController ? 'Embedded repository' : 'Not installed');
-    summaryRow(target, 'Setup complete', setup.complete ? 'Yes' : 'No');
-    summaryRow(target, 'Base branch', setup.baseBranch || 'Not configured');
-    summaryRow(target, 'Workspace', setup.workspaceId || 'Not configured');
-    summaryRow(target, 'Managed files', (changes.managedFiles || []).length);
-    summaryRow(target, 'Pending managed files', (changes.expectedFiles || []).length);
-    summaryRow(target, 'Unrelated changes', (changes.unexpectedFiles || []).length);
-    summaryRow(target, 'Migration', setup.migration?.state || 'Not started');
   }
 
   function renderMaintenance(data) {
@@ -503,12 +566,16 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
 
   function render(data) {
     if (!data) return;
+    const repositoryName = String(data.repository?.repository || '');
+    if (branchCatalog?.repository && branchCatalog.repository !== repositoryName) branchCatalog = null;
     ensureHarnessCurrentOption(data.configuration?.codingHarness);
+    ensureBaseBranchCurrentOption(data.setup?.baseBranch);
+    syncIssueSelectionPresentation();
     syncReviewWorkflowPresentation(data);
     baseline = snapshotConfigForm();
     renderDirtyState();
-    renderIntegration(data);
     renderMaintenance(data);
+    if (activeConfigTab() === 'repository') loadBranchCatalog();
   }
 
   function build() {
@@ -526,6 +593,7 @@ export const MANAGER_CONFIG_INTEGRATION_SCRIPT = String.raw`
     if (savebar) savebar.style.display = step === 'paseo' ? 'none' : '';
     if (step === 'paseo') loadPaseoConnection();
     if (step === 'harness') loadHarnessCatalog();
+    if (step === 'repository') loadBranchCatalog();
     if (step === 'review' && document.getElementById('review-workflow')?.value === 'quick-web-chatgpt') loadChatGptProfile();
   });
 
