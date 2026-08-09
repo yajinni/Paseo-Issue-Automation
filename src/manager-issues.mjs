@@ -1,3 +1,4 @@
+import { detectDependencyCycles, relationshipNodes } from './dependencies.mjs';
 import { evaluateIssueQueue } from './issue-eligibility.mjs';
 import { runJson } from './process.mjs';
 import { listRuns, loadRuntime } from './state.mjs';
@@ -22,6 +23,34 @@ function listOpenIssues(root, jsonRunner = runJson) {
 
 function labels(issue) {
   return (issue?.labels || []).map((label) => typeof label === 'string' ? label : String(label?.name || '')).filter(Boolean);
+}
+
+function normalizeRelationship(value) {
+  if (!value || typeof value !== 'object') return null;
+  const number = Number(value.number);
+  if (!Number.isInteger(number) || number < 1) return null;
+  return {
+    number,
+    title: value.title || `Issue #${number}`,
+    state: String(value.state || '').toUpperCase(),
+    stateReason: String(value.stateReason || '').toUpperCase(),
+    url: value.url || null,
+  };
+}
+
+function nativeRelationships(issue) {
+  const blockedByNodes = relationshipNodes(issue?.blockedBy);
+  const blockingNodes = relationshipNodes(issue?.blocking);
+  const relationshipDataAvailable = blockedByNodes !== null;
+  return {
+    relationshipDataAvailable,
+    relationshipDataReason: relationshipDataAvailable
+      ? null
+      : 'Native GitHub blocked-by relationship data is unavailable for this issue.',
+    nativeBlockedBy: (blockedByNodes || []).map(normalizeRelationship).filter(Boolean),
+    nativeBlocking: (blockingNodes || []).map(normalizeRelationship).filter(Boolean),
+    nativeBlockingAvailable: blockingNodes !== null,
+  };
 }
 
 function runByIssue(runs) {
@@ -62,6 +91,111 @@ function rejectionLabel(kind) {
     invalid: 'Invalid issue',
   };
   return labels[kind] || 'Not eligible';
+}
+
+function uniqueSortedNumbers(values = []) {
+  return [...new Set(values.map(Number).filter((number) => Number.isInteger(number) && number > 0))]
+    .sort((left, right) => left - right);
+}
+
+export function buildManagerOpenIssueGraph(items = []) {
+  const byNumber = new Map(items
+    .filter((item) => Number.isInteger(Number(item?.issueNumber)))
+    .map((item) => [Number(item.issueNumber), item]));
+  const issueNumbers = [...byNumber.keys()].sort((left, right) => left - right);
+  const dependencies = {};
+  const unlocks = Object.fromEntries(issueNumbers.map((number) => [number, []]));
+  const resolvedDependencies = {};
+  const externalDependencies = {};
+  const unavailableIssueNumbers = [];
+  let relationshipCount = 0;
+
+  for (const number of issueNumbers) {
+    const item = byNumber.get(number);
+    if (item.relationshipDataAvailable === false) unavailableIssueNumbers.push(number);
+    const internal = [];
+    const resolved = [];
+    const external = [];
+    for (const dependency of item.nativeBlockedBy || []) {
+      const dependencyNumber = Number(dependency?.number);
+      if (!Number.isInteger(dependencyNumber) || dependencyNumber < 1) continue;
+      if (byNumber.has(dependencyNumber)) {
+        internal.push(dependencyNumber);
+      } else if (String(dependency.state || '').toUpperCase() === 'CLOSED') {
+        resolved.push(dependencyNumber);
+      } else {
+        external.push(dependencyNumber);
+      }
+    }
+    dependencies[number] = uniqueSortedNumbers(internal);
+    resolvedDependencies[number] = uniqueSortedNumbers(resolved);
+    externalDependencies[number] = uniqueSortedNumbers(external);
+    relationshipCount += dependencies[number].length;
+  }
+
+  for (const [numberText, blockers] of Object.entries(dependencies)) {
+    const number = Number(numberText);
+    for (const blocker of blockers) unlocks[blocker]?.push(number);
+  }
+  for (const number of issueNumbers) unlocks[number] = uniqueSortedNumbers(unlocks[number]);
+
+  const unavailable = new Set(unavailableIssueNumbers);
+  const pending = new Set(issueNumbers);
+  const levelByIssue = {};
+  let progressed = true;
+  while (pending.size && progressed) {
+    progressed = false;
+    for (const number of [...pending].sort((left, right) => left - right)) {
+      if (unavailable.has(number) || externalDependencies[number].length) continue;
+      const blockers = dependencies[number] || [];
+      if (!blockers.every((blocker) => Object.hasOwn(levelByIssue, blocker))) continue;
+      levelByIssue[number] = blockers.length
+        ? 1 + Math.max(...blockers.map((blocker) => levelByIssue[blocker]))
+        : 0;
+      pending.delete(number);
+      progressed = true;
+    }
+  }
+
+  const unresolvedIssueNumbers = [...pending].sort((left, right) => left - right);
+  const cycles = detectDependencyCycles(dependencies);
+  const cycleIssueNumbers = uniqueSortedNumbers(cycles.flat());
+  const levelsByDepth = new Map();
+  for (const [numberText, level] of Object.entries(levelByIssue)) {
+    const number = Number(numberText);
+    const values = levelsByDepth.get(level) || [];
+    values.push(number);
+    levelsByDepth.set(level, values);
+  }
+  const levels = [...levelsByDepth.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([level, numbers]) => ({ level, issueNumbers: uniqueSortedNumbers(numbers) }));
+  const levelValues = Object.values(levelByIssue);
+
+  return {
+    source: 'native-github-blocked-by',
+    available: unavailableIssueNumbers.length === 0,
+    issueNumbers,
+    relationshipCount,
+    unavailableIssueNumbers,
+    dependencies,
+    unlocks,
+    resolvedDependencies,
+    externalDependencies,
+    levelByIssue,
+    levels,
+    maxLevel: levelValues.length ? Math.max(...levelValues) : null,
+    unresolvedIssueNumbers,
+    cycles,
+    cycleIssueNumbers,
+    counts: {
+      readyNow: levelValues.filter((level) => level === 0).length,
+      waitingOnOneLevel: levelValues.filter((level) => level === 1).length,
+      waitingOnTwoLevels: levelValues.filter((level) => level === 2).length,
+      waitingOnThreePlusLevels: levelValues.filter((level) => level >= 3).length,
+      unresolved: unresolvedIssueNumbers.length,
+    },
+  };
 }
 
 export function buildManagerIssueFlow(items = []) {
@@ -149,6 +283,7 @@ export function managerIssuePlan(root, config, {
   const items = issues.map((issue) => {
     const number = Number(issue.number);
     const run = runs.get(number);
+    const relationships = nativeRelationships(issue);
     const base = {
       issueNumber: number,
       title: issue.title || `Issue #${number}`,
@@ -160,6 +295,7 @@ export function managerIssuePlan(root, config, {
       statusId: 'rejected',
       reason: null,
       activePhase: run?.phase || null,
+      ...relationships,
     };
     if (activeRun(run)) {
       return {
@@ -213,15 +349,23 @@ export function managerIssuePlan(root, config, {
     };
   });
 
+  const graph = buildManagerOpenIssueGraph(items);
+  const enrichedItems = items.map((item) => ({
+    ...item,
+    dependencyLevel: Object.hasOwn(graph.levelByIssue, item.issueNumber) ? graph.levelByIssue[item.issueNumber] : null,
+    directUnlocks: graph.unlocks[item.issueNumber] || [],
+  }));
+
   return {
     mode: queue.mode,
-    total: items.length,
-    eligible: items.filter((item) => item.statusId === 'next' || item.statusId === 'eligible').length,
-    blocked: items.filter((item) => item.statusId === 'blocked').length,
-    skipped: items.filter((item) => item.statusId === 'skipped').length,
-    active: items.filter((item) => item.statusId === 'active').length,
+    total: enrichedItems.length,
+    eligible: enrichedItems.filter((item) => item.statusId === 'next' || item.statusId === 'eligible').length,
+    blocked: enrichedItems.filter((item) => item.statusId === 'blocked').length,
+    skipped: enrichedItems.filter((item) => item.statusId === 'skipped').length,
+    active: enrichedItems.filter((item) => item.statusId === 'active').length,
     nextIssueNumber: orderedEligible[0] || null,
-    flow: buildManagerIssueFlow(items),
-    items,
+    flow: buildManagerIssueFlow(enrichedItems),
+    graph,
+    items: enrichedItems,
   };
 }
