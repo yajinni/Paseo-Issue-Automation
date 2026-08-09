@@ -21,8 +21,20 @@ function normalizedRemote(value) {
 function repositoryNameFromRemote(remote) {
   const value = normalizedRemote(remote);
   if (!value) return null;
-  const match = value.match(/(?:github\.com[/:])([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
-  return match ? `${match[1]}/${match[2]}` : null;
+
+  const scpMatch = value.match(/^[^@\s]+@[^:\s]+:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (scpMatch) return `${scpMatch[1]}/${scpMatch[2]}`;
+
+  try {
+    const parsed = new URL(value);
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length !== 2) return null;
+    const [owner, rawRepository] = parts;
+    const repository = rawRepository.replace(/\.git$/i, '');
+    return owner && repository ? `${owner}/${repository}` : null;
+  } catch {
+    return null;
+  }
 }
 
 function slug(value) {
