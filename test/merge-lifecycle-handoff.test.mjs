@@ -202,6 +202,70 @@ test('merged snapshot preserves an exact approval that arrives in the same poll 
     && event.reviewRequestId === claimed.reviewRequestId));
 });
 
+test('merged snapshot does not treat changes-requested completion as approval evidence', (t) => {
+  const root = repo(t);
+  configureReviews(root);
+  seedRun(root, { approved: false });
+  const registered = registerManagedPullRequest(root, managedInput(), { now: 1000 });
+  const claimed = claimNextReview(root, { now: 2500 });
+  markReviewSubmitted(root, claimed.id, {
+    submittedAt: new Date(3000).toISOString(),
+    conversationUrl: 'https://chatgpt.com/c/review',
+  });
+  const marker = `<!-- paseo-review:v1\n${JSON.stringify({
+    reviewRequestId: claimed.reviewRequestId,
+    repository: 'owner/repo',
+    pullRequestNumber: 45,
+    issueNumber: 101,
+    headSha: head,
+    reviewRound: claimed.reviewRound,
+    promptVersion: claimed.promptVersion,
+    result: 'changes_requested',
+  })}\n-->\nBlocking defect remains.`;
+  const openSnapshot = {
+    number: 45,
+    state: 'OPEN',
+    mergedAt: null,
+    headRefOid: head,
+    headRefName: 'ai/issue-101',
+    baseRefName: 'main',
+    labels: ['paseo:changes-requested'],
+    comments: [{ id: 7788, body: marker, createdAt: '2026-08-09T01:01:30.000Z' }],
+    reviews: [],
+    statusCheckRollup: [],
+    body: 'Fixes #101',
+    closingIssuesReferences: [{ number: 101 }],
+  };
+  const rejected = reconcileManagedPullRequest(root, registered.managed.id, {
+    now: 4000,
+    snapshot: openSnapshot,
+    effectRunner() { return []; },
+  });
+  assert.equal(rejected.review.result, 'changes_requested');
+  let store = loadPrReviewStore(root);
+  assert.equal(store.managedPullRequests[0].lastCompletedReviewSha, head);
+  assert.equal(store.reviewJobs.find((job) => job.id === claimed.id).result, 'changes_requested');
+
+  let effects = null;
+  const merged = reconcileManagedPullRequest(root, registered.managed.id, {
+    now: 5000,
+    snapshot: {
+      ...openSnapshot,
+      state: 'MERGED',
+      mergedAt: '2026-08-09T01:02:00.000Z',
+    },
+    effectRunner(_root, _managedId, pending) {
+      effects = pending;
+      return [];
+    },
+  });
+  assert.equal(merged.state, 'merged');
+  assert.equal(merged.reviewVerified, false);
+  assert.equal(effects.find((effect) => effect.type === 'verify-merged-issue').reviewVerified, false);
+  store = loadPrReviewStore(root);
+  assert.equal(store.managedPullRequests[0].reviewEvidenceMissing, true);
+});
+
 test('merged records with pending lifecycle completion remain eligible after persistence', (t) => {
   const root = repo(t);
   configureReviews(root);
