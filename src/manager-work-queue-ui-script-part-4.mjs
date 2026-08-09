@@ -14,6 +14,16 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_4 = String.raw`    const head = docu
     drawer.append(drawerSection('PR and review evidence', [
       ['PR', item.pullRequest?.number ? '#' + item.pullRequest.number : null, item.pullRequest?.url], ['Review type', review.label], ['Review stage', review.stage], ['Review round', review.round ? (review.limit ? review.round + ' / ' + review.limit : review.round) : null], ['Review source', review.source], ['Review result', review.result], ['Current head SHA', diagnostic.currentHeadSha || review.headSha], ['Validation approved', review.validationApproved ? 'Yes' : 'No'], ['Validation head SHA', review.validationHeadSha || diagnostic.validationHeadSha], ['Review approved', review.reviewApproved ? 'Yes' : 'No'], ['Approved head SHA', review.approvedHeadSha || diagnostic.approvedHeadSha], ['Approved commit', diagnostic.approvedCommit], ['Merged head SHA', diagnostic.mergedHeadSha], ['Merged at', diagnostic.mergedAt ? formatDate(diagnostic.mergedAt) : null], ['Issue closure verified', diagnostic.issueClosureVerifiedAt ? formatDate(diagnostic.issueClosureVerifiedAt) : null], ['Conversation', review.conversationUrl ? 'Open Web ChatGPT conversation' : null, review.conversationUrl],
     ]));
+    const prHealth = prHealthFor(item);
+    if (prHealth) {
+      const currentPr = prHealth.currentPr || {};
+      const problemSummary = (prHealth.problems || []).map(function(problem) { return '[' + problem.severity + '] ' + problem.title + ': ' + problem.message; }).join(' | ');
+      const failedChecks = (prHealth.checks?.failed || []).map(function(check) { return check.name + ': ' + check.state; }).join(' | ');
+      const pendingChecks = (prHealth.checks?.pending || []).map(function(check) { return check.name + ': ' + check.state; }).join(' | ');
+      drawer.append(drawerSection('Current PR health diagnosis', [
+        ['Health status', prHealth.label || prHealth.status], ['Health category', prHealth.status], ['Blocking problems', prHealth.blockingCount], ['Attention problems', prHealth.attentionCount], ['Waiting conditions', prHealth.waitingCount], ['GitHub snapshot available', prHealth.snapshotAvailable ? 'Yes' : 'No'], ['GitHub snapshot error', prHealth.snapshotError], ['PR state', currentPr.state], ['Draft', currentPr.isDraft ? 'Yes' : 'No'], ['PR head SHA', currentPr.headSha], ['Head branch', currentPr.headRefName], ['Base branch', currentPr.baseRefName], ['Mergeable', currentPr.mergeable], ['Merge state', currentPr.mergeStateStatus], ['GitHub review decision', currentPr.reviewDecision], ['Issue association', currentPr.issueAssociation === true ? 'Present' : currentPr.issueAssociation === false ? 'Missing' : null], ['Checks passing', prHealth.checks?.passingCount], ['Checks pending', prHealth.checks?.pendingCount], ['Checks failed', prHealth.checks?.failedCount], ['Failed check evidence', failedChecks || null], ['Pending check evidence', pendingChecks || null], ['Current PR problems', problemSummary || 'None'],
+      ]));
+    }
     const prAutomation = item.reviewAutomation || null;
     if (prAutomation) {
       const reviewJob = prAutomation.latestReviewJob || {};
@@ -51,7 +61,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_4 = String.raw`    const head = docu
   function showQueueError(error) { if (typeof showError === 'function') showError(error); else console.error(error); }
 
   function renderStatusQueue(data) {
-    statusData = data || null; queueData = data?.workQueue || { items: [], counts: {}, total: 0, active: 0, attention: 0 }; render();
+    statusData = data || null; queueData = data?.workQueue || { items: [], counts: {}, total: 0, active: 0, attention: 0, prHealth: { byIssue: {}, counts: {} } }; render();
     if (selectedIssue) { const selected = queueData.items?.find(function(item) { return item.issueNumber === selectedIssue; }); if (selected) openDrawer(selected, null, { preserveInteraction: true }); else closeDrawer(); }
     const badge = document.querySelector('[data-manager-badge="work-queue"]'); if (badge) { const count = Number(queueData.active || 0) + Number(queueData.attention || 0); badge.textContent = String(count); badge.classList.toggle('visible', count > 0); badge.classList.toggle('attention', Number(queueData.attention || 0) > 0); }
   }
