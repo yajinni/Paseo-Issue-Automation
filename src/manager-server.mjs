@@ -13,6 +13,7 @@ import { enhanceManagerWithIssueProcessingFlow } from './manager-issue-processin
 import { enhanceManagerWithIssuesPrReviews } from './manager-issues-pr-reviews-ui.mjs';
 import { managerHtml } from './manager-maintenance-ui.mjs';
 import { enhanceManagerWithNavigation } from './manager-navigation-ui.mjs';
+import { enhanceManagerWithOverviewActivity } from './manager-overview-ui.mjs';
 import { enhanceManagerWithStatusEvents } from './manager-status-events-ui.mjs';
 import { enhanceManagerWithUiFoundation, enhanceSetupWithSharedUiTheme } from './manager-ui-foundation.mjs';
 import { enhanceManagerWithWorkQueue } from './manager-work-queue-ui.mjs';
@@ -128,7 +129,8 @@ ${manualForm}
   const issueInsights = enhanceManagerWithDependencyInsights(issueFlow);
   const issueDiagnostics = enhanceManagerWithDependencyDiagnostics(issueInsights);
   const polished = enhanceManagerWithInteractionPolish(issueDiagnostics);
-  return enhanceManagerWithCodingWorkerStatus(polished);
+  const codingStatus = enhanceManagerWithCodingWorkerStatus(polished);
+  return enhanceManagerWithOverviewActivity(codingStatus);
 }
 
 export async function startManagerServer({
