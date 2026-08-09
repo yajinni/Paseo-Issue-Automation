@@ -9,13 +9,14 @@ import {
 test('configuration tabs mirror the simplified setup walkthrough without recreating setup link cards', () => {
   for (const label of [
     'Connect Paseo',
-    'Coding harness',
+    'Coding',
     'GitHub repository',
     'Issues setup',
     'Review setup',
     'Final readiness',
   ]) assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, new RegExp(label));
 
+  assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_SCRIPT, /\['harness', 'Coding harness'\]/);
   assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_SCRIPT, /setupLinkCard/);
   assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_SCRIPT, /Edit this setup step/);
   assert.doesNotMatch(MANAGER_CONFIGURATION_TABS_STYLE, /manager-config-step-link/);
@@ -65,6 +66,25 @@ test('configuration groups map to the setup tab that owns them', () => {
     "['Review workflow', 'review']",
     "['ChatGPT Profile', 'review']",
   ]) assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, new RegExp(mapping.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('Coding uses Paseo-reported model and thinking dropdowns', () => {
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /ensureSelect\('coder-model', 'Coder model'\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /ensureSelect\('reviewer-model', 'Reviewer model'\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /ensureSelect\('coder-thinking', 'Coder thinking level'\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /ensureSelect\('reviewer-thinking', 'Reviewer thinking level'\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /configuration\/harnesses/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /thinkingOptionIds/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /defaultThinkingOptionId/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /currently configured; not reported by Paseo/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /step === 'harness'\) loadModelCatalog/);
+});
+
+test('model choices follow the selected coding harness and refresh with harness discovery', () => {
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /function providerForHarness\(\)/);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /getElementById\('coding-harness'\).*addEventListener\('change'/s);
+  assert.match(MANAGER_CONFIGURATION_TABS_SCRIPT, /manager-refresh-harnesses/);
+  assert.match(MANAGER_CONFIGURATION_TABS_STYLE, /manager-model-catalog-note/);
 });
 
 test('integration and maintenance become configuration content instead of sidebar destinations', () => {
