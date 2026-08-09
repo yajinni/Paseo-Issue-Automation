@@ -20,6 +20,12 @@ test('parallel work summary distinguishes structural readiness from runnable wor
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /statusId === 'next' \|\| item\.statusId === 'eligible'/);
 });
 
+test('structural readiness is unknown when native relationship data is incomplete', () => {
+  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /plan\?\.graph\?\.available === false/);
+  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /'Unknown'/);
+  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /Native relationship data is incomplete/);
+});
+
 test('selected issue insight traces authoritative upstream and downstream graph relationships', () => {
   for (const text of [
     'Selected issue',
@@ -35,9 +41,10 @@ test('selected issue insight traces authoritative upstream and downstream graph 
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /graph\.levelByIssue/);
 });
 
-test('would-be-ready count requires selected issue to be the only remaining open blocker', () => {
+test('would-be-ready count requires the selected issue to be the only known open blocker', () => {
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /numberList\(graph\.dependencies\?\.\[dependent\]\)\.length === 1/);
-  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /only remaining open blocker/);
+  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /numberList\(graph\.externalDependencies\?\.\[dependent\]\)\.length === 0/);
+  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /only remaining known open blocker/);
 });
 
 test('map selection supports click, keyboard focus, escape clearing, and relation highlighting', () => {
