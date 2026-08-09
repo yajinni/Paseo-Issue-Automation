@@ -5,6 +5,7 @@ import { enhanceManagerWithAutomationReviews } from './manager-automation-review
 import { enhanceManagerWithConfigIntegrationMaintenance } from './manager-config-integration-maintenance-ui.mjs';
 import { managerConfigurationApiRequest } from './manager-configuration-service.mjs';
 import { enhanceManagerWithConfigurationTabs } from './manager-configuration-tabs-ui.mjs';
+import { enhanceManagerWithDependencyDiagnostics } from './manager-dependency-diagnostics-ui.mjs';
 import { enhanceManagerWithDependencyInsights } from './manager-dependency-insights-ui.mjs';
 import { enhanceManagerWithInteractionPolish } from './manager-interaction-ui.mjs';
 import { enhanceManagerWithIssueProcessingFlow } from './manager-issue-processing-flow-ui.mjs';
@@ -102,7 +103,8 @@ ${manualForm}
   const issueAndReviewViews = enhanceManagerWithIssuesPrReviews(configured);
   const issueFlow = enhanceManagerWithIssueProcessingFlow(issueAndReviewViews);
   const issueInsights = enhanceManagerWithDependencyInsights(issueFlow);
-  return enhanceManagerWithInteractionPolish(issueInsights);
+  const issueDiagnostics = enhanceManagerWithDependencyDiagnostics(issueInsights);
+  return enhanceManagerWithInteractionPolish(issueDiagnostics);
 }
 
 export async function startManagerServer({
