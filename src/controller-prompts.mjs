@@ -76,7 +76,19 @@ If required validation cannot pass, fix ordinary in-scope failures and revalidat
 }
 
 export function buildRepairPrompt({ issueNumber, findings }) {
-  return `Independent review for issue #${issueNumber} requires changes:\n\n${findings}\n\nAddress only these findings within the approved issue scope. Rerun every issue-required validation, commit and push all intended changes, update the existing draft PR, and leave the worktree clean with local HEAD equal to the PR head. The controller owns validation-summary bookkeeping; do not call Paseo hooks or invent a validation-summary API.`;
+  const instructions = String(findings || '').trim();
+  return `The Issue Execution Controller has already accepted the following repair instructions for GitHub issue #${issueNumber}.
+
+These embedded instructions are the authoritative input for this repair turn. Do not search repository files, issue prose, PR reviewDecision, or unrelated review comments to rediscover what changes were requested. Inspect surrounding code only as needed to implement and validate the instructions safely.
+
+Authoritative repair instructions:
+---
+${instructions || '[No repair instructions were recorded. Stop without changing code and report the empty handoff.]'}
+---
+
+Address only these instructions within the approved issue scope. Preserve unrelated correct work. Rerun every issue-required validation, commit and push all intended changes, update the existing draft PR, and leave the worktree clean with local HEAD equal to the PR head.
+
+The controller owns validation-summary bookkeeping. Do not call Paseo hooks, search for another validation-summary command, or invent a validation-summary API.`;
 }
 
 export function buildBaseUpdatePrompt({ issueNumber, baseBranch, reason }) {
