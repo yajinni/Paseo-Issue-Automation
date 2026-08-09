@@ -15,6 +15,7 @@ import {
 import { installPlaywrightLibrary } from './playwright-installer.mjs';
 import { loadPrReviewStore, savePrAutomationConfig } from './pr-review-store.mjs';
 import { parseRepositoryApiPath, resolveRepositoryApiContext } from './repository-api-context.mjs';
+import { listAllGitHubBranches } from './setup-wizard/github-repositories.mjs';
 
 function projectConversationUrl(root, options = {}) {
   try {
@@ -70,6 +71,35 @@ async function saveChatGptConversation(root, body = {}, options = {}) {
   };
 }
 
+function githubHostFromRemote(remote) {
+  const value = String(remote || '').trim();
+  const urlMatch = value.match(/^[a-z][a-z0-9+.-]*:\/\/([^/@]+@)?([^/:]+)(?::\d+)?\//i);
+  if (urlMatch?.[2]) return urlMatch[2];
+  const scpMatch = value.match(/^[^@\s]+@([^:]+):/);
+  return scpMatch?.[1] || 'github.com';
+}
+
+function managerBranchCatalog(context, options = {}) {
+  const repository = String(context.repository?.repository || '').trim();
+  if (!repository) throw new Error('The registered repository does not have a GitHub owner/name identity.');
+  const loadBranches = options.branchLoader || listAllGitHubBranches;
+  const result = loadBranches(repository, {
+    host: options.githubHost || githubHostFromRemote(context.repository?.remote),
+    runner: options.runner,
+    env: options.env,
+  });
+  return {
+    repository,
+    branches: result.branches || [],
+    recommendedBranch: result.recommended || null,
+    blocker: result.ok ? null : result.blocker || {
+      code: 'github-branch-catalog-unavailable',
+      message: 'GitHub branches could not be loaded.',
+      recoveryAction: 'Check GitHub CLI access, then refresh branches.',
+    },
+  };
+}
+
 function response(body, status = 200) {
   return { handled: true, status, body };
 }
@@ -88,6 +118,9 @@ export async function managerConfigurationApiRequest({ method, pathname, body = 
   }
   if (context.pathname === '/api/configuration/harnesses' && method === 'GET') {
     return response(await managerHarnessCatalog(context, options));
+  }
+  if (context.pathname === '/api/configuration/branches' && method === 'GET') {
+    return response(managerBranchCatalog(context, options));
   }
   if (context.pathname === '/api/configuration/chatgpt-profile' && method === 'GET') {
     return response({ status: chatGptStatus(context.root, options) });
