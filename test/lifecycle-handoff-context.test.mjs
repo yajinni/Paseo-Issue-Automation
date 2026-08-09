@@ -26,6 +26,8 @@ function fixJob(overrides = {}) {
   return {
     reviewedHeadSha: oldHead,
     reviewRequestId: 'paseo-review-request-7',
+    sourceReviewRound: 4,
+    sourceReviewCommentId: 9911,
     findings: 'Fix the status transition and add the missing regression test.',
     ...overrides,
   };
@@ -51,6 +53,24 @@ test('serial review repair prompt carries the complete authoritative review iden
   assert.match(prompt, /paseo-review:v1/);
   assert.match(prompt, /fix worker owns internal exact-head validation bookkeeping/i);
   assert.doesNotMatch(prompt, /paseo-issue-automation record/);
+});
+
+test('serial repair prompt uses immutable job review identity after the managed PR advances', () => {
+  const prompt = codingFixPrompt(
+    managed({ reviewRound: 9, lastReviewCommentId: 778899 }),
+    fixJob({ sourceReviewRound: 4, sourceReviewCommentId: 9911 }),
+  );
+  assert.match(prompt, /Review round: 4/);
+  assert.match(prompt, /Matching PR review comment ID: 9911/);
+  assert.doesNotMatch(prompt, /Review round: 9/);
+  assert.doesNotMatch(prompt, /778899/);
+});
+
+test('serial repair prompt fails closed when immutable source review identity is missing', () => {
+  assert.throws(
+    () => codingFixPrompt(managed(), fixJob({ sourceReviewRound: undefined })),
+    /missing its immutable source review round/,
+  );
 });
 
 test('serial repair prompt fails closed when the authoritative finding payload is empty', () => {
