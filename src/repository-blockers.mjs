@@ -221,27 +221,14 @@ function automationBlockers(status, result) {
     }));
   }
 
-  if (status.capabilities?.backgroundWorkers && worker.running !== true) {
-    result.push(blocker({
-      code: 'coding-worker-stopped',
-      severity: 'warning',
-      scope: 'worker',
-      title: 'Coding worker is stopped',
-      message: `${name} has no background coding scheduler. Manual “Run now” remains available.`,
-      blocksIssueProcessing: true,
-      action: postAction('Start coding worker', 'worker/start'),
-    }));
-  }
-
   if (worker.lastError) {
     result.push(blocker({
       code: 'coding-worker-error',
       severity: 'error',
       scope: 'worker',
       title: 'Coding worker reported an error',
-      message: `${name} coding worker failed: ${worker.lastError}`,
-      blocksIssueProcessing: true,
-      action: postAction('Restart coding worker', 'worker/restart'),
+      message: `${name} coding worker failed its latest scheduling attempt: ${worker.lastError}`,
+      blocksIssueProcessing: false,
       details: { error: worker.lastError },
     }));
   } else if (worker.capacityError) {
