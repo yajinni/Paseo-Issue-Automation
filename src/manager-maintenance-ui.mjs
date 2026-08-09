@@ -85,7 +85,7 @@ function renderManagerOverview(data) {
   const issueReady = operational.issueProcessing === 'ready';
   const reviewReady = operational.prReviews === 'ready';
   const claimsEnabled = data.automation?.claimsEnabled === true;
-  const codingWorkerRunning = data.worker?.running === true;
+  const codingWorkerActive = data.worker?.state === 'active';
   const reviewWorkerRunning = data.reviewWorker?.running === true;
 
   const title = document.getElementById('overview-status-title');
@@ -97,7 +97,7 @@ function renderManagerOverview(data) {
 
   setOverviewMetric('overview-issue-processing', issueReady ? 'Ready' : 'Blocked', issueReady ? 'ready' : 'blocked');
   setOverviewMetric('overview-claims', claimsEnabled ? 'Enabled' : 'Paused', claimsEnabled ? 'ready' : 'attention');
-  setOverviewMetric('overview-coding-worker', codingWorkerRunning ? 'Running' : 'Stopped', codingWorkerRunning ? 'ready' : 'attention');
+  setOverviewMetric('overview-coding-worker', codingWorkerActive ? 'Active' : 'Idle', codingWorkerActive ? 'active' : 'ready');
   setOverviewMetric('overview-review-worker', reviewReady && reviewWorkerRunning ? 'Ready' : reviewWorkerRunning ? 'Attention' : 'Stopped', reviewReady && reviewWorkerRunning ? 'ready' : 'attention');
   setOverviewMetric('overview-active-work', String(data.automation?.activeRunCount || 0), Number(data.automation?.activeRunCount || 0) > 0 ? 'active' : 'neutral');
   setOverviewMetric('overview-attention', String(attentionCount), attentionCount ? 'attention' : 'ready');
@@ -153,16 +153,19 @@ function renderExternalMaintenance(data) {
     ['Removal sync error', removal && removal.syncError],
     ['Removal completed', removal && removal.completedAt],
   ]);
-  const workersRunning = Boolean(data.worker && data.worker.running) || Boolean(data.reviewWorker && data.reviewWorker.running);
+  const codingActive = data.worker?.state === 'active' || Number(data.worker?.activeCount || 0) > 0 || data.worker?.ticking === true;
+  const reviewRunning = Boolean(data.reviewWorker && data.reviewWorker.running);
+  const workersBusy = codingActive || reviewRunning;
+  const waitText = codingActive ? 'Wait for coding work to finish' : 'Stop PR-review worker first';
   const capabilities = data.capabilities || {};
   const repair = document.getElementById('repair-external-controller');
-  repair.disabled = !capabilities.externalRepair || workersRunning;
-  repair.textContent = workersRunning ? 'Stop repository workers before repair' : 'Repair managed components';
+  repair.disabled = !capabilities.externalRepair || workersBusy;
+  repair.textContent = workersBusy ? waitText : 'Repair managed components';
   const remove = document.getElementById('remove-external-controller');
-  remove.disabled = !capabilities.externalRemoval || workersRunning;
-  remove.textContent = maintenance.removalPending ? 'Removal PR is pending' : workersRunning ? 'Stop repository workers before removal' : 'Create removal PR';
+  remove.disabled = !capabilities.externalRemoval || workersBusy;
+  remove.textContent = maintenance.removalPending ? 'Removal PR is pending' : workersBusy ? waitText : 'Create removal PR';
   const reconcile = document.getElementById('reconcile-external-removal');
-  reconcile.disabled = !capabilities.externalRemovalReconciliation || workersRunning;
+  reconcile.disabled = !capabilities.externalRemovalReconciliation || workersBusy;
   const link = document.getElementById('removal-pr-link');
   link.textContent = '';
   if (removal && removal.url) {

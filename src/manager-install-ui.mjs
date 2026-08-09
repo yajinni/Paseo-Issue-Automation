@@ -52,38 +52,39 @@ function renderExternalInstallation(data) {
     ['Unrelated working-tree changes', (setup.repositoryChanges && setup.repositoryChanges.unexpectedFiles || []).join(', ') || 'None'],
     ['Package dependency', setup.externalController ? 'Not used' : setup.embeddedController ? 'Embedded mode' : 'Not installed'],
   ]);
-  const workerRunning = Boolean(data.worker && data.worker.running);
+  const codingActive = data.worker?.state === 'active' || Number(data.worker?.activeCount || 0) > 0 || data.worker?.ticking === true;
   const reviewWorkerRunning = Boolean(data.reviewWorker && data.reviewWorker.running);
-  const workersRunning = workerRunning || reviewWorkerRunning;
+  const workersBusy = codingActive || reviewWorkerRunning;
+  const waitText = codingActive ? 'Wait for coding work to finish' : 'Stop PR-review worker first';
 
   const installButton = document.getElementById('install-external-controller');
-  installButton.disabled = !capabilities.externalInstallation || workersRunning;
+  installButton.disabled = !capabilities.externalInstallation || workersBusy;
   installButton.textContent = setup.externalController
     ? 'External integration installed'
     : capabilities.migrationRequired
       ? 'Use migration for embedded installation'
-      : workersRunning
-        ? 'Stop repository workers before installation'
+      : workersBusy
+        ? waitText
         : 'Install for standalone manager';
 
   const migrationButton = document.getElementById('migrate-embedded-controller');
-  migrationButton.disabled = !capabilities.embeddedMigration || workersRunning;
+  migrationButton.disabled = !capabilities.embeddedMigration || workersBusy;
   migrationButton.textContent = setup.migrationPending
     ? 'Migration PR is pending'
     : capabilities.migrationAdoption
       ? 'Repository files are already migrated'
-      : workersRunning
-        ? 'Stop repository workers before migration'
+      : workersBusy
+        ? waitText
         : 'Create migration PR';
 
   const adoptionButton = document.getElementById('finalize-existing-migration');
-  adoptionButton.disabled = !capabilities.migrationAdoption || workersRunning;
-  adoptionButton.textContent = workersRunning
-    ? 'Stop repository workers before finalizing migration'
+  adoptionButton.disabled = !capabilities.migrationAdoption || workersBusy;
+  adoptionButton.textContent = workersBusy
+    ? waitText
     : 'Finalize existing migration';
 
   const reconcileButton = document.getElementById('reconcile-controller-migration');
-  reconcileButton.disabled = !capabilities.migrationReconciliation || workersRunning;
+  reconcileButton.disabled = !capabilities.migrationReconciliation || workersBusy;
 
   const setupLink = document.getElementById('setup-pr-link');
   if (!appendPrLink(setupLink, 'Setup PR', setup.pullRequest) && setup.externalController) {

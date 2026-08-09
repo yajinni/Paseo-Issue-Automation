@@ -2,6 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { managerApiRequest } from './manager-api.mjs';
 import { enhanceManagerWithAutomationReviews } from './manager-automation-reviews-ui.mjs';
+import { enhanceManagerWithCodingWorkerStatus } from './manager-coding-worker-status-ui.mjs';
 import { enhanceManagerWithConfigIntegrationMaintenance } from './manager-config-integration-maintenance-ui.mjs';
 import { managerConfigurationApiRequest } from './manager-configuration-service.mjs';
 import { enhanceManagerWithConfigurationTabs } from './manager-configuration-tabs-ui.mjs';
@@ -67,6 +68,28 @@ export function managerHasConfiguredRepository({ rootDir } = {}) {
   });
 }
 
+export function startConfiguredCodingWorkers(workerManager, {
+  rootDir,
+  repositoryLister = listRepositories,
+  configLoader = loadConfig,
+  onError = () => {},
+} = {}) {
+  const started = [];
+  const errors = [];
+  if (!workerManager?.start) return { started, errors };
+  for (const repository of repositoryLister({ rootDir })) {
+    try {
+      if (configLoader(repository.path).setupComplete !== true) continue;
+      started.push(workerManager.start(repository));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push({ repositoryId: repository?.id || null, error: message });
+      onError(error, repository);
+    }
+  }
+  return { started, errors };
+}
+
 export function managerDashboardHtml() {
   const setupLink = '<a href="/setup" data-manager-setup-link class="manager-setup-link">Add repository via setup</a>';
   const manualForm = `  <form class="register" id="register-form">
@@ -104,7 +127,8 @@ ${manualForm}
   const issueFlow = enhanceManagerWithIssueProcessingFlow(issueAndReviewViews);
   const issueInsights = enhanceManagerWithDependencyInsights(issueFlow);
   const issueDiagnostics = enhanceManagerWithDependencyDiagnostics(issueInsights);
-  return enhanceManagerWithInteractionPolish(issueDiagnostics);
+  const polished = enhanceManagerWithInteractionPolish(issueDiagnostics);
+  return enhanceManagerWithCodingWorkerStatus(polished);
 }
 
 export async function startManagerServer({
@@ -208,10 +232,16 @@ export async function startManagerServer({
     server.once('error', reject);
     server.listen(port, '127.0.0.1', resolve);
   });
+  const codingWorkerStartup = startConfiguredCodingWorkers(workers, {
+    rootDir,
+    onError: (error, repository) => {
+      console.warn(`Could not start coding worker for ${repository?.repository || repository?.name || repository?.id || 'repository'}: ${error.message}`);
+    },
+  });
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}`;
   console.log(`Paseo repository manager: ${url}`);
   server.on('close', () => { workers.close(); reviewWorkers.close(); });
   if (open) openBrowser(url);
-  return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers, paseoCredentialStore: credentials };
+  return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers, paseoCredentialStore: credentials, codingWorkerStartup };
 }

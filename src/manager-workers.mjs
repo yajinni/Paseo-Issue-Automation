@@ -6,13 +6,15 @@ import { DEFAULT_MANAGER_CONFIG, loadManagerConfig } from './manager-config.mjs'
 import { loadConfig } from './state.mjs';
 
 function snapshot(worker) {
-  if (!worker) return { running: false, state: 'stopped' };
+  if (!worker) return { running: false, state: 'idle' };
+  const active = worker.running === true
+    && (worker.ticking === true || Math.max(0, Number(worker.activeCount) || 0) > 0);
   return {
     repositoryId: worker.repositoryId,
     repositoryName: worker.repositoryName,
     root: worker.root,
     running: worker.running === true,
-    state: worker.running ? 'running' : 'stopped',
+    state: active ? 'active' : 'idle',
     intervalSeconds: worker.intervalSeconds,
     startedAt: worker.startedAt,
     lastTickAt: worker.lastTickAt,
@@ -64,20 +66,27 @@ export function createManagerWorkerPool({
         || left.repositoryId.localeCompare(right.repositoryId));
   }
 
+  function refreshWorkerActivity(worker, { conservative = false } = {}) {
+    if (!worker?.running) return;
+    try {
+      worker.activeCount = Math.max(0, Number(countActive(worker.root)) || 0);
+      worker.capacityError = null;
+    } catch (error) {
+      worker.capacityError = error instanceof Error ? error.message : String(error);
+      if (conservative) {
+        const repositoryMaximum = Math.max(1, Number(readConfig(worker.root).maxActive) || 1);
+        worker.activeCount = repositoryMaximum;
+      }
+    }
+  }
+
   function capacity() {
     const managerConfig = readManagerConfig(managerConfigOptions);
     const errors = [];
     let active = 0;
     for (const worker of runningWorkers()) {
-      try {
-        worker.activeCount = Math.max(0, Number(countActive(worker.root)) || 0);
-        worker.capacityError = null;
-      } catch (error) {
-        worker.capacityError = error instanceof Error ? error.message : String(error);
-        errors.push({ repositoryId: worker.repositoryId, error: worker.capacityError });
-        const repositoryMaximum = Math.max(1, Number(readConfig(worker.root).maxActive) || 1);
-        worker.activeCount = repositoryMaximum;
-      }
+      refreshWorkerActivity(worker, { conservative: true });
+      if (worker.capacityError) errors.push({ repositoryId: worker.repositoryId, error: worker.capacityError });
       active += worker.activeCount;
     }
     lastCapacity = {
@@ -134,6 +143,7 @@ export function createManagerWorkerPool({
           lastServedId = worker.repositoryId;
         } finally {
           worker.ticking = false;
+          refreshWorkerActivity(worker);
         }
       }
     } finally {
@@ -149,7 +159,7 @@ export function createManagerWorkerPool({
     pending.add(worker.repositoryId);
     worker.pending = true;
     drain();
-    return snapshot(worker);
+    return status(repositoryId);
   }
 
   function start(repository) {
@@ -161,7 +171,7 @@ export function createManagerWorkerPool({
       if (path.resolve(existing.root) !== root) {
         throw new Error(`Worker ${repositoryId} is already running for a different repository path.`);
       }
-      return snapshot(existing);
+      return status(repositoryId);
     }
     const config = readConfig(root);
     const intervalSeconds = Number(config.pollIntervalSeconds);
@@ -188,13 +198,14 @@ export function createManagerWorkerPool({
     worker.timer = setIntervalFn(() => tick(repositoryId), intervalSeconds * 1000);
     worker.timer?.unref?.();
     workers.set(repositoryId, worker);
+    refreshWorkerActivity(worker);
     return snapshot(worker);
   }
 
   function stop(repositoryId) {
     const id = String(repositoryId || '');
     const worker = workers.get(id);
-    if (!worker) return { repositoryId: id || null, running: false, state: 'stopped', changed: false };
+    if (!worker) return { repositoryId: id || null, running: false, state: 'idle', changed: false };
     if (worker.timer) clearIntervalFn(worker.timer);
     pending.delete(id);
     worker.pending = false;
@@ -211,16 +222,33 @@ export function createManagerWorkerPool({
   }
 
   function refresh(repository) {
-    if (!repository?.id || !workers.has(String(repository.id))) return status(repository?.id);
-    return restart(repository);
+    if (!repository?.id || !repository?.path) return status(repository?.id);
+    const repositoryId = String(repository.id);
+    const existing = workers.get(repositoryId);
+    if (!existing?.running) return start(repository);
+    const root = path.resolve(repository.path);
+    if (path.resolve(existing.root) !== root) {
+      throw new Error(`Worker ${repositoryId} is already running for a different repository path.`);
+    }
+    const intervalSeconds = Number(readConfig(root).pollIntervalSeconds);
+    if (!Number.isInteger(intervalSeconds) || intervalSeconds < 60) {
+      throw new Error('Repository pollIntervalSeconds must be an integer of at least 60.');
+    }
+    if (existing.intervalSeconds !== intervalSeconds) return restart(repository);
+    return status(repositoryId);
   }
 
   function status(repositoryId) {
-    return snapshot(workers.get(String(repositoryId || '')));
+    const worker = workers.get(String(repositoryId || ''));
+    refreshWorkerActivity(worker);
+    return snapshot(worker);
   }
 
   function list() {
-    return runningWorkers().map(snapshot);
+    return runningWorkers().map((worker) => {
+      refreshWorkerActivity(worker);
+      return snapshot(worker);
+    });
   }
 
   function managerStatus({ refreshCapacity = true } = {}) {

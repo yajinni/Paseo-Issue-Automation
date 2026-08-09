@@ -16,19 +16,19 @@ function repository() {
   return root;
 }
 
-test('manager external installation refuses active repository workers', () => {
+test('manager external installation allows an idle coder but refuses active coding and running PR review', () => {
   const entry = { id: 'repo-one', path: '/repo-one', name: 'One' };
   assert.throws(
     () => installExternalRepositoryFromManager(entry, {
-      workerManager: { status: () => ({ running: true }) },
+      workerManager: { status: () => ({ running: true, state: 'active', activeCount: 1 }) },
       reviewWorkerManager: { status: () => ({ running: false }) },
       installer: () => { throw new Error('installer should not run'); },
     }),
-    /Stop this repository’s coding worker/,
+    /active coding work to finish/,
   );
   assert.throws(
     () => installExternalRepositoryFromManager(entry, {
-      workerManager: { status: () => ({ running: false }) },
+      workerManager: { status: () => ({ running: true, state: 'idle', activeCount: 0 }) },
       reviewWorkerManager: { status: () => ({ running: true }) },
       installer: () => { throw new Error('installer should not run'); },
     }),
@@ -36,10 +36,10 @@ test('manager external installation refuses active repository workers', () => {
   );
 });
 
-test('manager external installation passes only the selected repository path', () => {
+test('manager external installation passes only the selected repository path with idle coding infrastructure', () => {
   const calls = [];
   const result = installExternalRepositoryFromManager({ id: 'repo-one', path: '/repo-one' }, {
-    workerManager: { status: () => ({ running: false }) },
+    workerManager: { status: () => ({ running: true, state: 'idle', activeCount: 0 }) },
     reviewWorkerManager: { status: () => ({ running: false }) },
     installer: (root) => { calls.push(root); return { controllerMode: 'external-manager' }; },
   });

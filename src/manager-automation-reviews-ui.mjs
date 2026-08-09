@@ -187,11 +187,7 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
       ['Last dispatch', time(automation.lastDispatchAt)],
     ]);
     renderFacts('manager-coding-worker-facts', [
-      ['Worker', worker.running ? 'Running' : 'Stopped'],
-      ['Interval', worker.intervalSeconds ? worker.intervalSeconds + ' seconds' : 'Not running'],
-      ['Last tick', time(worker.lastTickAt)],
-      ['Capacity wait', worker.lastScheduleReason || 'None'],
-      ['Last error', worker.lastError || worker.capacityError || 'None'],
+      ['Status', worker.state === 'active' ? 'Active' : 'Idle'],
     ]);
     renderFacts('manager-review-workflow-facts', [
       ['Workflow', workflowLabel(review.workflow)],
@@ -234,9 +230,7 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
     const claims = card('Claims & scheduling', 'Repository-scoped scheduling controls for eligible issue work.', 'manager-claims-facts');
     const claimsActions = actionArea(claims);
     for (const action of ['resume', 'pause', 'run-now', 'reconcile']) moveAction(oldControls, claimsActions, action);
-    const coding = card('Coding worker', 'Starts or stops the selected repository coding poller. Manager-wide capacity remains under Manager Settings.', 'manager-coding-worker-facts');
-    const codingActions = actionArea(coding);
-    for (const action of ['worker/start', 'worker/stop', 'worker/restart']) moveAction(oldControls, codingActions, action);
+    const coding = card('Coding worker', 'Automatically available for new issue coding and review fixes. It is Active while coding work is running and Idle otherwise.', 'manager-coding-worker-facts');
     automationGrid.append(claims, coding);
     automationView.prepend(automationGrid);
 

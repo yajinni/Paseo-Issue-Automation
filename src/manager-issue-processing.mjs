@@ -20,7 +20,7 @@ export function managerIssueProcessingAction({
   if (pathname === '/api/issue-processing/start') {
     const claims = actionHandler(root, '/api/resume', {}, actions);
     try {
-      const worker = workerManager.start(repository);
+      const worker = workerManager.refresh?.(repository) || workerManager.start(repository);
       return {
         state: 'running',
         claimsEnabled: true,
@@ -34,11 +34,10 @@ export function managerIssueProcessingAction({
   }
 
   const claims = actionHandler(root, '/api/pause', {}, actions);
-  const worker = workerManager.stop(repository.id);
   return {
     state: 'paused',
     claimsEnabled: false,
-    worker,
+    worker: workerManager.status?.(repository.id) || { running: true, state: 'idle' },
     claims,
   };
 }
