@@ -20,10 +20,11 @@ test('parallel work summary distinguishes structural readiness from runnable wor
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /statusId === 'next' \|\| item\.statusId === 'eligible'/);
 });
 
-test('structural readiness is unknown when native relationship data is incomplete', () => {
+test('readiness and capacity fail closed when their authoritative status is unavailable', () => {
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /plan\?\.graph\?\.available === false/);
-  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /'Unknown'/);
+  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /maxActive === null \? 'Unknown'/);
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /Native relationship data is incomplete/);
+  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /Waiting for capacity status/);
 });
 
 test('selected issue insight traces authoritative upstream and downstream graph relationships', () => {
@@ -56,8 +57,12 @@ test('map selection supports click, keyboard focus, escape clearing, and relatio
   }
 });
 
-test('insights observe the existing Issues plan and status streams without adding an API', () => {
+test('status-driven base-map rerenders restore capacity and selected issue overlays', () => {
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /window\.addManagerStatusListener\(statusListener\)/);
+  assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /renderCapacity\(latestPlan\);\s*applySelection\(latestPlan\);/);
+});
+
+test('insights observe the existing Issues plan and status streams without adding an API', () => {
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /includes\('\/issues-plan'\)/);
   assert.match(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /previousJsonRequest\(url, options\)/);
   assert.doesNotMatch(MANAGER_DEPENDENCY_INSIGHTS_SCRIPT, /fetch\(/);
