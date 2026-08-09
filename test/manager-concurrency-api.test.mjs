@@ -53,5 +53,5 @@ test('manager dashboard exposes global capacity and fairness state', () => {
   assert.match(html, /Manager-wide coding capacity/);
   assert.match(html, /fair scheduling turn/);
   assert.match(html, /\/api\/manager\/status/);
-  assert.match(html, /Capacity wait/);
+  assert.match(html, /Waiting repositories/);
 });
