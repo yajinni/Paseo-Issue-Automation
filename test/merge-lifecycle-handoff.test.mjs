@@ -91,6 +91,9 @@ test('review prompt leaves repair dispatch to Paseo and requires approval eviden
   assert.match(prompt, /Do not launch, contact, or independently instruct a coding agent/i);
   assert.match(prompt, /Paseo reconciliation owns creation of the repair job/i);
   assert.match(prompt, /authoritative approval evidence and must be posted before merge/i);
+  assert.match(prompt, new RegExp(`current head still equals ${head}`, 'i'));
+  assert.match(prompt, new RegExp(`${head} as the expected head SHA`, 'i'));
+  assert.doesNotMatch(prompt, /\{\{headSha\}\}/);
   assert.doesNotMatch(prompt, /Tell the coding agent to update/i);
 });
 
@@ -191,6 +194,7 @@ test('merged snapshot preserves an exact approval that arrives in the same poll 
   assert.equal(managed.lastReviewCommentId, 7788);
   assert.equal(reviewJob.state, 'completed');
   assert.equal(reviewJob.result, 'approved');
+  assert.equal(reviewJob.resultSourceId, 7788);
   const run = loadRun(root, 101);
   assert.ok(run.events.some((event) => event.event === 'review'
     && event.result === 'APPROVED'
@@ -198,7 +202,7 @@ test('merged snapshot preserves an exact approval that arrives in the same poll 
     && event.reviewRequestId === claimed.reviewRequestId));
 });
 
-test('merged records with pending issue completion remain eligible for reconciliation', (t) => {
+test('merged records with pending lifecycle completion remain eligible after persistence', (t) => {
   const root = repo(t);
   configureReviews(root);
   registerManagedPullRequest(root, managedInput(), { now: 1000 });
@@ -206,9 +210,12 @@ test('merged records with pending issue completion remain eligible for reconcili
     const managed = store.managedPullRequests[0];
     managed.reviewState = 'merged';
     managed.lastCompletedReviewSha = head;
-    managed.issueClosurePending = true;
+    managed.issueClosurePending = false;
     managed.lifecycleCompletionPending = true;
+    managed.reviewEvidenceMissing = false;
   });
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].lifecycleCompletionPending, true);
+
   let effectCalls = 0;
   const snapshot = {
     number: 45,
