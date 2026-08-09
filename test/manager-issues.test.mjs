@@ -1,9 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildManagerIssueFlow, managerIssuePlan } from '../src/manager-issues.mjs';
+import {
+  buildManagerIssueFlow,
+  buildManagerOpenIssueGraph,
+  managerIssuePlan,
+} from '../src/manager-issues.mjs';
 
-function issue(number, title = `Issue ${number}`) {
-  return { number, title, url: `https://github.test/issues/${number}`, labels: [], state: 'OPEN', blockedBy: [], blocking: [] };
+function issue(number, title = `Issue ${number}`, overrides = {}) {
+  return {
+    number,
+    title,
+    url: `https://github.test/issues/${number}`,
+    labels: [],
+    state: 'OPEN',
+    blockedBy: [],
+    blocking: [],
+    ...overrides,
+  };
+}
+
+function relation(number, state = 'OPEN') {
+  return {
+    number,
+    title: `Issue ${number}`,
+    url: `https://github.test/issues/${number}`,
+    state,
+    stateReason: state === 'CLOSED' ? 'COMPLETED' : '',
+  };
 }
 
 test('manager issue plan shows every open issue while preserving scheduler order and blockers', () => {
@@ -44,6 +67,10 @@ test('manager issue plan shows every open issue while preserving scheduler order
   assert.equal(plan.active, 1);
   assert.equal(plan.skipped, 1);
   assert.ok(plan.flow);
+  assert.ok(plan.graph);
+  assert.deepEqual(plan.graph.issueNumbers, [1, 2, 3, 4, 5]);
+  assert.equal(plan.graph.counts.readyNow, 5);
+  assert.equal(plan.items.every((item) => item.relationshipDataAvailable === true), true);
 
   assert.equal(queueOptions.issues, issues);
   for (const callback of ['recordInvalid', 'restoreInvalid', 'recordWait', 'recordReady']) {
@@ -71,6 +98,135 @@ test('manager issue plan returns eligible issues in lowest issue-number order', 
   assert.deepEqual(plan.items.map((item) => item.issueNumber), [3, 8, 12]);
   assert.deepEqual(plan.items.map((item) => item.processingOrder), [1, 2, 3]);
   assert.equal(plan.nextIssueNumber, 3);
+});
+
+test('all-open graph keeps native relationships for unselected issues and computes exact levels', () => {
+  const issues = [
+    issue(1, 'Ready A', { blocking: [relation(3), relation(4)] }),
+    issue(2, 'Ready B'),
+    issue(3, 'Branch A', { blockedBy: [relation(1)], blocking: [relation(5)] }),
+    issue(4, 'Branch B', { blockedBy: [relation(1)], blocking: [relation(5)] }),
+    issue(5, 'Join', { blockedBy: [relation(3), relation(4)] }),
+  ];
+  const plan = managerIssuePlan('/repo', { issueSelection: { mode: 'recommended-labels' } }, {
+    jsonRunner: () => issues,
+    runtimeLoader: () => ({ skippedIssueNumbers: [] }),
+    runLister: () => [],
+    queueEvaluator: () => ({
+      mode: 'recommended-labels',
+      eligible: [],
+      waiting: [],
+      rejected: issues.map((entry) => ({ issueNumber: entry.number, kind: 'not-ready', reason: 'Not selected.' })),
+    }),
+  });
+
+  assert.equal(plan.eligible, 0);
+  assert.deepEqual(plan.graph.issueNumbers, [1, 2, 3, 4, 5]);
+  assert.deepEqual(plan.graph.dependencies, {
+    1: [],
+    2: [],
+    3: [1],
+    4: [1],
+    5: [3, 4],
+  });
+  assert.deepEqual(plan.graph.unlocks[1], [3, 4]);
+  assert.deepEqual(plan.graph.unlocks[3], [5]);
+  assert.deepEqual(plan.graph.levels, [
+    { level: 0, issueNumbers: [1, 2] },
+    { level: 1, issueNumbers: [3, 4] },
+    { level: 2, issueNumbers: [5] },
+  ]);
+  assert.deepEqual(plan.graph.counts, {
+    readyNow: 2,
+    waitingOnOneLevel: 2,
+    waitingOnTwoLevels: 1,
+    waitingOnThreePlusLevels: 0,
+    unresolved: 0,
+  });
+  assert.equal(plan.items.find((item) => item.issueNumber === 5).dependencyLevel, 2);
+  assert.deepEqual(plan.items.find((item) => item.issueNumber === 1).directUnlocks, [3, 4]);
+  assert.deepEqual(plan.items.find((item) => item.issueNumber === 5).nativeBlockedBy.map((entry) => entry.number), [3, 4]);
+});
+
+test('all-open graph ignores completed external blockers when assigning current open levels', () => {
+  const graph = buildManagerOpenIssueGraph([
+    {
+      issueNumber: 10,
+      relationshipDataAvailable: true,
+      nativeBlockedBy: [relation(9, 'CLOSED')],
+    },
+    {
+      issueNumber: 11,
+      relationshipDataAvailable: true,
+      nativeBlockedBy: [relation(10)],
+    },
+  ]);
+
+  assert.deepEqual(graph.dependencies, { 10: [], 11: [10] });
+  assert.deepEqual(graph.resolvedDependencies[10], [9]);
+  assert.equal(graph.levelByIssue[10], 0);
+  assert.equal(graph.levelByIssue[11], 1);
+  assert.deepEqual(graph.unresolvedIssueNumbers, []);
+});
+
+test('all-open graph fails relationship availability closed and propagates unresolved depth', () => {
+  const graph = buildManagerOpenIssueGraph([
+    {
+      issueNumber: 20,
+      relationshipDataAvailable: false,
+      nativeBlockedBy: [],
+    },
+    {
+      issueNumber: 21,
+      relationshipDataAvailable: true,
+      nativeBlockedBy: [relation(20)],
+    },
+    {
+      issueNumber: 22,
+      relationshipDataAvailable: true,
+      nativeBlockedBy: [],
+    },
+  ]);
+
+  assert.equal(graph.available, false);
+  assert.deepEqual(graph.unavailableIssueNumbers, [20]);
+  assert.deepEqual(graph.levelByIssue, { 22: 0 });
+  assert.deepEqual(graph.unresolvedIssueNumbers, [20, 21]);
+  assert.equal(graph.counts.readyNow, 1);
+  assert.equal(graph.counts.unresolved, 2);
+});
+
+test('all-open graph keeps a missing open blocker unresolved instead of pretending it is complete', () => {
+  const graph = buildManagerOpenIssueGraph([
+    {
+      issueNumber: 30,
+      relationshipDataAvailable: true,
+      nativeBlockedBy: [relation(999, 'OPEN')],
+    },
+    {
+      issueNumber: 31,
+      relationshipDataAvailable: true,
+      nativeBlockedBy: [relation(30)],
+    },
+  ]);
+
+  assert.equal(graph.available, true);
+  assert.deepEqual(graph.externalDependencies[30], [999]);
+  assert.deepEqual(graph.unresolvedIssueNumbers, [30, 31]);
+  assert.deepEqual(graph.levels, []);
+});
+
+test('all-open graph reports cycles instead of inventing a dependency level', () => {
+  const graph = buildManagerOpenIssueGraph([
+    { issueNumber: 40, relationshipDataAvailable: true, nativeBlockedBy: [relation(41)] },
+    { issueNumber: 41, relationshipDataAvailable: true, nativeBlockedBy: [relation(40)] },
+    { issueNumber: 42, relationshipDataAvailable: true, nativeBlockedBy: [] },
+  ]);
+
+  assert.deepEqual(graph.levels, [{ level: 0, issueNumbers: [42] }]);
+  assert.deepEqual(graph.unresolvedIssueNumbers, [40, 41]);
+  assert.deepEqual(graph.cycleIssueNumbers, [40, 41]);
+  assert.equal(graph.cycles.length, 1);
 });
 
 test('dependency flow groups independent issues into parallel waves and records unlocks', () => {
