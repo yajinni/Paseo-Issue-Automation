@@ -17,6 +17,9 @@ import { buildWindowsCmdInvocation, resolveCommand } from './process.mjs';
 const require = createRequire(import.meta.url);
 const BROWSER_LEASE_TTL_MS = 180_000;
 const BROWSER_COMMAND_TIMEOUT_MS = 15 * 60_000;
+const CONVERSATION_READY_TIMEOUT_MS = 30_000;
+const CONVERSATION_READY_STABLE_SAMPLES = 4;
+const CONVERSATION_READY_POLL_MS = 300;
 
 export function playwrightCommand(platform = process.platform) {
   return platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -230,6 +233,83 @@ export async function locateMessageComposer(page, { timeoutMs = 10_000 } = {}) {
   throw new Error('A usable ChatGPT message composer could not be located.');
 }
 
+function boxSignature(box) {
+  if (!box) return null;
+  return [box.x, box.y, box.width, box.height].map((value) => Math.round(Number(value) || 0)).join(':');
+}
+
+function composerInsideViewport(box, viewport) {
+  if (!box || box.width <= 0 || box.height <= 0) return false;
+  const width = Number(viewport?.width);
+  const height = Number(viewport?.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
+  const tolerance = 2;
+  return box.x >= -tolerance
+    && box.y >= -tolerance
+    && box.x + box.width <= width + tolerance
+    && box.y + box.height <= height + tolerance;
+}
+
+export async function waitForConversationReady(page, conversationUrl, {
+  timeoutMs = CONVERSATION_READY_TIMEOUT_MS,
+  stableSamples = CONVERSATION_READY_STABLE_SAMPLES,
+  pollMs = CONVERSATION_READY_POLL_MS,
+} = {}) {
+  const normalized = normalizeChatGptConversationUrl(conversationUrl);
+  const deadline = Date.now() + Math.max(1, Number(timeoutMs) || CONVERSATION_READY_TIMEOUT_MS);
+  const requiredStableSamples = Math.max(2, Number(stableSamples) || CONVERSATION_READY_STABLE_SAMPLES);
+  const intervalMs = Math.max(1, Number(pollMs) || CONVERSATION_READY_POLL_MS);
+
+  try {
+    await page.waitForFunction(
+      () => document.readyState === 'complete',
+      null,
+      { timeout: Math.max(1, deadline - Date.now()) },
+    );
+  } catch {
+    throw new Error('ChatGPT document did not finish loading before review submission.');
+  }
+
+  if (isLoginOrHomeUrl(page.url())) throw new Error('ChatGPT redirected to login or home.');
+  if (!sameConversationUrl(page.url(), normalized)) throw new Error('ChatGPT redirected to a different conversation.');
+
+  const composer = await locateMessageComposer(page, { timeoutMs: Math.max(1, deadline - Date.now()) });
+  let previousSignature = null;
+  let consecutiveStableSamples = 0;
+
+  while (Date.now() < deadline) {
+    if (isLoginOrHomeUrl(page.url())) throw new Error('ChatGPT redirected to login or home.');
+    if (!sameConversationUrl(page.url(), normalized)) throw new Error('ChatGPT redirected to a different conversation.');
+
+    await composer.scrollIntoViewIfNeeded().catch(() => {});
+    const [visible, enabled, editable, box, viewport] = await Promise.all([
+      composer.isVisible().catch(() => false),
+      composer.isEnabled().catch(() => false),
+      composer.isEditable().catch(() => true),
+      composer.boundingBox().catch(() => null),
+      page.evaluate(() => ({
+        readyState: document.readyState,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      })).catch(() => ({ readyState: null, width: null, height: null })),
+    ]);
+    const usable = viewport.readyState === 'complete'
+      && visible
+      && enabled
+      && editable
+      && composerInsideViewport(box, viewport);
+    const signature = usable ? boxSignature(box) : null;
+    if (usable && signature === previousSignature) consecutiveStableSamples += 1;
+    else if (usable) consecutiveStableSamples = 1;
+    else consecutiveStableSamples = 0;
+    previousSignature = signature;
+    if (consecutiveStableSamples >= requiredStableSamples) return composer;
+    await page.waitForTimeout(Math.min(intervalMs, Math.max(1, deadline - Date.now())));
+  }
+
+  throw new Error('ChatGPT conversation did not become ready with a stable usable message composer inside the visible browser viewport.');
+}
+
 async function diagnosticFailure(page, error, { reviewRequestId = 'browser', stage = 'submission' } = {}) {
   const paths = browserPaths();
   const safeId = String(reviewRequestId).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
@@ -302,10 +382,7 @@ export async function inspectConversation({ conversationUrl, headless = true, se
     context = launched.context;
     const page = launched.page;
     await page.goto(normalized, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-    await page.waitForTimeout(1_500);
-    if (isLoginOrHomeUrl(page.url())) throw new Error('ChatGPT redirected to login or home; authenticate the dedicated profile first.');
-    if (!sameConversationUrl(page.url(), normalized)) throw new Error('ChatGPT opened an unexpected conversation.');
-    const composer = await locateMessageComposer(page);
+    const composer = await waitForConversationReady(page, normalized);
     if (sendTestPrompt) {
       const harmless = `Paseo browser test ${new Date().toISOString()}. Reply with OK only.`;
       await composer.fill(harmless).catch(async () => {
@@ -368,13 +445,10 @@ export async function submitReviewPrompt({ conversationUrl, prompt, reviewReques
     context = launched.context;
     page = launched.page;
     await page.goto(normalized, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-    await page.waitForTimeout(1_500);
-    if (isLoginOrHomeUrl(page.url())) throw new Error('ChatGPT redirected to login or home.');
-    if (!sameConversationUrl(page.url(), normalized)) throw new Error('ChatGPT redirected to a different conversation.');
+    const composer = await waitForConversationReady(page, normalized);
     if (await requestAlreadyVisible(page, reviewRequestId)) {
       return { submitted: true, recoveredExistingSubmission: true, submittedAt: new Date().toISOString(), conversationUrl: normalized };
     }
-    const composer = await locateMessageComposer(page, { timeoutMs: 12_000 });
     await composer.fill(prompt).catch(async () => {
       await composer.click();
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
