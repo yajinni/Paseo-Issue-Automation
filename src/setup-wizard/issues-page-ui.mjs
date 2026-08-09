@@ -31,7 +31,7 @@ export const ISSUES_PAGE_SCRIPT = String.raw`
     content().className = '';
     content().innerHTML = '<div class="paseo-grid">'
       + '<section class="' + cardClass(settingsMissing) + '"><h3>Issue selection</h3><p>Choose which open issues Paseo may consider. Invalid issues are still rejected by the installed issue contract.</p>'
-      + '<label class="choice"><input type="radio" name="issue-mode" value="recommended-labels" ' + (s.mode === 'recommended-labels' ? 'checked' : '') + '> Recommended labels <span class="muted">(default)</span></label>'
+      + '<label class="choice"><input type="radio" name="issue-mode" value="recommended-labels" ' + (s.mode === 'recommended-labels' ? 'checked' : '') + '> Labels (Recommended)</label>'
       + '<label class="choice"><input type="radio" name="issue-mode" value="all-open" ' + (s.mode === 'all-open' ? 'checked' : '') + '> All open issues</label>'
       + '<div class="notice">' + escape(state.explanations?.ordering || '') + '</div><div class="notice">' + escape(state.explanations?.dependencies || '') + '</div></section>'
       + '<section class="' + cardClass(settingsMissing) + '"><h3>Advanced options</h3>'

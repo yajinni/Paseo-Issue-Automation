@@ -7,8 +7,8 @@ import {
   switchGitHubAccount,
 } from './github-accounts.mjs';
 import {
+  listAllGitHubBranches,
   listAllGitHubRepositories,
-  listGitHubBranchPage,
 } from './github-repositories.mjs';
 import {
   loadSetupSessionStore,
@@ -29,42 +29,6 @@ function selections(session) {
     account: String(value.account || '').trim(),
     repository: String(value.repository || '').trim(),
     baseBranch: String(value.baseBranch || '').trim(),
-  };
-}
-
-function collectBranches(repository, options = {}) {
-  const branches = [];
-  let after = null;
-  for (let page = 0; page < 100; page += 1) {
-    const result = listGitHubBranchPage(repository, { ...options, after });
-    if (!result.ok) return { ...result, branches };
-    branches.push(...result.branches);
-    if (!result.pageInfo.hasNextPage) return { ...result, branches };
-    if (!result.pageInfo.endCursor || result.pageInfo.endCursor === after) {
-      return {
-        ok: false,
-        repository: typeof repository === 'string' ? repository : repository?.nameWithOwner,
-        branches,
-        recommended: result.recommended,
-        blocker: {
-          code: 'github-branch-pagination-stalled',
-          message: 'GitHub branch pagination did not advance.',
-          recoveryAction: 'Refresh branches.',
-        },
-      };
-    }
-    after = result.pageInfo.endCursor;
-  }
-  return {
-    ok: false,
-    repository: typeof repository === 'string' ? repository : repository?.nameWithOwner,
-    branches,
-    recommended: null,
-    blocker: {
-      code: 'github-branch-pagination-limit',
-      message: 'Branch discovery exceeded its safety page limit.',
-      recoveryAction: 'Refresh branches.',
-    },
   };
 }
 
@@ -178,7 +142,7 @@ function loadStatus(options = {}) {
     const reconciled = reconcileRepositorySelection(selection.repository || null, repositories);
     const repositoryName = reconciled.selection ? selection.repository : '';
     if (repositoryName) {
-      const result = (options.branchLoader || collectBranches)(repositoryName, {
+      const result = (options.branchLoader || listAllGitHubBranches)(repositoryName, {
         host: auth.activeAccount.host || selection.host,
         runner: options.runner,
         env: options.env,
@@ -251,7 +215,7 @@ export function saveGitHubSetupPage(input = {}, options = {}) {
   let session = saveSetupPage('repository', { selections: next }, options);
 
   if (repositoryName && selectedRepository?.selectable && (!status.branches.length || repositoryChanged)) {
-    const branchResult = (options.branchLoader || collectBranches)(repositoryName, {
+    const branchResult = (options.branchLoader || listAllGitHubBranches)(repositoryName, {
       host: active?.host || next.host,
       runner: options.runner,
       env: options.env,
