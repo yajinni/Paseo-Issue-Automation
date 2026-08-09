@@ -67,6 +67,32 @@ test('approved review gate waits for pending CI and repairs failed CI', () => {
   assert.match(failed.reason, /test: FAILURE/);
 });
 
+test('approved review gate refreshes the exact remote-tracking refs it evaluates', () => {
+  const calls = [];
+  const runner = (command, args, options) => {
+    calls.push({ command, args, options });
+    return { ok: true, stdout: '', stderr: '' };
+  };
+  const result = evaluateApprovedReviewGate('/repo', managed, job, basePr, {
+    runner,
+    config,
+    runState,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls[0].args, [
+    'fetch', '--prune', 'origin',
+    '+refs/heads/main:refs/remotes/origin/main',
+    '+refs/heads/ai/issue-12-test:refs/remotes/origin/ai/issue-12-test',
+  ]);
+  assert.deepEqual(calls[1].args, [
+    'merge-base', '--is-ancestor',
+    'refs/remotes/origin/main',
+    'refs/remotes/origin/ai/issue-12-test',
+  ]);
+  assert.equal(calls[0].options.cwd, '/repo');
+  assert.equal(calls[0].options.allowFailure, true);
+});
+
 test('approved review gate passes only after CI, base freshness, and conflict checks', () => {
   const result = evaluateApprovedReviewGate('/repo', managed, job, basePr, {
     runner: successfulRunner,
