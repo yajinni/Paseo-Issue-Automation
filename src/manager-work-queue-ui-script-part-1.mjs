@@ -11,7 +11,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
     ['closure-verified', 'Issue Closure Verified'],
     ['completed', 'Completed'],
   ];
-  let queueData = { items: [], counts: {}, total: 0, active: 0, attention: 0 };
+  let queueData = { items: [], counts: {}, total: 0, active: 0, attention: 0, prHealth: { byIssue: {}, counts: {} } };
   let statusData = null;
   const PAGE_SIZE = 10;
   let filter = 'all';
@@ -28,6 +28,8 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
   function isAttention(item) { return ['failed', 'review-failed', 'needs-attention'].includes(item.stage); }
   function isActive(item) { return !['completed', 'failed', 'review-failed', 'needs-attention', 'ready', 'waiting'].includes(item.stage); }
   function isReviewStage(item) { return ['review-queued', 'reviewing', 'changes-requested', 'fixing', 'review-failed'].includes(item.stage) || Boolean(item.review); }
+  function prHealthFor(item) { return queueData?.prHealth?.byIssue?.[String(item.issueNumber)] || null; }
+  function hasPrProblems(item) { const health = prHealthFor(item); return Boolean(health && ['blocking', 'attention', 'unavailable'].includes(health.status)); }
   function formatDate(value) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
   function elapsed(item) { const start = new Date(item.startedAt || item.updatedAt || 0).getTime(); const end = new Date(item.completedAt || item.updatedAt || Date.now()).getTime(); if (!start || Number.isNaN(start) || Number.isNaN(end) || end < start) return '—'; const minutes = Math.floor((end - start) / 60000); const days = Math.floor(minutes / 1440); const hours = Math.floor((minutes % 1440) / 60); const mins = minutes % 60; return (days ? days + 'd ' : '') + (hours ? hours + 'h ' : '') + mins + 'm'; }
   function text(value, fallback) { return value == null || value === '' ? (fallback || 'Not recorded') : String(value); }
@@ -39,15 +41,15 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
     const title = document.getElementById('manager-view-title');
     const description = document.getElementById('manager-view-description');
     if (title) title.textContent = 'Issue Lifecycle';
-    if (description) description.textContent = 'Track workflow progress, models, review identity, and activity for each recorded issue.';
+    if (description) description.textContent = 'Track workflow progress, PR health, review identity, and activity for each recorded issue.';
   }
 
   function queueShell() {
     const card = document.createElement('section');
     card.className = 'work-queue-card';
     card.innerHTML = '<div class="work-queue-toolbar"><div class="work-queue-toolbar-fields">'
-      + '<label>Search<input id="work-queue-search" type="search" placeholder="issue, title, branch, or PR"></label>'
-      + '<label>Status<select id="work-queue-filter"><option value="all">All recorded work</option><option value="active">Active work</option><option value="attention">Needs attention</option></select></label>'
+      + '<label>Search<input id="work-queue-search" type="search" placeholder="issue, title, branch, PR, or PR problem"></label>'
+      + '<label>Status<select id="work-queue-filter"><option value="all">All recorded work</option><option value="active">Active work</option><option value="attention">Needs attention</option><option value="pr-problems">PR problems</option></select></label>'
       + '<label>Stage<select id="work-queue-stage-filter"><option value="all">All stages</option><option value="ready">Available</option><option value="waiting">Waiting for dependencies</option><option value="queued">Claimed</option><option value="coding">Coding</option><option value="review-queued">PR Review Queued</option><option value="reviewing">Reviewing</option><option value="changes-requested">Changes requested</option><option value="fixing">Fixing</option><option value="review-failed">Review failed</option><option value="failed">Failed</option><option value="merged">Merged</option><option value="closure-verified">Issue Closure Verified</option><option value="completed">Completed</option></select></label>'
       + '</div><div class="work-queue-count" id="work-queue-count">Loading…</div></div>'
       + '<div class="lifecycle-table"><div class="lifecycle-columns"><span>Issue</span><span>Title</span><span>Current stage</span><span>Run details</span><span>PR</span><span>Started</span><span>Last updated</span><span>Elapsed</span><span></span></div><div id="work-queue-list"><div class="work-queue-empty">Loading recorded work…</div></div></div>'
@@ -121,10 +123,13 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
   function matches(item) {
     if (filter === 'active' && !isActive(item)) return false;
     if (filter === 'attention' && !isAttention(item)) return false;
+    if (filter === 'pr-problems' && !hasPrProblems(item)) return false;
     if (stageFilter !== 'all' && item.stage !== stageFilter) return false;
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
-    const haystack = [item.issueNumber, item.title, item.branch, item.pullRequest?.number, item.pullRequest?.url, item.stageLabel, item.reason, item.coding?.model, item.review?.label, item.review?.model]
+    const health = prHealthFor(item);
+    const problemText = (health?.problems || []).flatMap(function(problem) { return [problem.title, problem.message, problem.code]; });
+    const haystack = [item.issueNumber, item.title, item.branch, item.pullRequest?.number, item.pullRequest?.url, item.stageLabel, item.reason, item.coding?.model, item.review?.label, item.review?.model, health?.label, health?.status, ...problemText]
       .filter(function(value) { return value != null; }).join(' ').toLowerCase();
     return haystack.includes(needle);
   }
