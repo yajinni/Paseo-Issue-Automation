@@ -82,6 +82,12 @@ test('Details drawer is a deep diagnostic view rather than a second pretty timel
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Approved head SHA/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Merged head SHA/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Latest dispatch result/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Repository blockers/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /PR-review automation record/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Stored review state/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Last submitted review SHA/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Review job state/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /Fix job state/);
 });
 
 test('detail drawer remains an accessible modal with focus containment and focus restoration', () => {
