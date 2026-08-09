@@ -32,6 +32,17 @@ test('work queue exposes current lifecycle state and useful issue/PR identity', 
   assert.equal(item.attempt, 2);
 });
 
+test('ready and queued lifecycle stages use the user-facing Available and Claimed names', () => {
+  const available = managerWorkQueueItem({ issueNumber: 1, status: PASEO_LABELS.ready, phase: 'ready' });
+  const claimed = managerWorkQueueItem({ issueNumber: 2, status: PASEO_LABELS.queued, phase: 'queued' });
+  assert.equal(available.stage, 'ready');
+  assert.equal(available.stageLabel, 'Available');
+  assert.match(available.nextAction, /available/i);
+  assert.equal(claimed.stage, 'queued');
+  assert.equal(claimed.stageLabel, 'Claimed');
+  assert.match(claimed.nextAction, /claimed/i);
+});
+
 test('native dependency waits are shown as waiting without inventing a blocked lifecycle label', () => {
   const item = managerWorkQueueItem({
     issueNumber: 4,
@@ -63,7 +74,35 @@ test('legacy stored labels normalize to current lifecycle names without exposing
   assert.doesNotMatch(item.lifecycleLabel, /^agent-/);
 });
 
-test('review detail preserves exact-head, stage, round, validation, and approval identity', () => {
+test('coding detail exposes configured model thinking level and harness', () => {
+  const item = managerWorkQueueItem({ issueNumber: 8, phase: 'coding' }, {
+    codingHarness: 'opencode',
+    models: { coder: 'openai/gpt-5.5', coderThinking: 'high' },
+  });
+  assert.deepEqual(item.coding, {
+    model: 'openai/gpt-5.5',
+    thinking: 'high',
+    harness: 'opencode',
+  });
+});
+
+test('recorded coding identity wins over later configuration changes when present', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 81,
+    phase: 'coding',
+    coderModel: 'openai/gpt-5.5',
+    coderThinking: 'high',
+    codingHarness: 'opencode',
+  }, {
+    codingHarness: 'different-harness',
+    models: { coder: 'other/model', coderThinking: 'low' },
+  });
+  assert.equal(item.coding.model, 'openai/gpt-5.5');
+  assert.equal(item.coding.thinking, 'high');
+  assert.equal(item.coding.harness, 'opencode');
+});
+
+test('quick harness review is presented as Light review with model and thinking', () => {
   const item = managerWorkQueueItem({
     issueNumber: 9,
     status: PASEO_LABELS.reviewing,
@@ -81,8 +120,15 @@ test('review detail preserves exact-head, stage, round, validation, and approval
       summary: 'One blocking issue.',
       at: '2026-08-07T09:10:00.000Z',
     }],
-  }, { review: { quickMaxRounds: 3, fullMaxRounds: 4 } });
+  }, {
+    review: { workflow: 'quick-manual', quickMaxRounds: 3, fullMaxRounds: 4 },
+    models: { reviewer: 'openai/gpt-5.5-mini', reviewerThinking: 'medium' },
+  });
 
+  assert.equal(item.review.type, 'light');
+  assert.equal(item.review.label, 'Light review');
+  assert.equal(item.review.model, 'openai/gpt-5.5-mini');
+  assert.equal(item.review.thinking, 'medium');
   assert.equal(item.review.stage, 'quick');
   assert.equal(item.review.round, 2);
   assert.equal(item.review.limit, 3);
@@ -93,9 +139,64 @@ test('review detail preserves exact-head, stage, round, validation, and approval
   assert.equal(item.review.reviewApproved, false);
 });
 
-test('queue timeline combines recorded activity, review events, and prior attempts newest first', () => {
+test('full-immediate harness review is presented as Heavy review', () => {
   const item = managerWorkQueueItem({
     issueNumber: 10,
+    phase: 'reviewing',
+    events: [{ event: 'harness-review', stage: 'full', round: 1, result: 'pass', headSha: 'head-heavy', at: '2026-08-07T10:00:00.000Z' }],
+  }, {
+    review: { workflow: 'full-immediate', quickMaxRounds: 3, fullMaxRounds: 4 },
+    models: { reviewer: 'openai/gpt-5.5', reviewerThinking: 'high' },
+  });
+  assert.equal(item.review.type, 'heavy');
+  assert.equal(item.review.label, 'Heavy review');
+  assert.equal(item.review.model, 'openai/gpt-5.5');
+  assert.equal(item.review.thinking, 'high');
+  assert.equal(item.review.limit, 4);
+});
+
+test('Web ChatGPT full review is distinct and never invents model or thinking identity', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 11,
+    phase: 'reviewing',
+    events: [{
+      event: 'review',
+      stage: 'full',
+      round: 2,
+      result: 'APPROVED',
+      headSha: 'web-head',
+      source: 'browser-review',
+      conversationUrl: 'https://chatgpt.com/c/review-11',
+      at: '2026-08-07T11:00:00.000Z',
+    }],
+  }, {
+    review: { workflow: 'quick-web-chatgpt', quickMaxRounds: 3, fullMaxRounds: 5 },
+    models: { reviewer: 'openai/gpt-5.5', reviewerThinking: 'high' },
+  });
+  assert.equal(item.review.type, 'web-chatgpt');
+  assert.equal(item.review.label, 'Web ChatGPT review');
+  assert.equal(item.review.channel, 'Browser conversation');
+  assert.equal(item.review.conversationUrl, 'https://chatgpt.com/c/review-11');
+  assert.equal(item.review.model, null);
+  assert.equal(item.review.thinking, null);
+});
+
+test('review-queued stage exposes its configured upcoming review method before a result exists', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 12,
+    status: PASEO_LABELS.reviewQueued,
+    phase: 'review-queued',
+  }, {
+    review: { workflow: 'full-immediate', quickMaxRounds: 3, fullMaxRounds: 4 },
+    models: { reviewer: 'openai/gpt-5.5', reviewerThinking: 'high' },
+  });
+  assert.equal(item.review.label, 'Heavy review');
+  assert.equal(item.review.model, 'openai/gpt-5.5');
+});
+
+test('queue timeline combines recorded activity, review events, and prior attempts newest first', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 13,
     activity: [{ type: 'agent-started', at: '2026-08-07T09:00:00.000Z', details: 'Coder started.' }],
     events: [{ event: 'harness-review', stage: 'quick', round: 1, result: 'pass', headSha: 'head1', at: '2026-08-07T09:20:00.000Z' }],
     history: [{ attempt: 1, branch: 'ai/old', status: PASEO_LABELS.failed, startedAt: '2026-08-07T08:00:00.000Z', completedAt: '2026-08-07T08:30:00.000Z' }],
@@ -106,6 +207,60 @@ test('queue timeline combines recorded activity, review events, and prior attemp
   assert.match(item.timeline[0].detail, /quick.*round 1.*pass.*head head1/i);
   assert.equal(item.timeline[1].type, 'agent-started');
   assert.equal(item.timeline[2].type, 'attempt-history');
+});
+
+test('append-only lifecycle timeline preserves operator evidence for the activity view', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 14,
+    lifecycle: [{
+      id: 'event-1',
+      at: '2026-08-07T12:00:00.000Z',
+      type: 'operator-action',
+      source: 'operator',
+      status: 'success',
+      message: 'Skip issue completed.',
+      evidence: { action: 'skip-issue' },
+    }],
+  });
+  assert.equal(item.timeline[0].type, 'operator-action');
+  assert.equal(item.timeline[0].source, 'operator');
+  assert.match(item.timeline[0].detail, /Skip issue completed/);
+  assert.equal(item.timeline[0].evidence.action, 'skip-issue');
+});
+
+test('merged and issue-closure-verified phases remain visible before terminal completion', () => {
+  const merged = managerWorkQueueItem({ issueNumber: 20, phase: 'merged', mergedAt: '2026-08-09T04:00:00.000Z' });
+  const verified = managerWorkQueueItem({ issueNumber: 21, phase: 'issue-closure-verified', issueClosureVerifiedAt: '2026-08-09T04:01:00.000Z' });
+  assert.equal(merged.stage, 'merged');
+  assert.equal(merged.stageLabel, 'Merged');
+  assert.equal(verified.stage, 'closure-verified');
+  assert.equal(verified.stageLabel, 'Issue Closure Verified');
+});
+
+test('deep troubleshooting diagnostics expose recorded execution and exact-head identity', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 22,
+    phase: 'reviewing',
+    status: PASEO_LABELS.reviewing,
+    worktreePath: '/tmp/worktree',
+    workspaceId: 'workspace-22',
+    coderAgentId: 'agent-22',
+    controllerPid: 4321,
+    heartbeatAt: '2026-08-09T04:01:00.000Z',
+    currentHeadSha: 'head-current',
+    validationHeadSha: 'head-validation',
+    approvedHeadSha: 'head-approved',
+    mergedHeadSha: 'head-merged',
+  });
+  assert.equal(item.diagnostics.rawStatus, PASEO_LABELS.reviewing);
+  assert.equal(item.diagnostics.phase, 'reviewing');
+  assert.equal(item.diagnostics.worktreePath, '/tmp/worktree');
+  assert.equal(item.diagnostics.coderAgentId, 'agent-22');
+  assert.equal(item.diagnostics.controllerPid, 4321);
+  assert.equal(item.diagnostics.currentHeadSha, 'head-current');
+  assert.equal(item.diagnostics.validationHeadSha, 'head-validation');
+  assert.equal(item.diagnostics.approvedHeadSha, 'head-approved');
+  assert.equal(item.diagnostics.mergedHeadSha, 'head-merged');
 });
 
 test('completed merged issue runs remain recorded but do not count as active work', () => {
