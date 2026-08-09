@@ -3,6 +3,7 @@ import { inspectExternalMigrationAdoption } from './external-adoption.mjs';
 import { externalMaintenanceStatus } from './external-maintenance.mjs';
 import { loadExternalMigration } from './external-migration.mjs';
 import { managerPrHealthSummary } from './manager-pr-health.mjs';
+import { managerReviewEvidenceSummary } from './manager-review-evidence.mjs';
 import { managerPrHealthSnapshot } from './pr-review-github.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { inspectRepository } from './repository-registry.mjs';
@@ -91,9 +92,11 @@ export function managerRepositoryStatus(repository, {
   const prHealth = managerPrHealthSummary(runs, prReviewStore, {
     loadSnapshot: (prNumber) => prSnapshotLoader(inspected.path, prNumber),
   });
+  const reviewEvidence = managerReviewEvidenceSummary(runs, prReviewStore, config);
   const workQueue = {
     ...managerWorkQueue(runs, config, prReviewStore),
     prHealth,
+    reviewEvidence,
   };
   const activeRuns = runs.filter((item) =>
     !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'merged', 'closed'].includes(String(item?.status || '')),
