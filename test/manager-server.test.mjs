@@ -7,6 +7,7 @@ import test from 'node:test';
 import { dispatchCli } from '../src/entrypoint.mjs';
 import { managerApiRequest } from '../src/manager-api.mjs';
 import { managerHtml } from '../src/manager-review-ui.mjs';
+import { startConfiguredCodingWorkers } from '../src/manager-server.mjs';
 import { addRepository } from '../src/repository-registry.mjs';
 import { loadConfig, saveConfig, saveRuntime } from '../src/state.mjs';
 
@@ -29,7 +30,26 @@ test('bare command starts the manager outside a repository without invoking lega
   assert.deepEqual(calls, [{ open: true, rootDir: '/manager-home' }]);
 });
 
-test('manager API scopes coding and PR review workers to one repository', () => {
+test('configured repositories automatically start coding workers while incomplete repositories are skipped', () => {
+  const calls = [];
+  const repositories = [
+    { id: 'ready', path: '/ready', repository: 'yajinni/Ready' },
+    { id: 'setup', path: '/setup', repository: 'yajinni/Setup' },
+  ];
+  const result = startConfiguredCodingWorkers({
+    start(repository) { calls.push(repository.id); return { repositoryId: repository.id, running: true, state: 'idle' }; },
+  }, {
+    rootDir: '/manager',
+    repositoryLister: () => repositories,
+    configLoader: (root) => ({ setupComplete: root === '/ready' }),
+  });
+  assert.deepEqual(calls, ['ready']);
+  assert.equal(result.started.length, 1);
+  assert.equal(result.started[0].state, 'idle');
+  assert.deepEqual(result.errors, []);
+});
+
+test('manager API keeps coding worker lifecycle internal while PR review worker controls remain repository scoped', () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), 'paseo-manager-api-'));
   const repositoryRoot = createRepository(rootDir, 'Example');
   const repository = addRepository(repositoryRoot, { rootDir });
@@ -50,11 +70,11 @@ test('manager API scopes coding and PR review workers to one repository', () => 
 
   const workerCalls = [];
   const workerManager = {
-    status: (id) => ({ repositoryId: id, running: true, state: 'running', intervalSeconds: 120 }),
-    start: (entry) => { workerCalls.push(['start', entry.id, entry.path]); return { running: true }; },
-    stop: (id) => { workerCalls.push(['stop', id]); return { running: false }; },
-    restart: (entry) => { workerCalls.push(['restart', entry.id]); return { running: true }; },
-    refresh: (entry) => { workerCalls.push(['refresh', entry.id]); return { running: true }; },
+    status: (id) => ({ repositoryId: id, running: true, state: 'idle', intervalSeconds: 120 }),
+    start: (entry) => { workerCalls.push(['start', entry.id, entry.path]); return { running: true, state: 'idle' }; },
+    stop: (id) => { workerCalls.push(['stop', id]); return { running: false, state: 'idle' }; },
+    restart: (entry) => { workerCalls.push(['restart', entry.id]); return { running: true, state: 'idle' }; },
+    refresh: (entry) => { workerCalls.push(['refresh', entry.id]); return { running: true, state: 'idle' }; },
     list: () => [],
   };
   const reviewCalls = [];
@@ -79,14 +99,15 @@ test('manager API scopes coding and PR review workers to one repository', () => 
   assert.equal(response.body.status.capabilities.backgroundWorkers, true);
   assert.equal(response.body.status.capabilities.prReviewWorkers, true);
   assert.equal(response.body.status.worker.running, true);
+  assert.equal(response.body.status.worker.state, 'idle');
   assert.equal(response.body.status.reviewWorker.running, true);
 
   const workerStart = managerApiRequest({
     method: 'POST',
     pathname: `/api/repositories/${encodeURIComponent(repository.id)}/worker/start`,
   }, { rootDir, workerManager, reviewWorkerManager });
-  assert.equal(workerStart.status, 200);
-  assert.deepEqual(workerCalls[0], ['start', repository.id, repositoryRoot]);
+  assert.equal(workerStart.status, 405);
+  assert.equal(workerCalls.some((entry) => entry[0] === 'start'), false);
 
   const reviewStart = managerApiRequest({
     method: 'POST',
@@ -125,12 +146,15 @@ test('manager API scopes coding and PR review workers to one repository', () => 
   assert.ok(reviewCalls.some((entry) => entry[0] === 'stop' && entry[1] === repository.id));
 });
 
-test('manager UI exposes repository coding and PR review workers', () => {
+test('manager UI exposes coding status without coding lifecycle controls and leaves PR review controls unchanged', () => {
   const html = managerHtml();
   assert.match(html, /id="repository-select"/);
   assert.match(html, /Register repository/);
   assert.match(html, /Resume claims/);
-  assert.match(html, /data-action="worker\/start"/);
+  assert.match(html, /\['Coding worker', data\.worker && data\.worker\.state === 'active' \? 'Active' : 'Idle'\]/);
+  assert.doesNotMatch(html, /data-action="worker\/start"/);
+  assert.doesNotMatch(html, /data-action="worker\/stop"/);
+  assert.doesNotMatch(html, /data-action="worker\/restart"/);
   assert.match(html, /data-action="review-worker\/start"/);
   assert.match(html, /data-action="review-worker\/stop"/);
   assert.match(html, /data-issue-action="start-issue"/);
