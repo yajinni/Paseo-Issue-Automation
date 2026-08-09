@@ -16,7 +16,7 @@ import {
   logApiActionStarted,
   logApiActionSucceeded,
 } from '../src/server-action-log.mjs';
-import { statePaths } from '../src/state.mjs';
+import { appendIssueLifecycle, statePaths } from '../src/state.mjs';
 
 function temporaryRepository() {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-controller-log-'));
@@ -72,6 +72,61 @@ test('controller logs are append-only, newest-first, filterable, and redact sens
     assert.deepEqual(listControllerLogs(root, { category: 'issues' }).events.map((event) => event.id), ['second']);
     assert.deepEqual(listControllerLogs(root, { query: 'issue #12' }).events.map((event) => event.id), ['second']);
     assert.deepEqual(listControllerLogs(root, { before: '2026-08-05T00:02:00.000Z' }).events.map((event) => event.id), ['second', 'first']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('seven-day log queries merge issue lifecycle with controller events and exclude older history', () => {
+  const root = temporaryRepository();
+  try {
+    appendControllerLog(root, {
+      id: 'old-controller',
+      timestamp: '2026-08-01T12:00:00.000Z',
+      category: 'pr-reviews',
+      action: 'old-review',
+      message: 'Old review event.',
+    });
+    appendControllerLog(root, {
+      id: 'recent-controller',
+      timestamp: '2026-08-07T12:00:00.000Z',
+      level: 'error',
+      category: 'pr-reviews',
+      action: 'submit-review',
+      status: 'failed',
+      message: 'Recent browser review failure.',
+      details: { diagnostics: { screenshot: 'review-failed.png' } },
+    });
+    appendIssueLifecycle(root, 274, {
+      id: 'old-lifecycle',
+      at: '2026-08-01T13:00:00.000Z',
+      attempt: 3,
+      type: 'review-queued',
+      status: 'success',
+      message: 'Old lifecycle event.',
+    });
+    appendIssueLifecycle(root, 274, {
+      id: 'recent-lifecycle',
+      at: '2026-08-07T13:00:00.000Z',
+      attempt: 4,
+      type: 'review-queued',
+      status: 'success',
+      message: 'Queued current PR review.',
+      evidence: { prNumber: 383 },
+    });
+
+    const weekly = listControllerLogs(root, { since: '2026-08-02T00:00:00.000Z', limit: 50 });
+    assert.deepEqual(weekly.events.map((event) => event.id), [
+      'issue-lifecycle:recent-lifecycle',
+      'recent-controller',
+    ]);
+    assert.equal(weekly.events[0].category, 'issues');
+    assert.equal(weekly.events[0].details.issueNumber, 274);
+    assert.equal(weekly.events[0].details.evidence.prNumber, 383);
+    assert.equal(weekly.events[1].details.diagnostics.screenshot, 'review-failed.png');
+    assert.deepEqual(weekly.categories, ['issues', 'pr-reviews']);
+    assert.equal(weekly.retention.days, 7);
+    assert.equal(controllerLogStatus(root).retentionDays, 7);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

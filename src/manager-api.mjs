@@ -1,3 +1,4 @@
+import { listControllerLogs } from './controller-log.mjs';
 import { managerRepositoryAction } from './manager-actions.mjs';
 import { loadManagerConfig, saveManagerConfig } from './manager-config.mjs';
 import {
@@ -20,6 +21,8 @@ import { findRepository } from './repository-registry.mjs';
 import { managerRepositoryStatus } from './manager-status.mjs';
 import { setupWizardApiRequest } from './setup-wizard/api.mjs';
 import { loadConfig } from './state.mjs';
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function workerAction(workerManager, context, pathname) {
   const workerRoute = ['/api/worker/start', '/api/worker/stop', '/api/worker/restart'].includes(pathname);
@@ -125,6 +128,15 @@ function issuePlanResult(context, options) {
   }
 }
 
+function weeklyLogsResult(context) {
+  const since = new Date(Date.now() - WEEK_MS).toISOString();
+  return {
+    handled: true,
+    status: 200,
+    body: listControllerLogs(context.root, { since, limit: 10_000 }),
+  };
+}
+
 function installationResult(context, options, handler, dependencyKey) {
   const result = handler(context.repository, {
     workerManager: options.workerManager,
@@ -173,6 +185,7 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     };
   }
   if (method === 'GET' && context.pathname === '/api/issues-plan') return issuePlanResult(context, options);
+  if (method === 'GET' && context.pathname === '/api/logs') return weeklyLogsResult(context);
   if (method === 'POST') {
     if (context.pathname === '/api/migrate/adopt') {
       const result = finalizeExistingMigrationFromManager(context.repository, {

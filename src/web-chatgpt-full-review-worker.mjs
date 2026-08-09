@@ -73,7 +73,8 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
     return saved;
   } catch (error) {
     const expired = expiredProfileSession(error);
-    const saved = markReviewSubmissionFailed(root, job.id, error, error.diagnostics || {});
+    const diagnostics = error.diagnostics || {};
+    const saved = markReviewSubmissionFailed(root, job.id, error, diagnostics);
     if (expired) {
       mutatePrReviewStore(root, (next) => pauseWebReviewsForExpiredProfile(next, { reason: expired.message }));
       setPrReviewLabels(root, managed.pullRequestNumber, {
@@ -88,6 +89,7 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
           reviewJobId: job.id,
           reviewRequestId: job.reviewRequestId,
           headSha: job.headSha,
+          diagnostics,
           failActivePullRequests: false,
         },
       });
@@ -102,7 +104,13 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
       action: 'submit-web-chatgpt-full-review',
       status: 'failed',
       message: `Web ChatGPT full-review submission failed for PR #${managed.pullRequestNumber}: ${error.message}`,
-      details: { reviewJobId: job.id, reviewRequestId: job.reviewRequestId, headSha: job.headSha, error },
+      details: {
+        reviewJobId: job.id,
+        reviewRequestId: job.reviewRequestId,
+        headSha: job.headSha,
+        diagnostics,
+        error,
+      },
     });
     throw error;
   }

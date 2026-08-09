@@ -1,4 +1,5 @@
 import { injectIntoBody } from './ui-html.mjs';
+import { enhanceManagerWithWeeklyLogs } from './manager-weekly-logs-ui.mjs';
 
 export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
 (function managerStatusEvents() {
@@ -102,5 +103,6 @@ export const MANAGER_STATUS_EVENTS_SCRIPT = String.raw`
 `;
 
 export function enhanceManagerWithStatusEvents(html) {
-  return injectIntoBody(html, `<script data-manager-status-events>${MANAGER_STATUS_EVENTS_SCRIPT}</script>`);
+  const withStatusEvents = injectIntoBody(html, `<script data-manager-status-events>${MANAGER_STATUS_EVENTS_SCRIPT}</script>`);
+  return enhanceManagerWithWeeklyLogs(withStatusEvents);
 }
