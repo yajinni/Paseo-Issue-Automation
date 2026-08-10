@@ -159,9 +159,11 @@ test('controller harness review persists exact structured Light review evidence'
   const root = repository(t);
   initialRun(root);
   const calls = [];
+  const auditCalls = [];
   const review = runConfiguredHarnessReview(root, 7, snapshot(root), {
     config: config('quick-manual'),
     jsonRunner: githubJson,
+    auditRunner: fakeRunner(auditCalls),
     agentRunner(command, args) {
       calls.push({ command, args });
       assert.equal(command, 'paseo');
@@ -174,13 +176,21 @@ test('controller harness review persists exact structured Light review evidence'
   assert.equal(review.event.event, 'harness-review');
   assert.equal(review.event.stage, 'quick');
   assert.equal(review.event.headSha, 'abcdef1234567890');
-  assert.equal(loadRun(root, 7).events.at(-1).result, 'pass');
+  assert.equal(review.audit?.verdict, 'APPROVED');
+  assert.deepEqual(auditCalls[0].args.slice(0, 3), ['pr', 'comment', '11']);
+  assert.match(auditCalls[0].args[4], /Commit: `abcdef1234567890`/);
+  const state = loadRun(root, 7);
+  assert.equal(state.events.at(-1).result, 'pass');
+  assert.equal(state.events.some((event) => event.event === 'review'
+    && event.result === 'APPROVED'
+    && event.commit === 'abcdef1234567890'), true);
   assert.equal(calls.length, 1);
 });
 
 test('controller rejects an otherwise passing verdict when GitHub head moved before acceptance', (t) => {
   const root = repository(t);
   initialRun(root);
+  const auditCalls = [];
   const review = runConfiguredHarnessReview(root, 7, snapshot(root), {
     config: config('full-immediate'),
     jsonRunner(command, args) {
@@ -188,10 +198,17 @@ test('controller rejects an otherwise passing verdict when GitHub head moved bef
       return githubJson(command, args);
     },
     agentRunner() { return exactVerdict('full', 1, 'pass'); },
+    auditRunner: fakeRunner(auditCalls),
   });
   assert.equal(review.decision.action, 'stale');
   assert.equal(review.event.result, 'stale');
-  assert.equal(loadRun(root, 7).events.at(-1).result, 'stale');
+  assert.equal(review.audit?.verdict, 'APPROVED');
+  assert.equal(auditCalls.length, 1);
+  const state = loadRun(root, 7);
+  assert.equal(state.events.at(-1).result, 'stale');
+  assert.equal(state.events.some((event) => event.event === 'review'
+    && event.result === 'APPROVED'
+    && event.commit === 'abcdef1234567890'), true);
 });
 
 test('Quick to Manual handoff marks draft ready, releases coding capacity, and records exact-head handoff', (t) => {
