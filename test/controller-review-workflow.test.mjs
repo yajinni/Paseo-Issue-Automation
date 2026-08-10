@@ -199,6 +199,13 @@ test('Quick to Manual handoff marks draft ready, releases coding capacity, and r
   initialRun(root);
   const calls = [];
   const review = {
+    repository: 'octo/app',
+    issue: {
+      number: 7,
+      title: 'Fix review workflow',
+      body: 'body',
+      url: 'https://example.invalid/octo/app/issues/7',
+    },
     decision: { action: 'handoff', target: 'full-manual', round: 3, limit: 3 },
     event: {
       event: 'harness-review', stage: 'quick', round: 3, result: 'changes', headSha: 'abcdef1234567890',
