@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,7 @@ const MANAGED_ID = 'octo/app#11';
 
 function repository(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-finalization-head-change-'));
+  execFileSync('git', ['init', '-q'], { cwd: root });
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }
