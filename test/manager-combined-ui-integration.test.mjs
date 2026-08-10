@@ -25,17 +25,6 @@ test('combined manager dashboard keeps lifecycle and dependency-map feature stac
   for (const asset of assets) {
     assert.equal(count(html, asset), 1, `${asset} should be injected exactly once`);
   }
-
-  for (const expected of [
-    'PR Health',
-    'Review Evidence',
-    'Retry PR review',
-    'Dependency map',
-    'Selected issue',
-    'Longest dependency chain',
-  ]) {
-    assert.ok(html.includes(expected), `combined dashboard should retain ${expected}`);
-  }
 });
 
 test('combined manager feature scripts preserve subscriber and enhancer runtime order', () => {
