@@ -15,6 +15,7 @@ import {
 import { findFirstKey, runJson } from './process.mjs';
 import { loadConfig } from './state.mjs';
 import { PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
+import { PASEO_LABELS } from './label-catalog.mjs';
 
 const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fix-worker.mjs');
 
