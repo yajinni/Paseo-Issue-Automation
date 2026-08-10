@@ -9,6 +9,7 @@ import {
 } from './harness-review-stages.mjs';
 import { LEGACY_LABELS, PASEO_LABELS } from './label-catalog.mjs';
 import { enterManualReview } from './manual-review-lifecycle.mjs';
+import { registerManualReviewPullRequest } from './manual-review-reconcile.mjs';
 import { handoffValidatedPullRequest, prReviewAutomationEnabled } from './pr-review-handoff.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { reviewJobId } from './review-prompt.mjs';
@@ -73,7 +74,7 @@ function reviewContexts({ issue, snapshot, config, state }) {
   const changeContext = [
     `Review the exact branch ${snapshot.state.branch} at ${snapshot.head}.`,
     `The pull request is #${snapshot.pr.number} targeting ${snapshot.pr.baseRefName || config.baseBranch}.`,
-    `Use the repository workspace to inspect the exact diff and relevant surrounding code.`,
+    'Use the repository workspace to inspect the exact diff and relevant surrounding code.',
   ].join('\n');
   const validationContext = JSON.stringify({
     exactHead: snapshot.head,
@@ -162,7 +163,6 @@ export function runConfiguredHarnessReview(root, issueNumber, snapshot, {
     round: Number(verdict.round),
     promptVersion: Number(verdict.promptVersion),
   };
-  // createHarnessReviewEvent performs the exact request-identity validation.
   let event = createHarnessReviewEvent(checked, expected);
   const current = currentPrHead(root, snapshot.pr.number, jsonRunner);
   if (!current || String(current.headRefOid || '').toLowerCase() !== String(snapshot.head).toLowerCase()) {
@@ -219,7 +219,7 @@ export function enterConfiguredQuickHandoff(root, issueNumber, snapshot, review,
   config = loadConfig(root),
   runner = run,
 } = {}) {
-  if (![ 'quick-passed', 'handoff' ].includes(review?.decision?.action)) {
+  if (!['quick-passed', 'handoff'].includes(review?.decision?.action)) {
     throw new Error('Quick review has not reached a handoff decision.');
   }
   const findings = handoffFindings(review);
@@ -235,6 +235,19 @@ export function enterConfiguredQuickHandoff(root, issueNumber, snapshot, review,
       quickExhausted,
       isDraft: snapshot.pr.isDraft === true,
     }, { runner });
+    registerManualReviewPullRequest(root, {
+      repository: review.repository,
+      issueNumber,
+      issueUrl: review.issue?.url,
+      pullRequestNumber: snapshot.pr.number,
+      pullRequestUrl: snapshot.pr.url,
+      branchName: snapshot.state.branch,
+      worktreePath: snapshot.state.worktreePath,
+      workspaceId: snapshot.state.workspaceId,
+      coderAgentId: snapshot.state.coderAgentId || snapshot.state.agentId,
+      currentHeadSha: snapshot.head,
+      reviewRound: 1,
+    });
     releaseCodingSlot(root, issueNumber, runner);
     const saved = updateRun(root, issueNumber, {
       status: PASEO_LABELS.reviewQueued,
@@ -243,7 +256,7 @@ export function enterConfiguredQuickHandoff(root, issueNumber, snapshot, review,
       reviewExpectedHeadSha: snapshot.head,
       prNumber: snapshot.pr.number,
       prUrl: snapshot.pr.url,
-      completedAt: nowIso(),
+      completedAt: null,
       controllerPid: null,
     }, {
       type: 'manual-review-handoff',
@@ -273,8 +286,6 @@ export function enterConfiguredQuickHandoff(root, issueNumber, snapshot, review,
       headSha: snapshot.head,
       reviewPromptVersion: promptVersion,
     });
-    // Persist staged metadata before registration creates the queue job. The serial
-    // scheduler can therefore never observe this job as a legacy browser review.
     recordWebChatGptFullReviewMetadata(root, id, {
       stageRound: nextReviewRound(review.state, REVIEW_STAGES.full),
       maxStageRounds: config.review.fullMaxRounds,
