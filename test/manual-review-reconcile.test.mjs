@@ -1,0 +1,186 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { completeFixJob } from '../src/fix-worker.mjs';
+import {
+  reconcileManualReview,
+  registerManualReviewPullRequest,
+} from '../src/manual-review-reconcile.mjs';
+import {
+  findManaged,
+  loadPrReviewStore,
+  mutatePrReviewStore,
+} from '../src/pr-review-store.mjs';
+import { loadRun, saveRun } from '../src/state.mjs';
+
+function repository(t) {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-manual-review-'));
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  const bin = path.join(root, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const gh = path.join(bin, 'gh');
+  writeFileSync(gh, '#!/usr/bin/env node\nprocess.exit(0);\n');
+  chmodSync(gh, 0o755);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${previousPath || ''}`;
+  t.after(() => {
+    process.env.PATH = previousPath;
+    rmSync(root, { recursive: true, force: true });
+  });
+  return root;
+}
+
+function saveManualRun(root, headSha = 'abcdef1234567890') {
+  return saveRun(root, 7, {
+    issueNumber: 7,
+    issueTitle: 'Manual review fixture',
+    issueUrl: 'https://example.invalid/octo/app/issues/7',
+    status: 'paseo:review-queued',
+    phase: 'manual-review',
+    reviewRuntimeStage: 'full-manual',
+    reviewExpectedHeadSha: headSha,
+    branch: 'ai/issue-7-manual-review',
+    attempt: 1,
+    workspaceId: 'workspace-7',
+    coderAgentId: 'coder-7',
+    prNumber: 11,
+    prUrl: 'https://example.invalid/octo/app/pull/11',
+    completedAt: null,
+    events: [{
+      event: 'validation-summary',
+      result: 'PASS',
+      commit: headSha,
+      details: `Validation passed for ${headSha}.`,
+      at: '2026-08-10T04:00:00Z',
+    }],
+    activity: [],
+  });
+}
+
+function register(root, headSha = 'abcdef1234567890') {
+  return registerManualReviewPullRequest(root, {
+    repository: 'octo/app',
+    issueNumber: 7,
+    issueUrl: 'https://example.invalid/octo/app/issues/7',
+    pullRequestNumber: 11,
+    pullRequestUrl: 'https://example.invalid/octo/app/pull/11',
+    branchName: 'ai/issue-7-manual-review',
+    worktreePath: root,
+    workspaceId: 'workspace-7',
+    coderAgentId: 'coder-7',
+    currentHeadSha: headSha,
+    reviewRound: 1,
+  });
+}
+
+function manualChangesSnapshot(headSha = 'abcdef1234567890') {
+  return {
+    number: 11,
+    state: 'OPEN',
+    isDraft: false,
+    headRefOid: headSha,
+    reviews: [{
+      id: 9001,
+      state: 'CHANGES_REQUESTED',
+      commitId: headSha,
+      submittedAt: '2026-08-10T04:05:00Z',
+      body: 'Fix the null-state regression and add a regression test.',
+    }],
+  };
+}
+
+test('manual review registration is durable but never creates a browser review job', (t) => {
+  const root = repository(t);
+  saveManualRun(root);
+  const managed = register(root);
+  const store = loadPrReviewStore(root);
+  assert.equal(managed.reviewState, 'paused');
+  assert.match(managed.activeReviewRequestId, /^manual-review:/);
+  assert.equal(store.reviewJobs.length, 0);
+  assert.equal(store.fixJobs.length, 0);
+});
+
+test('manual CHANGES_REQUESTED queues one authoritative same-PR fix job', (t) => {
+  const root = repository(t);
+  saveManualRun(root);
+  const managed = register(root);
+  const outcome = reconcileManualReview(root, managed.id, { snapshot: manualChangesSnapshot() });
+  assert.equal(outcome.state, 'fix_queued');
+  const store = loadPrReviewStore(root);
+  assert.equal(store.reviewJobs.length, 0);
+  assert.equal(store.fixJobs.length, 1);
+  assert.match(store.fixJobs[0].reviewRequestId, /^manual-review:/);
+  assert.equal(store.fixJobs[0].reviewedHeadSha, 'abcdef1234567890');
+  assert.match(store.fixJobs[0].findings, /null-state regression/);
+  assert.equal(findManaged(store, managed.id).reviewState, 'fix_queued');
+  assert.equal(loadRun(root, 7).phase, 'manual-review-fix-queued');
+});
+
+test('manual requested changes without authoritative review text fails closed', (t) => {
+  const root = repository(t);
+  saveManualRun(root);
+  const managed = register(root);
+  assert.throws(() => reconcileManualReview(root, managed.id, {
+    snapshot: {
+      ...manualChangesSnapshot(),
+      reviews: [{
+        id: 9002,
+        state: 'CHANGES_REQUESTED',
+        commitId: 'abcdef1234567890',
+        submittedAt: '2026-08-10T04:05:00Z',
+        body: '',
+      }],
+    },
+  }), /authoritative repair handoff/);
+  assert.equal(loadPrReviewStore(root).fixJobs.length, 0);
+});
+
+test('a completed manual fix returns the validated new head to manual review instead of browser review', (t) => {
+  const root = repository(t);
+  saveManualRun(root);
+  const managed = register(root);
+  const queued = reconcileManualReview(root, managed.id, { snapshot: manualChangesSnapshot() });
+  mutatePrReviewStore(root, (store) => {
+    const fix = store.fixJobs.find((job) => job.id === queued.fixJob.id);
+    fix.state = 'fixing';
+    fix.coderAgentId = 'repair-agent-7';
+    const record = findManaged(store, managed.id);
+    record.reviewState = 'fixing';
+  });
+
+  const result = completeFixJob(root, queued.fixJob.id, {
+    waitForAgent: false,
+    snapshot: {
+      number: 11,
+      state: 'OPEN',
+      isDraft: false,
+      headRefOid: 'fedcba9876543210',
+      baseRefName: 'main',
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'CLEAN',
+    },
+    validator() {
+      return {
+        newHeadSha: 'fedcba9876543210',
+        validation: { details: 'Repaired exact head passed validation.' },
+      };
+    },
+    labelWriter() { return { changed: true }; },
+  });
+
+  assert.equal(result.returnToManualReview, true);
+  const store = loadPrReviewStore(root);
+  assert.equal(store.reviewJobs.length, 0);
+  assert.equal(store.fixJobs[0].state, 'completed');
+  const nextManaged = findManaged(store, managed.id);
+  assert.equal(nextManaged.reviewState, 'paused');
+  assert.equal(nextManaged.currentHeadSha, 'fedcba9876543210');
+  assert.match(nextManaged.activeReviewRequestId, /fedcba9876543210$/);
+  const state = loadRun(root, 7);
+  assert.equal(state.phase, 'manual-review');
+  assert.equal(state.reviewExpectedHeadSha, 'fedcba9876543210');
+  assert.equal(state.completedAt, null);
+});
