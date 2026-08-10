@@ -119,6 +119,24 @@ const arg = (name) => { const index = args.indexOf(name); return index >= 0 ? ar
 const workspaceFile = path.join(fixture, 'workspace.json');
 const prFile = path.join(fixture, 'pr.json');
 const externalMode = path.join(fixture, 'external-head-mode');
+function reviewIdentity() {
+  const prompt = String(args.at(-1) || '');
+  const lines = prompt.split('\\n');
+  const capture = (label) => {
+    const prefix = label + ':';
+    const line = lines.find((entry) => entry.startsWith(prefix));
+    return line ? line.slice(prefix.length).trim() : '';
+  };
+  return {
+    repository: capture('Repository'),
+    pullRequestNumber: Number(capture('Pull request').replace(/^#/, '')),
+    issueNumber: Number(capture('Associated issue').replace(/^#/, '')),
+    headSha: capture('Exact head SHA'),
+    stage: capture('Review stage'),
+    round: Number(capture('Review round')),
+    promptVersion: Number(capture('Prompt version')),
+  };
+}
 if (args[0] === 'workspace' && args[1] === 'create') {
   const root = arg('--path');
   const branch = arg('--new-branch');
@@ -160,6 +178,7 @@ if (args[0] === 'wait') {
   process.exit(0);
 }
 if (args[0] === 'run') {
+  const identity = reviewIdentity();
   const countFile = path.join(fixture, 'review-count');
   const count = existsSync(countFile) ? Number(readFileSync(countFile, 'utf8')) : 0;
   writeFileSync(countFile, String(count + 1));
@@ -180,11 +199,34 @@ if (args[0] === 'run') {
       pr.headRefOid = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: external, encoding: 'utf8' }).trim();
       writeFileSync(prFile, JSON.stringify(pr, null, 2));
     }
-    output({ approved: true, findings: 'Reviewer approved the exact head presented for this round.' });
+    output({
+      ...identity,
+      result: 'pass',
+      summary: 'Reviewer approved the exact head presented for this round.',
+      findings: [],
+    });
     process.exit(0);
   }
-  if (count === 0) { output({ approved: false, findings: 'Replace the initial marker content with the reviewed repair.' }); process.exit(0); }
-  output({ approved: true, findings: 'The repaired exact head satisfies review.' });
+  if (count === 0) {
+    output({
+      ...identity,
+      result: 'changes',
+      summary: 'Replace the initial marker content with the reviewed repair.',
+      findings: [{
+        severity: 'blocking',
+        message: 'Replace the initial marker content with the reviewed repair.',
+        file: 'acceptance-marker.txt',
+        requiredChange: 'Replace the initial marker content with the reviewed repair.',
+      }],
+    });
+    process.exit(0);
+  }
+  output({
+    ...identity,
+    result: 'pass',
+    summary: 'The repaired exact head satisfies review.',
+    findings: [],
+  });
   process.exit(0);
 }
 if (args[0] === 'send') { writeFileSync(path.join(fixture, 'repair-pending'), 'repair\\n'); process.exit(0); }
