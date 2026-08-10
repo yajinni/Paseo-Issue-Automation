@@ -12,6 +12,7 @@ import {
 } from './manager-installation.mjs';
 import { managerIssueProcessingAction } from './manager-issue-processing.mjs';
 import { managerIssuePlan } from './manager-issues.mjs';
+import { managerLifecycleDetailsApiRequest } from './manager-lifecycle-details.mjs';
 import {
   parseRepositoryApiPath,
   repositoryRegistryRequest,
@@ -167,6 +168,8 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
 
   const context = resolveRepositoryApiContext(pathname, options);
   if (!context) return { handled: false };
+  const lifecycleDetails = managerLifecycleDetailsApiRequest({ method, pathname: context.pathname }, context, options);
+  if (lifecycleDetails) return lifecycleDetails;
   const statusReader = options.statusReader || managerRepositoryStatus;
   if (method === 'GET' && context.pathname === '/api/status') {
     return {
