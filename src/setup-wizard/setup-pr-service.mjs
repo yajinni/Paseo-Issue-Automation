@@ -315,7 +315,18 @@ export function repairSetupRepository(options = {}) {
     };
   }
 
-  const config = loadConfig(context.checkoutPath);
+  let config = loadConfig(context.checkoutPath);
+  if (!config.baseBranch) {
+    const branchResult = runner('git', ['branch', '--show-current'], {
+      cwd: context.checkoutPath,
+      allowFailure: true,
+    });
+    const currentBranch = String(branchResult?.stdout || '').trim();
+    if (!branchResult?.ok || currentBranch !== context.baseBranch) {
+      throw new Error(`The selected base branch ${context.baseBranch} does not match the managed checkout current branch ${currentBranch || 'not configured'}. Recheck repository setup before repairing files.`);
+    }
+    config = saveConfig(context.checkoutPath, { ...config, baseBranch: context.baseBranch });
+  }
   if (config.baseBranch !== context.baseBranch) {
     throw new Error(`The selected base branch ${context.baseBranch} does not match the managed checkout base branch ${config.baseBranch || 'not configured'}. Recheck repository setup before repairing files.`);
   }

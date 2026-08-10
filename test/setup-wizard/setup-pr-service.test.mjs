@@ -18,7 +18,7 @@ import { saveConfig } from '../../src/state.mjs';
 
 const TEMPLATE_PATH = '.github/ISSUE_TEMPLATE/automated-coding-task.md';
 
-function setup(t, { legacyCheckoutPage = true } = {}) {
+function setup(t, { legacyCheckoutPage = true, configuredBaseBranch = 'release' } = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'setup-pr-confirmation-'));
   const checkoutPath = mkdtempSync(path.join(os.tmpdir(), 'setup-pr-checkout-'));
   t.after(() => {
@@ -43,7 +43,7 @@ function setup(t, { legacyCheckoutPage = true } = {}) {
       selections: { checkoutPath, checkoutManaged: true },
     }, { rootDir });
   }
-  saveConfig(checkoutPath, { setupComplete: false, baseBranch: 'release', maxActive: 1, models: {}, workspace: {} });
+  saveConfig(checkoutPath, { setupComplete: false, baseBranch: configuredBaseBranch, maxActive: 1, models: {}, workspace: {} });
   return { rootDir, checkoutPath };
 }
 
@@ -148,6 +148,46 @@ test('automatic setup repair fixes missing direct labels without creating a PR w
   assert.equal(result.action, 'repaired-directly');
   assert.match(result.summary, /Created 1 missing lifecycle label/);
   assert.equal(pullRequestCreated, false);
+});
+
+test('automatic setup repair initializes an unconfigured checkout after verifying its current base branch', (t) => {
+  const { rootDir, checkoutPath } = setup(t, { legacyCheckoutPage: false, configuredBaseBranch: '' });
+  const result = repairSetupRepository({
+    rootDir,
+    reconciler: () => null,
+    previewBuilder: preview,
+    labelInstaller: () => [],
+    templateInstaller: () => ({ path: TEMPLATE_PATH, updated: true }),
+    pullRequestCreator: (root) => {
+      const pullRequest = {
+        number: 19,
+        url: 'https://github.test/pr/19',
+        state: 'open',
+        branch: 'ai/install-paseo-automation-20260807t154500z',
+        baseBranch: 'release',
+        files: [TEMPLATE_PATH],
+      };
+      saveSetupPullRequest(root, pullRequest);
+      return { created: true, pullRequest };
+    },
+    autoMergeRequester: () => ({ requested: false, enabled: false, reason: 'disabled', action: null }),
+  });
+  assert.equal(result.action, 'created-pr');
+  assert.equal(result.pullRequest.number, 19);
+  assert.equal(result.pullRequest.baseBranch, 'release');
+  assert.equal(result.pullRequest.files[0], TEMPLATE_PATH);
+});
+
+test('automatic setup repair rejects an unconfigured checkout on a different branch', (t) => {
+  const { rootDir } = setup(t, { legacyCheckoutPage: false, configuredBaseBranch: '' });
+  saveSetupPage('repository', { baseBranch: 'main', selections: { baseBranch: 'main' } }, { rootDir });
+  assert.throws(() => repairSetupRepository({
+    rootDir,
+    reconciler: () => null,
+    previewBuilder: preview,
+    labelInstaller: () => [],
+    pullRequestCreator: () => ({ created: false }),
+  }), /managed checkout current branch release/);
 });
 
 test('automatic setup repair creates a new fix PR for missing or outdated managed files', (t) => {
