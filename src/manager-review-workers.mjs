@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { reconcileManualReviews } from './manual-review-reconcile.mjs';
 import { tickReviewScheduler } from './pr-review-scheduler.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { reconciliationDelay } from './reconciliation-timing.mjs';
@@ -38,6 +39,7 @@ function snapshot(worker) {
 export function createManagerReviewWorkerPool({
   reviewTick = tickReviewScheduler,
   reconcile = reconcileManagedPullRequestsWithWebFullReview,
+  reconcileManual = reconcileManualReviews,
   recover = recoverPrReviewStateWithWebFullReview,
   loadStore = loadPrReviewStore,
   reconciliationDelayForStore = reconciliationDelay,
@@ -73,7 +75,13 @@ export function createManagerReviewWorkerPool({
     worker.startupRecoveryPending = false;
     worker.startupRecovering = true;
     try {
-      worker.startupRecovery = { ok: true, result: recover(worker.root) };
+      worker.startupRecovery = {
+        ok: true,
+        result: {
+          managed: recover(worker.root),
+          manual: reconcileManual(worker.root),
+        },
+      };
     } catch (error) {
       worker.startupRecovery = { ok: false, error: error instanceof Error ? error.message : String(error) };
     } finally {
@@ -112,7 +120,10 @@ export function createManagerReviewWorkerPool({
     try {
       const store = loadStore(worker.root);
       worker.lastReconciliationResult = store.config.reconciliation.enabled
-        ? reconcile(worker.root)
+        ? {
+            managed: reconcile(worker.root),
+            manual: reconcileManual(worker.root),
+          }
         : { skipped: true, reason: 'Repository reconciliation is disabled.' };
       worker.lastReconciliationError = null;
     } catch (error) {
