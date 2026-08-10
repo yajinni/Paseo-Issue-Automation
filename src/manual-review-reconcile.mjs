@@ -270,15 +270,26 @@ function rehandoffValidatedExternalHead(root, managed, runState, pr) {
   const validation = latestValidation(runState, head);
   if (!validation) {
     const message = `Manual-review PR #${managed.pullRequestNumber} moved from ${runState.reviewExpectedHeadSha || managed.currentHeadSha} to ${head} without exact-head validation evidence.`;
-    mutatePrReviewStore(root, (store) => {
-      const record = findManaged(store, managed.id);
-      if (record) record.lastError = message;
-    });
-    updateManualRun(root, managed.issueNumber, {
-      phase: 'manual-review-stale-head',
+    const runAlreadyStale = runState.phase === 'manual-review-stale-head' && runState.reason === message;
+    const managedAlreadyStale = managed.lastError === message;
+    if (!managedAlreadyStale) {
+      mutatePrReviewStore(root, (store) => {
+        const record = findManaged(store, managed.id);
+        if (record) record.lastError = message;
+      });
+    }
+    if (!runAlreadyStale) {
+      updateManualRun(root, managed.issueNumber, {
+        phase: 'manual-review-stale-head',
+        reason: message,
+      }, { type: 'manual-review-stale-head', details: message });
+    }
+    return {
+      state: 'stale',
+      needsOperator: true,
       reason: message,
-    }, { type: 'manual-review-stale-head', details: message });
-    return { state: 'stale', needsOperator: true, reason: message };
+      ...(runAlreadyStale && managedAlreadyStale ? { unchanged: true } : {}),
+    };
   }
   enterManualReview(root, {
     pullRequestNumber: managed.pullRequestNumber,
@@ -345,14 +356,21 @@ export function reconcileManualReview(root, managedId, {
     };
   }
   if (outcome.action === 'merged-complete') {
-    updateManualRun(root, managed.issueNumber, {
-      phase: 'manual-review-merged-pending-finalization',
-      reason: null,
-    }, {
-      type: 'manual-review-merge-observed',
-      details: `Manual-review PR #${managed.pullRequestNumber} merged at exact head ${expectedHeadSha}; deterministic merge finalization is pending.`,
-    });
-    return { state: 'merged-pending-finalization', headSha: expectedHeadSha };
+    const unchanged = runState.phase === 'manual-review-merged-pending-finalization';
+    if (!unchanged) {
+      updateManualRun(root, managed.issueNumber, {
+        phase: 'manual-review-merged-pending-finalization',
+        reason: null,
+      }, {
+        type: 'manual-review-merge-observed',
+        details: `Manual-review PR #${managed.pullRequestNumber} merged at exact head ${expectedHeadSha}; deterministic merge finalization is pending.`,
+      });
+    }
+    return {
+      state: 'merged-pending-finalization',
+      headSha: expectedHeadSha,
+      ...(unchanged ? { unchanged: true } : {}),
+    };
   }
   if (outcome.action === 'closed-unmerged') return markClosedUnmerged(root, managed);
   return { state: 'waiting-manual-review', headSha: expectedHeadSha };
