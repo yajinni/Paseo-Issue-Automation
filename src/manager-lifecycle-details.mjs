@@ -18,6 +18,12 @@ function firstNumber(...values) {
   return null;
 }
 
+function sameSha(left, right) {
+  const a = firstString(left)?.toLowerCase();
+  const b = firstString(right)?.toLowerCase();
+  return Boolean(a && b && a === b);
+}
+
 function normalizedResult(value) {
   const raw = firstString(value);
   if (!raw) return null;
@@ -177,21 +183,37 @@ function mergeCurrentReviewEvidence(card, evidence) {
   if (!evidence) return card;
   const evidenceType = evidence.type === 'web-chatgpt' ? 'chatgpt' : evidence.type;
   if (evidenceType !== card.type) return card;
-  const findings = Array.isArray(evidence.findings) ? evidence.findings : card.findings;
+  const evidenceHead = firstString(evidence.exactHeadSha, evidence.currentHeadSha);
+  const cardHead = firstString(card.exactHeadSha);
+  const replacesDifferentHead = Boolean(evidenceHead && cardHead && !sameSha(evidenceHead, cardHead));
+  const previous = replacesDifferentHead
+    ? {
+        performed: false,
+        startedAt: null,
+        completedAt: null,
+        round: null,
+        result: null,
+        exactHeadSha: null,
+        summary: null,
+        findings: [],
+        conversationUrl: null,
+      }
+    : card;
+  const findings = Array.isArray(evidence.findings) ? evidence.findings : previous.findings;
   return {
     ...card,
     configured: true,
-    performed: card.performed || Boolean(evidence.completedAt || evidence.result || evidence.jobId),
-    startedAt: firstString(card.startedAt, evidence.requestedAt, evidence.submittedAt),
-    completedAt: firstString(card.completedAt, evidence.completedAt),
-    round: firstNumber(card.round, evidence.round),
-    limit: firstNumber(card.limit, evidence.limit),
-    result: card.result || normalizedResult(evidence.result),
-    exactHeadSha: firstString(card.exactHeadSha, evidence.exactHeadSha),
-    summary: firstString(card.summary, evidence.summary),
+    performed: previous.performed || Boolean(evidence.completedAt || evidence.result || evidence.jobId),
+    startedAt: firstString(previous.startedAt, evidence.requestedAt, evidence.submittedAt),
+    completedAt: firstString(evidence.completedAt, previous.completedAt),
+    round: firstNumber(evidence.round, previous.round),
+    limit: firstNumber(evidence.limit, card.limit),
+    result: normalizedResult(evidence.result) || previous.result,
+    exactHeadSha: firstString(evidenceHead, previous.exactHeadSha),
+    summary: firstString(evidence.summary, previous.summary),
     findings,
     findingCounts: evidence.findingCounts || findingCounts(findings),
-    conversationUrl: firstString(card.conversationUrl, evidence.conversationUrl),
+    conversationUrl: firstString(evidence.conversationUrl, previous.conversationUrl),
     reviewJobId: firstString(evidence.jobId),
     reviewRequestId: firstString(evidence.reviewRequestId),
     attempts: Number.isInteger(Number(evidence.attempts)) ? Number(evidence.attempts) : null,
