@@ -25,6 +25,8 @@ import {
 import { markIssueMerged } from './issue-merge-state.mjs';
 import { matchingReviewResult } from './review-result.mjs';
 
+const FINALIZATION_REQUEST_PREFIX = 'approved-finalization:';
+
 function labelNames(pr) {
   return new Set((pr?.labels || []).map((label) => typeof label === 'string' ? label : label.name));
 }
@@ -159,6 +161,10 @@ function reconcileClosedUnmergedInStore(store, managed, at) {
   };
 }
 
+function importedFinalizationEvidence(managed) {
+  return String(managed.lastProcessedReviewRequestId || '').startsWith(FINALIZATION_REQUEST_PREFIX);
+}
+
 function reconcileHeadChange(store, managed, pr, at) {
   const newSha = String(pr.headRefOid || '').toLowerCase();
   if (!newSha || newSha === managed.currentHeadSha) return null;
@@ -167,6 +173,34 @@ function reconcileHeadChange(store, managed, pr, at) {
   managed.updatedAt = at;
   managed.lastActivityAt = at;
   managed.reviewRound += 1;
+
+  if (importedFinalizationEvidence(managed)) {
+    const reason = `PR head changed from approved ${previousSha} to ${newSha} after deterministic finalization. Exact-head approval is invalid; a fresh workflow review is required.`;
+    terminateManagedJobs(store, managed, reason, at);
+    managed.lastError = reason;
+    transitionManaged(store, managed, 'failed', {
+      reason,
+      actor: 'reconciliation',
+      sha: newSha,
+      at,
+    });
+    appendHistory(store, {
+      entityType: 'managed_pull_request', entityId: managed.id,
+      reason,
+      actor: 'reconciliation', sha: newSha, timestamp: at,
+    });
+    return {
+      finalizationInvalidated: true,
+      headSha: newSha,
+      effects: [{
+        type: 'set-review-labels',
+        pullRequestNumber: managed.pullRequestNumber,
+        add: [PR_REVIEW_LABELS.failed],
+        remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.changesRequested],
+      }],
+    };
+  }
+
   const job = enqueueReviewInStore(store, managed, { headSha: newSha, now: Date.parse(at) });
   appendHistory(store, {
     entityType: 'managed_pull_request', entityId: managed.id,
@@ -441,7 +475,7 @@ export function reconcileManagedPullRequest(root, managedId, {
       state: managed.reviewState,
       headChanged: Boolean(headJob),
       review,
-      effects: review?.effects || [],
+      effects: [...(headJob?.effects || []), ...(review?.effects || [])],
     };
   });
   const effectResults = effectRunner(root, managedId, outcome.effects || []);
