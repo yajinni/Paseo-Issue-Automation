@@ -1,13 +1,18 @@
-import { markHumanReview } from './automation.mjs';
-import { managedPrSnapshot } from './pr-review-github.mjs';
+import { finalizeApprovedPullRequest } from './approved-pr-finalization.mjs';
+import { managedPrSnapshot, managerPrHealthSnapshot } from './pr-review-github.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
 import { run } from './process.mjs';
 
 const FAILED_CHECK_STATES = new Set(['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED']);
 const PENDING_CHECK_STATES = new Set(['', 'PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED', 'REQUESTED', 'WAITING', 'UNKNOWN']);
+const IMPORTED_FINALIZATION_PREFIX = 'approved-finalization:';
 
 function checkState(check) {
   return String(check?.conclusion || check?.state || check?.status || 'UNKNOWN').toUpperCase();
+}
+
+function importedFinalizationEvidence(reviewJob) {
+  return String(reviewJob?.reviewRequestId || '').startsWith(IMPORTED_FINALIZATION_PREFIX);
 }
 
 export function summarizeReviewGateChecks(checks = []) {
@@ -105,6 +110,7 @@ export function recordApprovedBrowserReview(root, managed, reviewJob, {
 } = {}) {
   const state = loadRun(root, managed.issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${managed.issueNumber}.`);
+  if (importedFinalizationEvidence(reviewJob)) return state;
   const existing = (state.events || []).some((event) => event.event === 'review'
     && event.result === 'APPROVED'
     && event.commit === reviewJob.headSha
@@ -134,6 +140,13 @@ export function finalizeApprovedBrowserReview(root, managed, reviewJob, {
   pr = null,
   gate = null,
 } = {}) {
+  if (importedFinalizationEvidence(reviewJob)) {
+    return {
+      mode: 'managed-finalization',
+      unchanged: true,
+      state: loadRun(root, managed.issueNumber),
+    };
+  }
   const currentPr = pr || managedPrSnapshot(root, managed.pullRequestNumber);
   const evaluated = gate || evaluateApprovedReviewGate(root, managed, reviewJob, currentPr);
   if (!evaluated.ok) {
@@ -141,6 +154,19 @@ export function finalizeApprovedBrowserReview(root, managed, reviewJob, {
     error.gate = evaluated;
     throw error;
   }
-  recordApprovedBrowserReview(root, managed, reviewJob, { findings });
-  return markHumanReview(root, managed.issueNumber, managed.pullRequestNumber);
+  const state = recordApprovedBrowserReview(root, managed, reviewJob, { findings });
+  const health = managerPrHealthSnapshot(root, managed.pullRequestNumber);
+  if (!health) throw new Error(`Could not read PR #${managed.pullRequestNumber} for deterministic finalization.`);
+  return finalizeApprovedPullRequest(root, {
+    repository: managed.repository,
+    issueNumber: managed.issueNumber,
+    issueUrl: managed.issueUrl,
+    pullRequest: health,
+    state,
+    findings: [],
+    unresolvedFindings: false,
+    approvalSource: 'browser-review',
+    paseoOwned: String(health.headRefName || '') === String(managed.branchName || '')
+      && String(health.headRefOid || '').toLowerCase() === String(reviewJob.headSha || '').toLowerCase(),
+  });
 }
