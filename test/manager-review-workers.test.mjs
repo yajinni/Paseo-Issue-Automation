@@ -126,13 +126,43 @@ test('review scheduler and reconciliation failures remain repository isolated', 
   pool.reconcileTick('repo-b');
   assert.deepEqual(reviewRoots, ['/repo-a', '/repo-b']);
   assert.deepEqual(reconcileRoots, ['/repo-a', '/repo-b']);
-  assert.deepEqual(manualRoots, ['/repo-a']);
+  assert.deepEqual(manualRoots, ['/repo-a', '/repo-b', '/repo-a', '/repo-b']);
   assert.equal(pool.status('repo-a').lastReviewError, null);
   assert.equal(pool.status('repo-b').lastReviewError, 'review failed');
   assert.equal(pool.status('repo-a').lastReconciliationError, null);
-  assert.equal(pool.status('repo-b').lastReconciliationError, 'reconcile failed');
+  assert.equal(pool.status('repo-b').lastReconciliationError, 'managed: reconcile failed');
+  assert.deepEqual(pool.status('repo-b').lastReconciliationResult, {
+    managed: null,
+    manual: { checked: 0 },
+  });
   assert.equal(pool.status('repo-a').running, true);
   assert.equal(pool.status('repo-b').running, true);
+});
+
+test('manual reconciliation failure does not suppress managed reconciliation', () => {
+  const timers = fakeTimers();
+  const pool = createManagerReviewWorkerPool({
+    recover: () => ({ recovered: true }),
+    reconcile: () => ({ checked: 2 }),
+    reconcileManual: () => { throw new Error('manual failed'); },
+    loadStore: () => ({
+      config: { reconciliation: { enabled: true } },
+      managedPullRequests: [],
+    }),
+    reconciliationDelayForStore: () => 45_000,
+    setIntervalFn: timers.setIntervalFn,
+    clearIntervalFn: timers.clearIntervalFn,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  pool.start({ id: 'repo-a', name: 'A', path: '/repo-a' });
+  timers.timeouts.find((timer) => timer.milliseconds === 0).callback();
+  pool.reconcileTick('repo-a');
+  assert.deepEqual(pool.status('repo-a').lastReconciliationResult, {
+    managed: { checked: 2 },
+    manual: null,
+  });
+  assert.equal(pool.status('repo-a').lastReconciliationError, 'manual: manual failed');
 });
 
 test('reconciliation includes manual review maintenance alongside managed review maintenance', () => {
