@@ -203,7 +203,7 @@ function mergeCurrentReviewEvidence(card, evidence) {
   return {
     ...card,
     configured: true,
-    performed: previous.performed || Boolean(evidence.completedAt || evidence.result || evidence.jobId),
+    performed: previous.performed || Boolean(evidence.completedAt || evidence.result),
     startedAt: firstString(previous.startedAt, evidence.requestedAt, evidence.submittedAt),
     completedAt: firstString(evidence.completedAt, previous.completedAt),
     round: firstNumber(evidence.round, previous.round),
