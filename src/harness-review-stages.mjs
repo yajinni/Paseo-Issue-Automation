@@ -114,7 +114,36 @@ export function reviewStageDecision({ config = {}, state = {}, stage, verdict })
 }
 
 export function validateHarnessReviewVerdict(verdict, expected = {}) {
-  if (!verdict || typeof verdict !== 'object') throw new Error('Reviewer did not return a structured verdict.');
+  if (!verdict || typeof verdict !== 'object' || Array.isArray(verdict)) {
+    throw new Error('Reviewer did not return the required structured verdict.');
+  }
+  const requiredFields = [
+    'repository',
+    'pullRequestNumber',
+    'issueNumber',
+    'headSha',
+    'stage',
+    'round',
+    'promptVersion',
+    'result',
+    'summary',
+    'findings',
+  ];
+  const missing = requiredFields.filter((field) => !Object.hasOwn(verdict, field));
+  if (missing.length) {
+    throw new Error(`Reviewer did not return the required structured verdict fields: ${missing.join(', ')}.`);
+  }
+  if (typeof verdict.repository !== 'string' || !verdict.repository.trim()
+      || !Number.isInteger(verdict.pullRequestNumber) || verdict.pullRequestNumber < 1
+      || !Number.isInteger(verdict.issueNumber) || verdict.issueNumber < 1
+      || !/^[0-9a-f]{7,64}$/i.test(String(verdict.headSha || ''))
+      || !Object.values(REVIEW_STAGES).includes(verdict.stage)
+      || !Number.isInteger(verdict.round) || verdict.round < 1 || verdict.round > 20
+      || !Number.isInteger(verdict.promptVersion) || verdict.promptVersion < 1
+      || typeof verdict.summary !== 'string'
+      || !Array.isArray(verdict.findings)) {
+    throw new Error('Reviewer did not return the required structured verdict shape.');
+  }
   const checks = [
     ['repository', String(expected.repository || '')],
     ['pullRequestNumber', Number(expected.pullRequestNumber)],
@@ -128,7 +157,6 @@ export function validateHarnessReviewVerdict(verdict, expected = {}) {
     if (verdict[field] !== value) throw new Error(`Reviewer verdict ${field} does not match the requested review.`);
   }
   if (!REVIEW_WORKFLOW_RESULTS.includes(verdict.result)) throw new Error('Reviewer verdict result is invalid.');
-  if (!Array.isArray(verdict.findings)) throw new Error('Reviewer verdict findings must be an array.');
   return verdict;
 }
 
