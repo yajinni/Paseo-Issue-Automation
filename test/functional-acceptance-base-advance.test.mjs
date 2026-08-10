@@ -223,7 +223,19 @@ if (args[0] === 'run') {
     execFileSync('git', ['commit', '--quiet', '-m', 'Advance main during review'], { cwd: root, stdio: 'pipe' });
     execFileSync('git', ['push', '--quiet', 'origin', 'main'], { cwd: root, stdio: 'pipe' });
   }
-  output({ approved: true, findings: 'Independent reviewer approved this exact head.' });
+  const pr = JSON.parse(readFileSync(prFile, 'utf8'));
+  output({
+    repository: 'owner/repo',
+    pullRequestNumber: 11,
+    issueNumber: 105,
+    headSha: pr.headRefOid,
+    stage: 'full',
+    round: count + 1,
+    promptVersion: 1,
+    result: 'pass',
+    summary: 'Independent staged reviewer approved this exact head.',
+    findings: [],
+  });
   process.exit(0);
 }
 if (args[0] === 'stop') process.exit(0);
