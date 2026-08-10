@@ -255,11 +255,15 @@ export function approvedFinalizationOwnership(state = {}, pullRequest = {}, head
     && normalizedHead(pullRequest.headRefOid) === head);
 }
 
-function ensureReady(root, pullRequest, { runner = run } = {}) {
-  if (pullRequest?.isDraft !== true) return { changed: false };
+function ensureReady(root, pullRequest, { runner = run, required = true } = {}) {
+  if (pullRequest?.isDraft !== true) return { changed: false, ready: true };
   const result = runner('gh', ['pr', 'ready', String(pullRequest.number)], { cwd: root, allowFailure: true });
-  if (!result?.ok) throw new Error(text(result?.stderr || result?.stdout) || `Could not mark PR #${pullRequest.number} ready for finalization.`);
-  return { changed: true };
+  if (!result?.ok) {
+    const reason = text(result?.stderr || result?.stdout) || `Could not mark PR #${pullRequest.number} ready for finalization.`;
+    if (required) throw new Error(reason);
+    return { changed: false, ready: false, reason };
+  }
+  return { changed: true, ready: true };
 }
 
 function humanReviewAlreadyMarked(state, pullRequestNumber, headSha) {
@@ -307,6 +311,20 @@ function releaseCodingSlotForMerge(root, issueNumber, { runner = run } = {}) {
   if (!result?.ok) throw new Error(text(result?.stderr || result?.stdout) || `Could not release the coding slot for issue #${issueNumber}.`);
 }
 
+function humanFallback(root, issueNumber, pr, head, reason, managed, eligibility, options, extras = {}) {
+  const readiness = ensureReady(root, pr, { ...options, required: false });
+  const readinessReason = readiness.ready
+    ? reason
+    : [reason, `PR remains draft: ${readiness.reason}`].filter(Boolean).join(' ');
+  return {
+    ...routeToHumanReview(root, issueNumber, pr.number, head, readinessReason || null, options),
+    managed,
+    eligibility,
+    readiness,
+    ...extras,
+  };
+}
+
 export function finalizeApprovedPullRequest(root, {
   repository,
   issueNumber,
@@ -328,7 +346,6 @@ export function finalizeApprovedPullRequest(root, {
   if (!approval) throw new Error(`No authoritative exact-head approval exists for ${head}.`);
   if (!validation) throw new Error(`No passing exact-head validation exists for ${head}.`);
 
-  ensureReady(root, pr, options);
   const managed = ensureManagedApprovedFinalization(root, {
     repository,
     issueNumber,
@@ -364,20 +381,13 @@ export function finalizeApprovedPullRequest(root, {
   });
 
   if (config.review?.workflow === 'quick-manual' || config.review?.autoMergeApproved !== true) {
-    return {
-      ...routeToHumanReview(root, issueNumber, pr.number, head, null, options),
-      managed,
-      eligibility,
-    };
+    return humanFallback(root, issueNumber, pr, head, null, managed, eligibility, options);
   }
   if (!eligibility.eligible) {
     const reason = `Automatic merge was not authorized: ${eligibility.reasons.join(', ')}.`;
-    return {
-      ...routeToHumanReview(root, issueNumber, pr.number, head, reason, options),
-      managed,
-      eligibility,
+    return humanFallback(root, issueNumber, pr, head, reason, managed, eligibility, options, {
       autoMergeUnavailable: true,
-    };
+    });
   }
 
   const currentState = loadRun(root, issueNumber);
@@ -390,15 +400,13 @@ export function finalizeApprovedPullRequest(root, {
   const capability = repositoryAutoMergeCapability(root, repository, options);
   if (!capability.known || !capability.enabled) {
     const reason = capability.reason || 'GitHub repository auto-merge is unavailable.';
-    return {
-      ...routeToHumanReview(root, issueNumber, pr.number, head, reason, options),
-      managed,
-      eligibility,
+    return humanFallback(root, issueNumber, pr, head, reason, managed, eligibility, options, {
       capability,
       autoMergeUnavailable: true,
-    };
+    });
   }
 
+  ensureReady(root, pr, { ...options, required: true });
   const request = (options.autoMergeRequester || requestApprovedPullRequestAutoMerge)(root, {
     config,
     pullRequest: normalizedPr,
@@ -414,14 +422,11 @@ export function finalizeApprovedPullRequest(root, {
   }, options);
   if (!request.enabled) {
     const reason = request.reason || 'GitHub did not enable automatic merge.';
-    return {
-      ...routeToHumanReview(root, issueNumber, pr.number, head, reason, options),
-      managed,
-      eligibility,
+    return humanFallback(root, issueNumber, pr, head, reason, managed, eligibility, options, {
       capability,
       request,
       autoMergeUnavailable: true,
-    };
+    });
   }
 
   releaseCodingSlotForMerge(root, issueNumber, options);
