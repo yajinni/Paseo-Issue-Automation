@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { ensureManagedApprovedFinalization } from '../src/approved-pr-finalization.mjs';
 import { reconcileManagedPullRequest } from '../src/pr-review-reconcile.mjs';
-import { loadPrReviewStore } from '../src/pr-review-store.mjs';
+import { loadPrReviewStore, PR_REVIEW_LABELS } from '../src/pr-review-store.mjs';
 
 const OLD_HEAD = 'aaaaaaaaaaaaaaaa';
 const NEW_HEAD = 'bbbbbbbbbbbbbbbb';
@@ -62,7 +62,7 @@ test('post-approval head movement invalidates deterministic finalization without
     },
     effectRunner: (_root, _managedId, requested) => {
       effects.push(...requested);
-      return [];
+      return requested;
     },
   });
 
@@ -84,5 +84,8 @@ test('post-approval head movement invalidates deterministic finalization without
   assert.equal(after.reviewJobs.filter((job) => job.state === 'queued').length, 0);
   assert.equal(after.reviewJobs.filter((job) => job.state === 'submitting').length, 0);
   assert.equal(after.reviewJobs.filter((job) => job.state === 'awaiting_result').length, 0);
-  assert.equal(effects.length, 0);
+  assert.equal(effects.length, 1);
+  assert.equal(effects[0].type, 'set-review-labels');
+  assert.deepEqual(effects[0].add, [PR_REVIEW_LABELS.failed]);
+  assert.equal(effects[0].pullRequestNumber, 11);
 });
