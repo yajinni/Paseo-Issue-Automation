@@ -40,7 +40,7 @@ test('all status-consuming enhancers register through the listener API in the co
 
 test('composed Configuration exposes the six setup-aligned tabs without obsolete setup-link cards', () => {
   const html = managerDashboardHtml();
-  for (const label of ['Connect Paseo', 'Coding harness', 'GitHub repository', 'Issues setup', 'Review setup', 'Final readiness']) {
+  for (const label of ['Connect Paseo', 'Coding harness', 'GitHub repository', 'Issues setup', 'Review setup', 'Readiness']) {
     assert.match(html, new RegExp(label));
   }
   assert.doesNotMatch(html, /manager-config-step-link/);
