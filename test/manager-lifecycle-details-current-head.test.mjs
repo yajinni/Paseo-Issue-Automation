@@ -95,6 +95,7 @@ test('current review evidence replaces stale results from a previous PR head', (
   assert.ok(chatgpt);
   assert.equal(chatgpt.exactHeadSha, 'new-head');
   assert.equal(chatgpt.round, 2);
+  assert.equal(chatgpt.performed, false);
   assert.equal(chatgpt.result, null);
   assert.equal(chatgpt.completedAt, null);
   assert.equal(chatgpt.summary, null);

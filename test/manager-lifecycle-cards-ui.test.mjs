@@ -39,6 +39,8 @@ test('review cards are data-driven Light, Heavy PR, and ChatGPT stages', () => {
   assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /Review round/);
   assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /Issues found/);
   assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /Blocking issues/);
+  assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /review\.reviewJobId[\s\S]*Queued/);
+  assert.doesNotMatch(MANAGER_LIFECYCLE_CARDS_SCRIPT, /text: 'Optional'/);
 });
 
 test('Completed consolidates merge, closure, final status, and compact lifecycle trail', () => {
@@ -73,6 +75,13 @@ test('lifecycle details are loaded only for an expanded issue and the Activity T
   assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /main\.textContent = ''/);
   assert.doesNotMatch(MANAGER_LIFECYCLE_CARDS_SCRIPT, /activity-card[^\n]*remove/);
   assert.match(MANAGER_WORK_QUEUE_STYLE, /\.lifecycle-expanded\{display:grid/);
+});
+
+test('expanded lifecycle refetches after dashboard rerenders instead of reusing stale issue details', () => {
+  assert.doesNotMatch(MANAGER_LIFECYCLE_CARDS_SCRIPT, /const cache = new Map/);
+  assert.doesNotMatch(MANAGER_LIFECYCLE_CARDS_SCRIPT, /cache\.has|cache\.set/);
+  assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /const loading = new Map/);
+  assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /jsonRequest\(selectedPath\('issues\/['"]? \+ issueNumber/);
 });
 
 test('lifecycle card grid stays responsive while Completed remains full width when space allows', () => {
