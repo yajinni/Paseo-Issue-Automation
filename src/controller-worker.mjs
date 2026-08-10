@@ -209,16 +209,6 @@ function checkFailureDetails(checks) {
   }).join('\n');
 }
 
-function finalHarnessApproval(root, issueNumber, headSha, review) {
-  return recordEvent(root, issueNumber, {
-    event: 'review',
-    result: 'APPROVED',
-    commit: headSha,
-    details: review?.event?.summary || 'Staged Heavy review approved this exact commit.',
-    source: 'harness-review-compat',
-  });
-}
-
 async function execute(root, issueNumber) {
   const config = loadConfig(root);
   let repairCycles = 0;
@@ -312,7 +302,6 @@ async function execute(root, issueNumber) {
       continue;
     }
 
-    finalHarnessApproval(root, issueNumber, finalSnapshot.head, review);
     updateState(root, issueNumber, { phase: 'finalizing-human-review' });
     markHumanReview(root, issueNumber, finalSnapshot.pr.number);
     return;
