@@ -10,7 +10,8 @@ import {
   reviewRepairInstructions,
   runConfiguredHarnessReview,
 } from './controller-review-workflow.mjs';
-import { markHumanReview, recordEvent, terminalState } from './automation.mjs';
+import { finalizeApprovedPullRequest } from './approved-pr-finalization.mjs';
+import { recordEvent, terminalState } from './automation.mjs';
 import { inspectBaseFreshness } from './base-freshness.mjs';
 import { currentPr, ensureDraftPr } from './controller-draft-pr.mjs';
 import { appendIssueLifecycle, loadConfig, loadRun, saveRun } from './state.mjs';
@@ -302,8 +303,17 @@ async function execute(root, issueNumber) {
       continue;
     }
 
-    updateState(root, issueNumber, { phase: 'finalizing-human-review' });
-    markHumanReview(root, issueNumber, finalSnapshot.pr.number);
+    updateState(root, issueNumber, { phase: 'finalizing-approved-pr' });
+    finalizeApprovedPullRequest(root, {
+      repository: review.repository,
+      issueNumber,
+      issueUrl: review.issue?.url,
+      pullRequest: finalSnapshot.pr,
+      state: finalSnapshot.state,
+      findings: review.event.findings,
+      unresolvedFindings: false,
+      approvalSource: 'harness-review',
+    }, { config });
     return;
   }
   throw new Error('Maximum controller repair cycles reached.');
