@@ -1,5 +1,9 @@
 import { PASEO_LABELS, PR_REVIEW_LABELS } from './label-catalog.mjs';
-import { setPrReviewLabels } from './pr-review-github.mjs';
+import {
+  finalizeApprovedPullRequest,
+  prepareManagedFinalizationEvidence,
+} from './approved-pr-finalization.mjs';
+import { managerPrHealthSnapshot, setPrReviewLabels } from './pr-review-github.mjs';
 import {
   reconcileManagedPullRequest,
   reconcileManagedPullRequests,
@@ -14,7 +18,7 @@ import {
   transitionManaged,
 } from './pr-review-store.mjs';
 import { run } from './process.mjs';
-import { loadConfig } from './state.mjs';
+import { loadConfig, loadRun } from './state.mjs';
 import {
   recordWebChatGptFullReviewMetadata,
   webChatGptFullReviewMetadata,
@@ -118,6 +122,34 @@ function carryFullReviewMetadataToCurrentHeads(root) {
   return carried;
 }
 
+function finalizeReadyManagedApprovals(root, options = {}) {
+  const config = loadConfig(root);
+  if (config.review?.workflow !== 'quick-web-chatgpt') return [];
+  const store = loadPrReviewStore(root);
+  const finalized = [];
+  for (const managed of store.managedPullRequests) {
+    if (managed.reviewState !== 'ready_to_merge') continue;
+    const state = loadRun(root, managed.issueNumber);
+    if (!state || state.reviewRuntimeStage === 'full-manual') continue;
+    const pr = managerPrHealthSnapshot(root, managed.pullRequestNumber);
+    if (!pr || String(pr.state || '').toUpperCase() !== 'OPEN') continue;
+    const result = finalizeApprovedPullRequest(root, {
+      repository: managed.repository,
+      issueNumber: managed.issueNumber,
+      issueUrl: managed.issueUrl,
+      pullRequest: pr,
+      state,
+      findings: [],
+      unresolvedFindings: false,
+      approvalSource: 'browser-review',
+      paseoOwned: String(pr.headRefName || '') === String(managed.branchName || '')
+        && String(pr.headRefOid || '').toLowerCase() === String(managed.currentHeadSha || '').toLowerCase(),
+    }, options);
+    finalized.push({ managedId: managed.id, result });
+  }
+  return finalized;
+}
+
 export function enforceWebChatGptFullReviewLimits(root, options = {}) {
   const exhausted = exhaustedFixes(root);
   const stopped = exhausted
@@ -128,19 +160,25 @@ export function enforceWebChatGptFullReviewLimits(root, options = {}) {
 }
 
 export function reconcileManagedPullRequestWithWebFullReview(root, managedId, options = {}) {
+  const preparedFinalization = prepareManagedFinalizationEvidence(root);
   const outcome = reconcileManagedPullRequest(root, managedId, options);
   const runtime = enforceWebChatGptFullReviewLimits(root, options);
-  return { ...outcome, webChatGptFullReview: runtime };
+  const finalization = finalizeReadyManagedApprovals(root, options);
+  return { ...outcome, webChatGptFullReview: runtime, preparedFinalization, finalization };
 }
 
 export function reconcileManagedPullRequestsWithWebFullReview(root, options = {}) {
+  const preparedFinalization = prepareManagedFinalizationEvidence(root);
   const outcome = reconcileManagedPullRequests(root, options);
   const runtime = enforceWebChatGptFullReviewLimits(root, options);
-  return { ...outcome, webChatGptFullReview: runtime };
+  const finalization = finalizeReadyManagedApprovals(root, options);
+  return { ...outcome, webChatGptFullReview: runtime, preparedFinalization, finalization };
 }
 
 export function recoverPrReviewStateWithWebFullReview(root, options = {}) {
+  const preparedFinalization = prepareManagedFinalizationEvidence(root);
   const outcome = recoverPrReviewState(root, options);
   const runtime = enforceWebChatGptFullReviewLimits(root, options);
-  return { ...outcome, webChatGptFullReview: runtime };
+  const finalization = finalizeReadyManagedApprovals(root, options);
+  return { ...outcome, webChatGptFullReview: runtime, preparedFinalization, finalization };
 }
