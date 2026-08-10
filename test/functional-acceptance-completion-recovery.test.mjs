@@ -159,6 +159,7 @@ appendFileSync(path.join(fixture, 'commands.log'), JSON.stringify({ command: 'pa
 const output = (value) => process.stdout.write(JSON.stringify(value));
 const arg = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : null; };
 const workspaceFile = path.join(fixture, 'workspace.json');
+const prFile = path.join(fixture, 'pr.json');
 if (args[0] === 'workspace' && args[1] === 'create') {
   const root = arg('--path');
   const branch = arg('--new-branch');
@@ -190,7 +191,22 @@ if (args[0] === 'wait') {
   process.exit(0);
 }
 if (args[0] === 'send') { writeFileSync(path.join(fixture, 'recovery-pending'), 'recover\\n'); process.exit(0); }
-if (args[0] === 'run') { output({ approved: true, findings: 'Recovered exact-head handoff approved.' }); process.exit(0); }
+if (args[0] === 'run') {
+  const pr = JSON.parse(readFileSync(prFile, 'utf8'));
+  output({
+    repository: 'owner/repo',
+    pullRequestNumber: 9,
+    issueNumber: 103,
+    headSha: pr.headRefOid,
+    stage: 'full',
+    round: 1,
+    promptVersion: 1,
+    result: 'pass',
+    summary: 'Recovered exact-head handoff approved.',
+    findings: [],
+  });
+  process.exit(0);
+}
 if (args[0] === 'stop') process.exit(0);
 if (args[0] === 'ls') { output([]); process.exit(0); }
 if (args[0] === 'workspace' && args[1] === 'archive') process.exit(0);
