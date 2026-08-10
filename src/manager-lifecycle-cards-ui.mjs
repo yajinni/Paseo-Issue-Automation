@@ -8,7 +8,6 @@ export const MANAGER_LIFECYCLE_CARDS_STYLE = String.raw`
 
 export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
 (function managerLifecycleCardsUi() {
-  const cache = new Map();
   const loading = new Map();
   let observer = null;
 
@@ -24,7 +23,7 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
   function resultTone(value) {
     const text = String(value || '').toLowerCase();
     if (/pass|approved|complete|merged|closed/.test(text)) return 'success';
-    if (/change|pending|waiting|stale/.test(text)) return 'warning';
+    if (/change|pending|waiting|stale|queued/.test(text)) return 'warning';
     if (/fail|error|block/.test(text)) return 'danger';
     return '';
   }
@@ -91,9 +90,13 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
   function reviewCard(review) {
     const kind = review.type === 'chatgpt' ? 'chatgpt' : review.type;
     const icon = review.type === 'light' ? '✦' : review.type === 'heavy' ? '♜' : '◎';
-    const badge = review.performed
-      ? { text: review.result || 'Performed', tone: resultTone(review.result || 'complete') }
-      : { text: 'Optional', tone: 'optional' };
+    const badge = review.result
+      ? { text: review.result, tone: resultTone(review.result) }
+      : review.performed
+        ? { text: 'Performed', tone: 'success' }
+        : review.reviewJobId
+          ? { text: 'Queued', tone: 'warning' }
+          : { text: 'Not started', tone: '' };
     const framed = cardFrame(kind + (review.performed ? '' : ' pending'), review.label, icon, badge);
     const copy = document.createElement('p'); copy.className = 'lifecycle-card-copy'; copy.textContent = reviewCopy(review.type);
     if (review.type === 'chatgpt') {
@@ -106,7 +109,7 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
       fact('Review started', formatDate(review.startedAt)),
       fact('Review completed', formatDate(review.completedAt)),
       fact('Review round', review.round ? (review.limit ? review.round + ' of ' + review.limit : review.round) : 'Not recorded'),
-      fact('Result', review.result || (review.performed ? 'Recorded' : 'Not started'), { result: true }),
+      fact('Result', review.result || (review.performed ? 'Recorded' : review.reviewJobId ? 'Pending' : 'Not started'), { result: true }),
     );
     if (review.exactHeadSha) framed.facts.append(fact('Exact head', shortSha(review.exactHeadSha)));
     if (review.findingCounts?.total != null) {
@@ -202,10 +205,9 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
 
   async function load(issueNumber) {
     const key = String(issueNumber);
-    if (cache.has(key)) return cache.get(key);
     if (loading.has(key)) return loading.get(key);
     const promise = jsonRequest(selectedPath('issues/' + issueNumber + '/lifecycle-details'))
-      .then(function(body) { const details = body.lifecycleDetails; cache.set(key, details); return details; })
+      .then(function(body) { return body.lifecycleDetails; })
       .finally(function() { loading.delete(key); });
     loading.set(key, promise); return promise;
   }
