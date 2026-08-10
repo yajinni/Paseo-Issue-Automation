@@ -3,7 +3,7 @@ import {
   approvedPullRequestMergeEligibility,
   requestApprovedPullRequestAutoMerge,
 } from './approved-pr-auto-merge.mjs';
-import { LEGACY_LABELS, PASEO_LABELS } from './label-catalog.mjs';
+import { PASEO_LABELS } from './label-catalog.mjs';
 import { managerPrHealthSnapshot } from './pr-review-github.mjs';
 import {
   appendHistory,
@@ -305,7 +305,7 @@ function routeToHumanReview(root, issueNumber, pullRequestNumber, headSha, reaso
 function releaseCodingSlotForMerge(root, issueNumber, { runner = run } = {}) {
   const result = runner('gh', [
     'issue', 'edit', String(issueNumber),
-    '--remove-label', LEGACY_LABELS.running,
+    '--remove-label', PASEO_LABELS.coding,
     '--add-label', PASEO_LABELS.reviewQueued,
   ], { cwd: root, allowFailure: true });
   if (!result?.ok) throw new Error(text(result?.stderr || result?.stdout) || `Could not release the coding slot for issue #${issueNumber}.`);

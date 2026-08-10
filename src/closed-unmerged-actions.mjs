@@ -1,6 +1,7 @@
 import { appendHistory, clone, findManaged, mutatePrReviewStore, nowIso, transitionManaged } from './pr-review-store.mjs';
 import { enqueueReviewInStore } from './pr-review-queue.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
+import { PASEO_LABELS } from './label-catalog.mjs';
 import { run } from './process.mjs';
 
 function managedRecord(root, id) {
@@ -28,7 +29,7 @@ export function reopenClosedPullRequest(root, managedId) {
 
 export function returnIssueToCodingQueue(root, managedId) {
   const managed = managedRecord(root, managedId);
-  run('gh', ['issue', 'edit', String(managed.issueNumber), '--add-label', 'agent-ready', '--remove-label', 'agent-running', '--remove-label', 'human-review'], { cwd: root });
+  run('gh', ['issue', 'edit', String(managed.issueNumber), '--add-label', PASEO_LABELS.ready, '--remove-label', PASEO_LABELS.coding, '--remove-label', PASEO_LABELS.reviewQueued], { cwd: root });
   return mutatePrReviewStore(root, (store) => {
     const record = findManaged(store, managedId);
     transitionManaged(store, record, 'paused', { reason: 'Associated issue returned to the normal coding queue.', actor: 'user' });
@@ -38,7 +39,7 @@ export function returnIssueToCodingQueue(root, managedId) {
 
 export function returnIssueToBacklog(root, managedId) {
   const managed = managedRecord(root, managedId);
-  run('gh', ['issue', 'edit', String(managed.issueNumber), '--remove-label', 'agent-ready', '--remove-label', 'agent-running', '--remove-label', 'human-review'], { cwd: root, allowFailure: true });
+  run('gh', ['issue', 'edit', String(managed.issueNumber), '--remove-label', PASEO_LABELS.ready, '--remove-label', PASEO_LABELS.coding, '--remove-label', PASEO_LABELS.reviewQueued], { cwd: root, allowFailure: true });
   return mutatePrReviewStore(root, (store) => {
     const record = findManaged(store, managedId);
     transitionManaged(store, record, 'paused', { reason: 'Associated issue returned to backlog.', actor: 'user' });

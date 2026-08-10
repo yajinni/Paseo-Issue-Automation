@@ -44,10 +44,10 @@ export function failedAttemptRecoveryEligibility(state, { branchAction = 'keep' 
 
 function editRecoveryLabels(root, issueNumber, running, runner) {
   const args = ['issue', 'edit', String(issueNumber)];
-  const add = running ? [LABELS.running] : [LABELS.failed];
+  const add = running ? [PASEO_LABELS.coding] : [PASEO_LABELS.failed];
   const remove = running
-    ? [LABELS.ready, PASEO_LABELS.ready, LABELS.blocked, LABELS.failed, PASEO_LABELS.failed, PASEO_LABELS.needsAttention, LABELS.humanReview]
-    : [LABELS.running];
+    ? [PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.failed, PASEO_LABELS.needsAttention]
+    : [PASEO_LABELS.coding];
   add.forEach((label) => args.push('--add-label', label));
   remove.forEach((label) => args.push('--remove-label', label));
   const result = runner('gh', args, { cwd: root, allowFailure: true });

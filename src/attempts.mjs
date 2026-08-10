@@ -137,7 +137,7 @@ function validateLaunch(root, issue, config) {
       && (previous.branch || previous.workspaceId || previous.agentId || previous.coderAgentId || previous.controllerPid || previous.startedAt)) {
     throw new Error(`Issue #${issue.number} already has an active automation attempt.`);
   }
-  if (listByLabel(root, LABELS.running).length >= config.maxActive) throw new Error('Maximum active issue count reached.');
+  if (listByLabel(root, PASEO_LABELS.coding).length >= config.maxActive) throw new Error('Maximum active issue count reached.');
   return dependency;
 }
 
@@ -187,7 +187,7 @@ function terminalLaunchFailure(root, issue, reason) {
   }
   const cleanup = cleanupWorkspaceIfEmpty(root, current);
   try {
-    editLabels(root, issue.number, [LABELS.failed], [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.humanReview]);
+    editLabels(root, issue.number, [PASEO_LABELS.failed], [PASEO_LABELS.coding, PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.needsAttention]);
   } catch {}
   const at = now();
   const cleanupDetail = cleanup.status === 'archived-empty'
@@ -405,7 +405,7 @@ function launch(root, issue, branchAction) {
   const started = now();
   const agentTitle = `Issue #${issue.number} Coder (attempt ${selection.attempt})`;
   const workspaceTitle = selection.branch;
-  editLabels(root, issue.number, [LABELS.running], [LABELS.ready, PASEO_LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
+  editLabels(root, issue.number, [PASEO_LABELS.coding], [PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.failed, PASEO_LABELS.needsAttention]);
   saveRun(root, issue.number, {
     issueNumber: issue.number,
     issueTitle: issue.title,
@@ -517,7 +517,7 @@ export function dispatchNextIssue(root) {
   const runtime = loadRuntime(root);
   if (!config.setupComplete) return { claimed: false, reason: 'Setup is not complete.' };
   if (!runtime.claimsEnabled) return { claimed: false, reason: 'Claims are paused.' };
-  if (listByLabel(root, LABELS.running).length >= config.maxActive) {
+  if (listByLabel(root, PASEO_LABELS.coding).length >= config.maxActive) {
     return { claimed: false, reason: 'Maximum active issue count reached.' };
   }
 
@@ -575,7 +575,7 @@ export function abandonAttempt(root, number, reason = 'Abandoned by user') {
   if (state.status === LABELS.humanReview) throw new Error('A human-review attempt cannot be abandoned.');
   if (state.coderAgentId || state.agentId) run('paseo', ['stop', String(state.coderAgentId || state.agentId)], { cwd: root, allowFailure: true });
   if (state.workspaceId) run('paseo', ['workspace', 'archive', String(state.workspaceId)], { cwd: root, allowFailure: true });
-  editLabels(root, number, [LABELS.failed], [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.humanReview]);
+  editLabels(root, number, [PASEO_LABELS.failed], [PASEO_LABELS.coding, PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.needsAttention]);
   run('gh', ['issue', 'comment', String(number), '--body', `Automation attempt ${state.attempt || 1} abandoned: ${reason}`], {
     cwd: root,
   });
@@ -596,7 +596,7 @@ export function restartIssue(root, number, { branchAction = 'keep' } = {}) {
   const state = loadRun(root, number);
   if (state?.status === LABELS.running) abandonAttempt(root, number, 'Restarted as a fresh attempt');
   else if (state?.workspaceId) run('paseo', ['workspace', 'archive', String(state.workspaceId)], { cwd: root, allowFailure: true });
-  editLabels(root, number, [LABELS.ready], [LABELS.running, LABELS.blocked, LABELS.failed, LABELS.humanReview]);
+  editLabels(root, number, [PASEO_LABELS.ready], [PASEO_LABELS.coding, PASEO_LABELS.queued, PASEO_LABELS.failed, PASEO_LABELS.needsAttention]);
   return dispatchSpecificIssue(root, number, { branchAction });
 }
 
