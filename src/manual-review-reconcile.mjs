@@ -174,13 +174,36 @@ function queueManualFix(root, managedId, review, expectedHeadSha, { now = Date.n
   return result;
 }
 
-function recordManualApproval(root, managed, expectedHeadSha) {
-  const state = loadRun(root, managed.issueNumber);
-  const already = (state?.events || []).some((event) => event.event === 'review'
+function manualApprovalEvent(state, expectedHeadSha) {
+  return (state?.events || []).some((event) => event.event === 'review'
     && event.result === 'APPROVED'
-    && event.commit === expectedHeadSha
+    && String(event.commit || '').toLowerCase() === String(expectedHeadSha || '').toLowerCase()
     && event.source === 'manual-review');
-  if (!already) {
+}
+
+function humanReviewAlreadyMarked(state, managed, expectedHeadSha) {
+  return state?.phase === 'human-review'
+    && String(state.approvedCommit || '').toLowerCase() === String(expectedHeadSha || '').toLowerCase()
+    && Number(state.prNumber) === Number(managed.pullRequestNumber);
+}
+
+function managedManualApprovalComplete(managed, expectedHeadSha) {
+  const expected = String(expectedHeadSha || '').toLowerCase();
+  return managed.reviewState === 'ready_to_merge'
+    && String(managed.lastCompletedReviewSha || '').toLowerCase() === expected
+    && managed.lastProcessedReviewRequestId === manualRequestId(managed.id, expected)
+    && !managed.activeReviewRequestId;
+}
+
+function manualApprovalSettled(state, managed, expectedHeadSha) {
+  return manualApprovalEvent(state, expectedHeadSha)
+    && humanReviewAlreadyMarked(state, managed, expectedHeadSha)
+    && managedManualApprovalComplete(managed, expectedHeadSha);
+}
+
+function recordManualApproval(root, managed, expectedHeadSha) {
+  let state = loadRun(root, managed.issueNumber);
+  if (!manualApprovalEvent(state, expectedHeadSha)) {
     recordEvent(root, managed.issueNumber, {
       event: 'review',
       result: 'APPROVED',
@@ -188,11 +211,15 @@ function recordManualApproval(root, managed, expectedHeadSha) {
       details: 'Manual GitHub review approved this exact validated commit.',
       source: 'manual-review',
     });
+    state = loadRun(root, managed.issueNumber);
   }
-  markHumanReview(root, managed.issueNumber, managed.pullRequestNumber);
+  if (!humanReviewAlreadyMarked(state, managed, expectedHeadSha)) {
+    markHumanReview(root, managed.issueNumber, managed.pullRequestNumber);
+  }
   return mutatePrReviewStore(root, (store) => {
     const record = findManaged(store, managed.id);
     if (!record) return null;
+    if (managedManualApprovalComplete(record, expectedHeadSha)) return clone(record);
     const at = nowIso();
     record.lastCompletedReviewSha = expectedHeadSha;
     record.lastProcessedReviewRequestId = manualRequestId(record.id, expectedHeadSha);
@@ -310,7 +337,12 @@ export function reconcileManualReview(root, managedId, {
     return { state: 'fix_queued', fixJob: queueManualFix(root, managed.id, outcome.review, expectedHeadSha, { now }) };
   }
   if (outcome.action === 'manual-review-complete') {
-    return { state: 'ready_to_merge', managed: recordManualApproval(root, managed, expectedHeadSha) };
+    const unchanged = manualApprovalSettled(runState, managed, expectedHeadSha);
+    return {
+      state: 'ready_to_merge',
+      managed: recordManualApproval(root, managed, expectedHeadSha),
+      ...(unchanged ? { unchanged: true } : {}),
+    };
   }
   if (outcome.action === 'merged-complete') {
     updateManualRun(root, managed.issueNumber, {
@@ -334,7 +366,7 @@ export function reconcileManualReviews(root, options = {}) {
     try {
       const outcome = reconcileManualReview(root, managed.id, options);
       result.checked += 1;
-      if (!outcome.skipped && outcome.state !== 'waiting-manual-review') result.changed += 1;
+      if (!outcome.skipped && !outcome.unchanged && outcome.state !== 'waiting-manual-review') result.changed += 1;
     } catch (error) {
       result.checked += 1;
       result.errors.push({ managedPullRequestId: managed.id, error: error.message });
