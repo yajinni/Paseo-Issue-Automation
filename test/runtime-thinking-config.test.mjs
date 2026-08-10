@@ -32,8 +32,8 @@ test('agent arguments omit --thinking when no thinking option is configured', ()
 
 test('saved coder and reviewer thinking selections are wired into their production run commands', () => {
   const attempts = readFileSync(new URL('../src/attempts.mjs', import.meta.url), 'utf8');
-  const controller = readFileSync(new URL('../src/controller-worker.mjs', import.meta.url), 'utf8');
+  const stagedReview = readFileSync(new URL('../src/controller-review-workflow.mjs', import.meta.url), 'utf8');
 
   assert.match(attempts, /thinking:\s*config\.models\.coderThinking/);
-  assert.match(controller, /config\.models\.reviewerThinking\s*\?\s*\['--thinking',\s*config\.models\.reviewerThinking\]/);
+  assert.match(stagedReview, /config\.models\.reviewerThinking\s*\?\s*\['--thinking',\s*config\.models\.reviewerThinking\]/);
 });
