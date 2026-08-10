@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -20,9 +28,25 @@ function repository(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-manual-review-'));
   execFileSync('git', ['init', '-q'], { cwd: root });
   const bin = path.join(root, 'bin');
+  const callsFile = path.join(root, 'gh-calls.log');
   mkdirSync(bin, { recursive: true });
   const gh = path.join(bin, 'gh');
-  writeFileSync(gh, '#!/usr/bin/env node\nprocess.exit(0);\n');
+  writeFileSync(gh, `#!/usr/bin/env node
+const { appendFileSync } = require('node:fs');
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify(args) + '\\n');
+if (args[0] === 'pr' && args[1] === 'view') {
+  process.stdout.write(JSON.stringify({
+    number: 11,
+    isDraft: false,
+    headRefOid: 'abcdef1234567890',
+    baseRefName: 'main',
+    statusCheckRollup: [],
+    url: 'https://example.invalid/octo/app/pull/11',
+  }));
+}
+process.exit(0);
+`);
   chmodSync(gh, 0o755);
   const previousPath = process.env.PATH;
   process.env.PATH = `${bin}${path.delimiter}${previousPath || ''}`;
@@ -31,6 +55,12 @@ function repository(t) {
     rmSync(root, { recursive: true, force: true });
   });
   return root;
+}
+
+function ghCalls(root) {
+  const file = path.join(root, 'gh-calls.log');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 
 function saveManualRun(root, headSha = 'abcdef1234567890') {
@@ -88,6 +118,22 @@ function manualChangesSnapshot(headSha = 'abcdef1234567890') {
       commitId: headSha,
       submittedAt: '2026-08-10T04:05:00Z',
       body: 'Fix the null-state regression and add a regression test.',
+    }],
+  };
+}
+
+function manualApprovedSnapshot(headSha = 'abcdef1234567890') {
+  return {
+    number: 11,
+    state: 'OPEN',
+    isDraft: false,
+    headRefOid: headSha,
+    reviews: [{
+      id: 9003,
+      state: 'APPROVED',
+      commitId: headSha,
+      submittedAt: '2026-08-10T04:06:00Z',
+      body: 'Approved.',
     }],
   };
 }
@@ -183,4 +229,42 @@ test('a completed manual fix returns the validated new head to manual review ins
   assert.equal(state.phase, 'manual-review');
   assert.equal(state.reviewExpectedHeadSha, 'fedcba9876543210');
   assert.equal(state.completedAt, null);
+});
+
+test('repeated manual approval reconciliation does not repeat GitHub side effects', (t) => {
+  const root = repository(t);
+  saveManualRun(root);
+  const managed = register(root);
+  const approved = manualApprovedSnapshot();
+
+  const first = reconcileManualReview(root, managed.id, { snapshot: approved });
+  assert.equal(first.state, 'ready_to_merge');
+  assert.equal(first.unchanged, undefined);
+
+  const callsAfterFirst = ghCalls(root);
+  assert.equal(callsAfterFirst.filter((args) => args[0] === 'issue' && args[1] === 'comment').length, 1);
+  const firstState = loadRun(root, 7);
+  assert.equal(firstState.phase, 'human-review');
+  assert.equal(firstState.approvedCommit, 'abcdef1234567890');
+  assert.equal(firstState.events.filter((event) => event.event === 'review'
+    && event.result === 'APPROVED'
+    && event.source === 'manual-review').length, 1);
+
+  const firstStore = loadPrReviewStore(root);
+  assert.equal(findManaged(firstStore, managed.id).reviewState, 'ready_to_merge');
+  assert.equal(firstStore.history.filter((entry) => entry.entityId === managed.id
+    && entry.newState === 'ready_to_merge').length, 1);
+
+  const second = reconcileManualReview(root, managed.id, { snapshot: approved });
+  assert.equal(second.state, 'ready_to_merge');
+  assert.equal(second.unchanged, true);
+  assert.deepEqual(ghCalls(root), callsAfterFirst);
+
+  const secondState = loadRun(root, 7);
+  assert.equal(secondState.events.filter((event) => event.event === 'review'
+    && event.result === 'APPROVED'
+    && event.source === 'manual-review').length, 1);
+  const secondStore = loadPrReviewStore(root);
+  assert.equal(secondStore.history.filter((entry) => entry.entityId === managed.id
+    && entry.newState === 'ready_to_merge').length, 1);
 });
