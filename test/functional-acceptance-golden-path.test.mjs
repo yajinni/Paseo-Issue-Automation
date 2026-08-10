@@ -292,7 +292,14 @@ test('functional acceptance: one eligible issue reaches exact-head human review 
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'wait'), 1);
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 1);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 1);
-  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 0);
+  const reviewerAuditComments = commands.filter((entry) => entry.command === 'gh'
+    && entry.args[0] === 'pr'
+    && entry.args[1] === 'comment');
+  assert.equal(reviewerAuditComments.length, 1);
+  assert.equal(reviewerAuditComments[0].args[2], '7');
+  assert.equal(commandOption(reviewerAuditComments[0].args, '--body').includes('## Automated Reviewer audit'), true);
+  assert.equal(commandOption(reviewerAuditComments[0].args, '--body').includes(`Commit: \`${head}\``), true);
+  assert.equal(commandOption(reviewerAuditComments[0].args, '--body').includes('Verdict: **APPROVED**'), true);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'issue' && args[1] === 'comment'), 1);
 
   const coderRun = commands.find((entry) => entry.command === 'paseo' && entry.args[0] === 'run' && entry.args.includes('--background'));
