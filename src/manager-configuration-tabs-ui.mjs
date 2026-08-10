@@ -14,6 +14,8 @@ export const MANAGER_CONFIGURATION_TABS_STYLE = String.raw`
 .manager-auto-merge-help{margin:0!important;padding:0!important;border:0!important;background:transparent!important;color:var(--paseo-muted)!important;font-size:12px!important;line-height:1.45!important}
 .manager-auto-merge-switch{position:relative;width:46px;height:26px;flex:0 0 auto}.manager-auto-merge-switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:2}.manager-auto-merge-switch input:disabled{cursor:not-allowed}.manager-auto-merge-track{position:absolute;inset:0;border:1px solid #526074;border-radius:999px;background:#202b39;transition:background .15s ease,border-color .15s ease}.manager-auto-merge-track::after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#c8d3e0;transition:transform .15s ease,background .15s ease}.manager-auto-merge-switch input:checked + .manager-auto-merge-track{background:#2f6fed;border-color:#5f8ff3}.manager-auto-merge-switch input:checked + .manager-auto-merge-track::after{transform:translateX(20px);background:#fff}.manager-auto-merge-switch input:focus-visible + .manager-auto-merge-track{outline:2px solid #8ab8ff;outline-offset:3px}.manager-auto-merge-setting[aria-disabled="true"] .manager-auto-merge-track{opacity:.55}
 .manager-model-catalog-note{grid-column:1/-1;color:var(--paseo-muted);font-size:11px;line-height:1.4;margin-top:2px}.manager-model-catalog-note.error{color:#ffaca5}
+.manager-integration-summary{display:grid;gap:14px;padding:15px;border:1px solid #334156;border-radius:11px;background:#101925}.manager-integration-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.manager-integration-state{display:flex;align-items:center;gap:9px}.manager-integration-state-dot{width:11px;height:11px;border-radius:999px;background:#718097;box-shadow:0 0 0 3px #71809722}.manager-integration-state.connected .manager-integration-state-dot{background:#55bd78;box-shadow:0 0 0 3px #55bd7822}.manager-integration-state.attention .manager-integration-state-dot{background:#e2ad45;box-shadow:0 0 0 3px #e2ad4522}.manager-integration-state.blocked .manager-integration-state-dot{background:#e06f78;box-shadow:0 0 0 3px #e06f7822}.manager-integration-state strong{display:block;font-size:15px}.manager-integration-state small{display:block;color:var(--paseo-muted);font-size:11px;margin-top:3px}.manager-integration-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.manager-integration-fact{border:1px solid #2d394b;border-radius:9px;background:#111a26;padding:10px}.manager-integration-fact span{display:block;color:var(--paseo-muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}.manager-integration-fact strong{font-size:12px;line-height:1.4;overflow-wrap:anywhere}.manager-integration-actions{display:flex;gap:8px;flex-wrap:wrap}.manager-integration-advanced{margin-top:12px;border-top:1px solid #2c3849;padding-top:12px}.manager-integration-advanced>summary{cursor:pointer;color:#aebed1;font-weight:650;font-size:12px}.manager-integration-advanced-body{display:grid;gap:12px;margin-top:12px}.manager-integration-advanced-body>p{margin:0;color:var(--paseo-muted);line-height:1.45}.manager-integration-advanced-body .facts{margin:0}.manager-integration-advanced-body .actions{margin-top:0!important}
+@media(max-width:820px){.manager-integration-facts{grid-template-columns:1fr}.manager-integration-head{display:block}.manager-integration-actions{margin-top:10px}}
 @media(max-width:720px){.manager-config-tabs{margin-inline:-2px}.manager-config-fields .manager-auto-merge-setting{grid-template-columns:minmax(0,1fr) auto!important;padding:13px!important}}
 `;
 
@@ -261,6 +263,119 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
     });
   }
 
+  function integrationCard() {
+    return document.getElementById('controller-mode-facts')?.closest('section.card') || null;
+  }
+
+  function simplifyRepositoryIntegration() {
+    const card = integrationCard();
+    if (!card || card.dataset.managerSimpleIntegration === 'true') return card;
+    card.dataset.managerSimpleIntegration = 'true';
+    const heading = card.querySelector('h2');
+    if (heading) heading.textContent = 'Repository Integration';
+
+    const existing = [...card.children].filter((child) => child !== heading);
+    const summary = document.createElement('div');
+    summary.className = 'manager-integration-summary';
+    summary.innerHTML = '<div class="manager-integration-head"><div class="manager-integration-state" id="manager-integration-state"><span class="manager-integration-state-dot"></span><div><strong>Checking integration…</strong><small>Reading the latest manager state.</small></div></div></div><div class="manager-integration-facts"><div class="manager-integration-fact"><span>Mode</span><strong id="manager-integration-mode">Unknown</strong></div><div class="manager-integration-fact"><span>Managed components</span><strong id="manager-integration-components">Checking…</strong></div><div class="manager-integration-fact"><span>Last checked</span><strong id="manager-integration-checked">—</strong></div></div><div class="manager-integration-actions"><button type="button" class="secondary" id="manager-integration-recheck">Recheck</button><button type="button" class="secondary" id="manager-integration-repair" hidden>Repair</button><button type="button" class="warning" id="manager-integration-migration-action" hidden>Migration action</button></div>';
+
+    const advanced = document.createElement('details');
+    advanced.className = 'manager-integration-advanced';
+    const advancedSummary = document.createElement('summary');
+    advancedSummary.textContent = 'Advanced / Migration history';
+    const body = document.createElement('div');
+    body.className = 'manager-integration-advanced-body';
+    for (const child of existing) body.append(child);
+    advanced.append(advancedSummary, body);
+    card.append(summary, advanced);
+
+    document.getElementById('manager-integration-recheck')?.addEventListener('click', () => document.getElementById('refresh-button')?.click());
+    document.getElementById('manager-integration-repair')?.addEventListener('click', () => document.getElementById('repair-external-controller')?.click());
+    document.getElementById('manager-integration-migration-action')?.addEventListener('click', (event) => {
+      const targetId = event.currentTarget?.dataset.targetId;
+      if (targetId) document.getElementById(targetId)?.click();
+    });
+    return card;
+  }
+
+  function integrationComponents(setup = {}) {
+    const components = [];
+    if (setup.issueTemplateManaged === true) components.push('Issue template');
+    if (Number(setup.managedLabelCount || 0) > 0) components.push(String(setup.managedLabelCount) + ' managed labels');
+    if (setup.workspaceId) components.push('Paseo workspace');
+    return components.length ? components.join(' · ') : setup.externalController ? 'Managed repository components' : 'Not installed';
+  }
+
+  function renderRepositoryIntegration(data) {
+    if (!data) return;
+    simplifyRepositoryIntegration();
+    const setup = data.setup || {};
+    const capabilities = data.capabilities || {};
+    const state = document.getElementById('manager-integration-state');
+    const mode = document.getElementById('manager-integration-mode');
+    const components = document.getElementById('manager-integration-components');
+    const checked = document.getElementById('manager-integration-checked');
+    const repair = document.getElementById('manager-integration-repair');
+    const migrationAction = document.getElementById('manager-integration-migration-action');
+    if (!state || !mode || !components || !checked || !repair || !migrationAction) return;
+
+    const external = setup.externalController === true || setup.controllerMode === 'external-manager';
+    const embedded = setup.embeddedController === true || setup.controllerMode === 'embedded-repository';
+    const migrationPending = setup.migrationPending === true;
+    const adoptionReady = capabilities.migrationAdoption === true;
+    const pendingFiles = setup.repositoryChanges?.expectedFiles || [];
+    const syncError = setup.migration?.syncError || null;
+    let tone = 'blocked';
+    let title = 'Setup required';
+    let detail = 'This repository is not ready for the standalone manager.';
+
+    if (migrationPending) {
+      tone = syncError ? 'blocked' : 'attention';
+      title = syncError ? 'Migration needs attention' : 'Migration in progress';
+      detail = syncError || 'A migration PR is pending or waiting for local synchronization.';
+    } else if (embedded && adoptionReady) {
+      tone = 'attention';
+      title = 'Migration ready to finalize';
+      detail = 'Repository files already match standalone-manager mode; finalize the local controller state.';
+    } else if (embedded) {
+      tone = 'attention';
+      title = 'Migration required';
+      detail = 'This repository still uses the legacy embedded Paseo installation.';
+    } else if (external && setup.complete === true && pendingFiles.length === 0) {
+      tone = 'connected';
+      title = 'Connected';
+      detail = 'This repository is configured for the Paseo standalone manager.';
+    } else if (external) {
+      tone = 'attention';
+      title = 'Integration needs attention';
+      detail = pendingFiles.length ? 'Managed repository files need to be reconciled.' : 'Standalone-manager setup is incomplete.';
+    }
+
+    state.className = 'manager-integration-state ' + tone;
+    state.querySelector('strong').textContent = title;
+    state.querySelector('small').textContent = detail;
+    mode.textContent = external ? 'Standalone manager' : embedded ? 'Legacy embedded installation' : 'Not installed';
+    components.textContent = integrationComponents(setup);
+    checked.textContent = new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+    repair.hidden = !(external && capabilities.externalRepair === true);
+    repair.disabled = document.getElementById('repair-external-controller')?.disabled === true;
+
+    let migrationTarget = null;
+    let migrationLabel = '';
+    if (capabilities.migrationReconciliation === true && migrationPending) {
+      migrationTarget = 'reconcile-controller-migration'; migrationLabel = 'Reconcile migration';
+    } else if (capabilities.migrationAdoption === true) {
+      migrationTarget = 'finalize-existing-migration'; migrationLabel = 'Finalize migration';
+    } else if (capabilities.embeddedMigration === true || embedded) {
+      migrationTarget = 'migrate-embedded-controller'; migrationLabel = 'Migrate to standalone manager';
+    }
+    migrationAction.hidden = !migrationTarget;
+    migrationAction.dataset.targetId = migrationTarget || '';
+    migrationAction.textContent = migrationLabel || 'Migration action';
+    migrationAction.disabled = migrationTarget ? document.getElementById(migrationTarget)?.disabled === true : true;
+  }
+
   function showStep(step, { focus = false } = {}) {
     if (!STEPS.some(([id]) => id === step)) step = 'paseo';
     activeStep = step;
@@ -286,6 +401,9 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
       }
     }
     if (step === 'harness') loadModelCatalog(false);
+    if (step === 'repository') {
+      try { if (typeof currentStatus !== 'undefined' && currentStatus) renderRepositoryIntegration(currentStatus); } catch {}
+    }
     document.dispatchEvent(new CustomEvent('paseo:configuration-tab', { detail: { step } }));
     if (focus) document.querySelector('.manager-config-tab[aria-selected="true"]')?.focus();
   }
@@ -342,6 +460,7 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
 
     moveViewCards(integration, configuration, 'repository');
     moveViewCards(maintenance, configuration, 'readiness');
+    simplifyRepositoryIntegration();
     patchOverview();
     showStep(activeStep);
     redirectLegacyViews();
@@ -366,7 +485,10 @@ export const MANAGER_CONFIGURATION_TABS_SCRIPT = String.raw`
   }
 
   if (typeof window.addManagerStatusListener === 'function') {
-    window.addManagerStatusListener(() => syncAutoMergeSetting());
+    window.addManagerStatusListener((data) => {
+      syncAutoMergeSetting();
+      renderRepositoryIntegration(data);
+    });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, { once: true });
   else build();
