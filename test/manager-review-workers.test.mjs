@@ -23,11 +23,15 @@ function fakeTimers() {
   };
 }
 
+const noManual = () => ({ checked: 0, changed: 0, errors: [] });
+
 test('PR review workers start immediately and defer repository recovery', () => {
   const timers = fakeTimers();
   const recovered = [];
+  const manual = [];
   const pool = createManagerReviewWorkerPool({
     recover: (root) => { recovered.push(root); return { recovered: root }; },
+    reconcileManual: (root) => { manual.push(root); return { checked: 0 }; },
     loadStore: () => ({
       config: { reconciliation: { enabled: true, activeIntervalMs: 45_000, idleIntervalMs: 300_000 } },
       managedPullRequests: [],
@@ -54,6 +58,7 @@ test('PR review workers start immediately and defer repository recovery', () => 
 
   for (const timer of timers.timeouts.filter((entry) => entry.milliseconds === 0)) timer.callback();
   assert.deepEqual(recovered, ['/repo-a', '/repo-b']);
+  assert.deepEqual(manual, ['/repo-a', '/repo-b']);
   assert.equal(pool.status('repo-a').startupRecoveryPending, false);
   assert.equal(pool.status('repo-a').startupRecovery.ok, true);
 });
@@ -63,6 +68,7 @@ test('review ticks wait until deferred startup recovery has completed', () => {
   const reviewRoots = [];
   const pool = createManagerReviewWorkerPool({
     recover: () => ({ recovered: true }),
+    reconcileManual: noManual,
     reviewTick: (root) => { reviewRoots.push(root); return { started: false }; },
     loadStore: () => ({ config: { reconciliation: { enabled: false } }, managedPullRequests: [] }),
     reconciliationDelayForStore: () => 300_000,
@@ -83,6 +89,7 @@ test('review scheduler and reconciliation failures remain repository isolated', 
   const timers = fakeTimers();
   const reviewRoots = [];
   const reconcileRoots = [];
+  const manualRoots = [];
   const pool = createManagerReviewWorkerPool({
     reviewTick: (root) => {
       reviewRoots.push(root);
@@ -93,6 +100,10 @@ test('review scheduler and reconciliation failures remain repository isolated', 
       reconcileRoots.push(root);
       if (root === '/repo-b') throw new Error('reconcile failed');
       return { checked: 1 };
+    },
+    reconcileManual: (root) => {
+      manualRoots.push(root);
+      return { checked: 0 };
     },
     recover: () => ({ recovered: true }),
     loadStore: () => ({
@@ -115,12 +126,70 @@ test('review scheduler and reconciliation failures remain repository isolated', 
   pool.reconcileTick('repo-b');
   assert.deepEqual(reviewRoots, ['/repo-a', '/repo-b']);
   assert.deepEqual(reconcileRoots, ['/repo-a', '/repo-b']);
+  assert.deepEqual(manualRoots, ['/repo-a', '/repo-b', '/repo-a', '/repo-b']);
   assert.equal(pool.status('repo-a').lastReviewError, null);
   assert.equal(pool.status('repo-b').lastReviewError, 'review failed');
   assert.equal(pool.status('repo-a').lastReconciliationError, null);
-  assert.equal(pool.status('repo-b').lastReconciliationError, 'reconcile failed');
+  assert.equal(pool.status('repo-b').lastReconciliationError, 'managed: reconcile failed');
+  assert.deepEqual(pool.status('repo-b').lastReconciliationResult, {
+    managed: null,
+    manual: { checked: 0 },
+  });
   assert.equal(pool.status('repo-a').running, true);
   assert.equal(pool.status('repo-b').running, true);
+});
+
+test('manual reconciliation failure does not suppress managed reconciliation', () => {
+  const timers = fakeTimers();
+  const pool = createManagerReviewWorkerPool({
+    recover: () => ({ recovered: true }),
+    reconcile: () => ({ checked: 2 }),
+    reconcileManual: () => { throw new Error('manual failed'); },
+    loadStore: () => ({
+      config: { reconciliation: { enabled: true } },
+      managedPullRequests: [],
+    }),
+    reconciliationDelayForStore: () => 45_000,
+    setIntervalFn: timers.setIntervalFn,
+    clearIntervalFn: timers.clearIntervalFn,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  pool.start({ id: 'repo-a', name: 'A', path: '/repo-a' });
+  timers.timeouts.find((timer) => timer.milliseconds === 0).callback();
+  pool.reconcileTick('repo-a');
+  assert.deepEqual(pool.status('repo-a').lastReconciliationResult, {
+    managed: { checked: 2 },
+    manual: null,
+  });
+  assert.equal(pool.status('repo-a').lastReconciliationError, 'manual: manual failed');
+});
+
+test('reconciliation includes manual review maintenance alongside managed review maintenance', () => {
+  const timers = fakeTimers();
+  const calls = [];
+  const pool = createManagerReviewWorkerPool({
+    recover: () => ({}),
+    reconcile: (root) => { calls.push(`managed:${root}`); return { checked: 2 }; },
+    reconcileManual: (root) => { calls.push(`manual:${root}`); return { checked: 1, changed: 1 }; },
+    loadStore: () => ({
+      config: { reconciliation: { enabled: true } },
+      managedPullRequests: [{ reviewState: 'paused' }],
+    }),
+    reconciliationDelayForStore: () => 45_000,
+    setIntervalFn: timers.setIntervalFn,
+    clearIntervalFn: timers.clearIntervalFn,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  pool.start({ id: 'repo-a', name: 'A', path: '/repo-a' });
+  timers.timeouts.find((timer) => timer.milliseconds === 0).callback();
+  pool.reconcileTick('repo-a');
+  assert.deepEqual(calls.slice(-2), ['managed:/repo-a', 'manual:/repo-a']);
+  assert.deepEqual(pool.status('repo-a').lastReconciliationResult, {
+    managed: { checked: 2 },
+    manual: { checked: 1, changed: 1 },
+  });
 });
 
 test('reconciliation uses repository-specific dynamic delays and reschedules', () => {
@@ -129,6 +198,7 @@ test('reconciliation uses repository-specific dynamic delays and reschedules', (
   const pool = createManagerReviewWorkerPool({
     recover: () => ({}),
     reconcile: () => ({ changed: 0 }),
+    reconcileManual: noManual,
     loadStore: () => ({
       config: { reconciliation: { enabled: true } },
       managedPullRequests: active ? [{ reviewState: 'queued' }] : [],
@@ -153,6 +223,7 @@ test('stopping and closing PR review workers clears review, recovery, and reconc
   const timers = fakeTimers();
   const pool = createManagerReviewWorkerPool({
     recover: () => ({}),
+    reconcileManual: noManual,
     loadStore: () => ({ config: { reconciliation: { enabled: false } }, managedPullRequests: [] }),
     reconciliationDelayForStore: () => 300_000,
     setIntervalFn: timers.setIntervalFn,

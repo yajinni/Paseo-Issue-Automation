@@ -82,7 +82,8 @@ function requireRun(root, issueNumber) {
 
 export function recordEvent(root, issueNumber, event) {
   const state = requireRun(root, issueNumber);
-  if (event.event === 'review') {
+  const stagedReviewEvidence = ['harness-review-compat', 'manual-review'].includes(event.source);
+  if (event.event === 'review' && !stagedReviewEvidence) {
     const completedRounds = (state.events || []).filter((item) => item.event === 'review').length;
     const maximum = loadConfig(root).maxReviewRounds;
     if (completedRounds >= maximum) throw new Error(`Maximum review rounds (${maximum}) reached.`);

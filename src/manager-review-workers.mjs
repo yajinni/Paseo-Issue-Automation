@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { reconcileManualReviews } from './manual-review-reconcile.mjs';
 import { tickReviewScheduler } from './pr-review-scheduler.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { reconciliationDelay } from './reconciliation-timing.mjs';
@@ -35,9 +36,29 @@ function snapshot(worker) {
   };
 }
 
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isolatedStep(name, operation, root) {
+  try {
+    return { name, ok: true, result: operation(root), error: null };
+  } catch (error) {
+    return { name, ok: false, result: null, error: errorMessage(error) };
+  }
+}
+
+function combinedStepError(steps) {
+  const failures = steps.filter((step) => !step.ok);
+  return failures.length
+    ? failures.map((step) => `${step.name}: ${step.error}`).join('; ')
+    : null;
+}
+
 export function createManagerReviewWorkerPool({
   reviewTick = tickReviewScheduler,
   reconcile = reconcileManagedPullRequestsWithWebFullReview,
+  reconcileManual = reconcileManualReviews,
   recover = recoverPrReviewStateWithWebFullReview,
   loadStore = loadPrReviewStore,
   reconciliationDelayForStore = reconciliationDelay,
@@ -59,7 +80,7 @@ export function createManagerReviewWorkerPool({
       worker.lastReviewError = null;
     } catch (error) {
       worker.lastReviewResult = null;
-      worker.lastReviewError = error instanceof Error ? error.message : String(error);
+      worker.lastReviewError = errorMessage(error);
     } finally {
       worker.reviewTicking = false;
     }
@@ -73,9 +94,19 @@ export function createManagerReviewWorkerPool({
     worker.startupRecoveryPending = false;
     worker.startupRecovering = true;
     try {
-      worker.startupRecovery = { ok: true, result: recover(worker.root) };
+      const managed = isolatedStep('managed', recover, worker.root);
+      const manual = isolatedStep('manual', reconcileManual, worker.root);
+      const error = combinedStepError([managed, manual]);
+      worker.startupRecovery = {
+        ok: !error,
+        result: {
+          managed: managed.result,
+          manual: manual.result,
+        },
+        ...(error ? { error } : {}),
+      };
     } catch (error) {
-      worker.startupRecovery = { ok: false, error: error instanceof Error ? error.message : String(error) };
+      worker.startupRecovery = { ok: false, error: errorMessage(error) };
     } finally {
       worker.startupRecovering = false;
     }
@@ -97,7 +128,7 @@ export function createManagerReviewWorkerPool({
     try {
       delay = reconciliationDelayForStore(loadStore(worker.root));
     } catch (error) {
-      worker.lastReconciliationError = error instanceof Error ? error.message : String(error);
+      worker.lastReconciliationError = errorMessage(error);
     }
     worker.nextReconciliationDelayMs = delay;
     worker.reconciliationTimer = setTimeoutFn(() => reconcileTick(worker.repositoryId), delay);
@@ -111,13 +142,21 @@ export function createManagerReviewWorkerPool({
     worker.lastReconciliationAt = now().toISOString();
     try {
       const store = loadStore(worker.root);
-      worker.lastReconciliationResult = store.config.reconciliation.enabled
-        ? reconcile(worker.root)
-        : { skipped: true, reason: 'Repository reconciliation is disabled.' };
-      worker.lastReconciliationError = null;
+      if (store.config.reconciliation.enabled) {
+        const managed = isolatedStep('managed', reconcile, worker.root);
+        const manual = isolatedStep('manual', reconcileManual, worker.root);
+        worker.lastReconciliationResult = {
+          managed: managed.result,
+          manual: manual.result,
+        };
+        worker.lastReconciliationError = combinedStepError([managed, manual]);
+      } else {
+        worker.lastReconciliationResult = { skipped: true, reason: 'Repository reconciliation is disabled.' };
+        worker.lastReconciliationError = null;
+      }
     } catch (error) {
       worker.lastReconciliationResult = null;
-      worker.lastReconciliationError = error instanceof Error ? error.message : String(error);
+      worker.lastReconciliationError = errorMessage(error);
     } finally {
       worker.reconciling = false;
       if (worker.running) scheduleReconciliation(worker);

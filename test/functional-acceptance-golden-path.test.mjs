@@ -141,7 +141,23 @@ if (args[0] === 'wait') {
   }
   process.exit(0);
 }
-if (args[0] === 'run') { output({ approved: true, findings: 'Golden-path fixture approved.' }); process.exit(0); }
+if (args[0] === 'run') {
+  const workspace = JSON.parse(readFileSync(workspaceFile, 'utf8'));
+  const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace.cwd, encoding: 'utf8' }).trim();
+  output({
+    repository: 'owner/repo',
+    pullRequestNumber: 7,
+    issueNumber: 101,
+    headSha,
+    stage: 'full',
+    round: 1,
+    promptVersion: 1,
+    result: 'pass',
+    summary: 'Golden-path fixture approved the exact staged Heavy review.',
+    findings: [],
+  });
+  process.exit(0);
+}
 if (args[0] === 'send' || args[0] === 'stop') process.exit(0);
 if (args[0] === 'ls') { output([]); process.exit(0); }
 if (args[0] === 'workspace' && args[1] === 'archive') process.exit(0);
@@ -227,7 +243,7 @@ function commandOption(args, name) {
   return index >= 0 ? args[index + 1] : null;
 }
 
-test('functional acceptance: one eligible issue reaches exact-head human review through the real controller', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
+test('functional acceptance: one eligible issue reaches exact-head human review through the real staged controller', { skip: process.platform === 'win32', timeout: 30000 }, async (t) => {
   const { fixture, root } = setupRepository(t);
 
   const dispatch = dispatchSpecificIssue(root, 101);
@@ -258,12 +274,15 @@ test('functional acceptance: one eligible issue reaches exact-head human review 
   assert.equal(git(worktree, ['status', '--porcelain=v1', '--untracked-files=all']), '');
 
   const validation = state.events.find((event) => event.event === 'validation-summary' && event.result === 'PASS');
-  const review = state.events.find((event) => event.event === 'review' && event.result === 'APPROVED');
+  const stagedReview = state.events.find((event) => event.event === 'harness-review' && event.stage === 'full' && event.result === 'pass');
+  const compatibilityApproval = state.events.find((event) => event.event === 'review' && event.result === 'APPROVED');
   assert.equal(validation?.commit, head);
-  assert.equal(review?.commit, head);
+  assert.equal(stagedReview?.headSha, head);
+  assert.equal(stagedReview?.round, 1);
+  assert.equal(compatibilityApproval?.commit, head);
 
   const activityTypes = new Set((state.activity || []).map((entry) => entry.type));
-  for (const expected of ['workspace-created', 'workspace-verified', 'agent-started', 'controller-started', 'controller-validation-recorded', 'review-started', 'review-audit-posted']) {
+  for (const expected of ['workspace-created', 'workspace-verified', 'agent-started', 'controller-started', 'controller-validation-recorded', 'review-started']) {
     assert.equal(activityTypes.has(expected), true, `missing activity ${expected}`);
   }
 
@@ -273,7 +292,14 @@ test('functional acceptance: one eligible issue reaches exact-head human review 
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'wait'), 1);
   assert.equal(countCommands(commands, 'paseo', (args) => args[0] === 'run' && !args.includes('--background')), 1);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'create'), 1);
-  assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'pr' && args[1] === 'comment'), 1);
+  const reviewerAuditComments = commands.filter((entry) => entry.command === 'gh'
+    && entry.args[0] === 'pr'
+    && entry.args[1] === 'comment');
+  assert.equal(reviewerAuditComments.length, 1);
+  assert.equal(reviewerAuditComments[0].args[2], '7');
+  assert.equal(commandOption(reviewerAuditComments[0].args, '--body').includes('## Automated Reviewer audit'), true);
+  assert.equal(commandOption(reviewerAuditComments[0].args, '--body').includes(`Commit: \`${head}\``), true);
+  assert.equal(commandOption(reviewerAuditComments[0].args, '--body').includes('Verdict: **APPROVED**'), true);
   assert.equal(countCommands(commands, 'gh', (args) => args[0] === 'issue' && args[1] === 'comment'), 1);
 
   const coderRun = commands.find((entry) => entry.command === 'paseo' && entry.args[0] === 'run' && entry.args.includes('--background'));
@@ -282,6 +308,7 @@ test('functional acceptance: one eligible issue reaches exact-head human review 
   assert.equal(commandOption(coderRun.args, '--thinking'), 'medium');
   assert.equal(commandOption(reviewerRun.args, '--provider'), 'fixture/reviewer');
   assert.equal(commandOption(reviewerRun.args, '--thinking'), 'high');
+  assert.match(reviewerRun.args.at(-1), /This is a FULL review/);
 
   const issueEdits = commands.filter((entry) => entry.command === 'gh' && entry.args[0] === 'issue' && entry.args[1] === 'edit');
   assert.equal(issueEdits.some((entry) => entry.args.includes('--add-label') && entry.args.includes('agent-running')), true);

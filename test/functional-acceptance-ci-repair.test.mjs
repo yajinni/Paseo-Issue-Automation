@@ -163,7 +163,25 @@ if (args[0] === 'wait') {
   process.exit(0);
 }
 if (args[0] === 'send') { writeFileSync(path.join(fixture, 'ci-repair-pending'), 'repair\\n'); process.exit(0); }
-if (args[0] === 'run') { output({ approved: true, findings: 'Independent reviewer approved this exact head.' }); process.exit(0); }
+if (args[0] === 'run') {
+  const countFile = path.join(fixture, 'review-count');
+  const count = existsSync(countFile) ? Number(readFileSync(countFile, 'utf8')) : 0;
+  writeFileSync(countFile, String(count + 1));
+  const pr = JSON.parse(readFileSync(prFile, 'utf8'));
+  output({
+    repository: 'owner/repo',
+    pullRequestNumber: 10,
+    issueNumber: 104,
+    headSha: pr.headRefOid,
+    stage: 'full',
+    round: count + 1,
+    promptVersion: 1,
+    result: 'pass',
+    summary: 'Independent staged reviewer approved this exact head.',
+    findings: [],
+  });
+  process.exit(0);
+}
 if (args[0] === 'stop') process.exit(0);
 if (args[0] === 'ls') { output([]); process.exit(0); }
 if (args[0] === 'workspace' && args[1] === 'archive') process.exit(0);

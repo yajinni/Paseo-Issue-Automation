@@ -2,11 +2,14 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { recordEvent } from './automation.mjs';
 import { appendControllerLog } from './controller-log.mjs';
+import { enterManualReview } from './manual-review-lifecycle.mjs';
 import { appendHistory, findFixJob, findManaged, loadPrReviewStore, mutatePrReviewStore, nowIso, transitionManaged } from './pr-review-store.mjs';
 import { enqueueReviewInStore } from './pr-review-queue.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
 import { agentCommandTimeoutMs, run } from './process.mjs';
-import { loadConfig, loadRun } from './state.mjs';
+import { loadConfig, loadRun, saveRun } from './state.mjs';
+
+const MANUAL_REVIEW_PREFIX = 'manual-review:';
 
 function safeFixLog(root, input) {
   try { return appendControllerLog(root, { category: 'pr-reviews', source: 'automation', ...input }); }
@@ -14,6 +17,14 @@ function safeFixLog(root, input) {
     console.error(JSON.stringify({ subsystem: 'controller-log', error: error.message }));
     return null;
   }
+}
+
+function manualReviewFix(job) {
+  return String(job?.reviewRequestId || '').startsWith(MANUAL_REVIEW_PREFIX);
+}
+
+function manualRequestId(managedId, headSha) {
+  return `${MANUAL_REVIEW_PREFIX}${managedId}:${String(headSha || '').toLowerCase()}`;
 }
 
 function latestPassingValidation(state, commit) {
@@ -95,6 +106,27 @@ export function validateFixedHead(root, managed, job, pr, {
   return { newHeadSha, validation };
 }
 
+function updateManualRunAfterFix(root, managed, newHeadSha) {
+  const state = loadRun(root, managed.issueNumber);
+  if (!state) throw new Error(`No automation state exists for issue #${managed.issueNumber}.`);
+  const at = nowIso();
+  return saveRun(root, managed.issueNumber, {
+    ...state,
+    phase: 'manual-review',
+    reviewRuntimeStage: 'full-manual',
+    reviewExpectedHeadSha: newHeadSha,
+    reason: null,
+    completedAt: null,
+    updatedAt: at,
+    heartbeatAt: at,
+    activity: [...(state.activity || []), {
+      type: 'manual-review-requeued-after-fix',
+      at,
+      details: `Validated repaired head ${newHeadSha} was returned to manual review on the same PR.`,
+    }],
+  });
+}
+
 export function completeFixJob(root, fixJobId, {
   waitForAgent = true,
   snapshot = null,
@@ -106,6 +138,7 @@ export function completeFixJob(root, fixJobId, {
   if (!job) throw new Error(`Fix job ${fixJobId} was not found.`);
   const managed = findManaged(initial, job.managedPullRequestId);
   if (!managed) throw new Error(`Managed PR ${job.managedPullRequestId} was not found.`);
+  const returnsToManualReview = manualReviewFix(job);
   safeFixLog(root, {
     action: 'run-pr-fix',
     status: 'started',
@@ -117,6 +150,7 @@ export function completeFixJob(root, fixJobId, {
       issueNumber: managed.issueNumber,
       reviewedHeadSha: job.reviewedHeadSha,
       coderAgentId: job.coderAgentId,
+      returnToManualReview: returnsToManualReview,
     },
   });
   if (waitForAgent) {
@@ -143,21 +177,53 @@ export function completeFixJob(root, fixJobId, {
     nextJob.lastError = null;
     record.currentHeadSha = newHeadSha;
     record.reviewRound += 1;
-    enqueueReviewInStore(store, record, { headSha: newHeadSha, now: Date.now() });
+    if (returnsToManualReview) {
+      record.queuePosition = null;
+      record.activeReviewRequestId = manualRequestId(record.id, newHeadSha);
+      transitionManaged(store, record, 'paused', {
+        reason: `Manual-review repair produced validated exact head ${newHeadSha}; return to manual review.`,
+        actor: 'fix-worker',
+        sha: newHeadSha,
+        at,
+      });
+    } else {
+      enqueueReviewInStore(store, record, { headSha: newHeadSha, now: Date.now() });
+    }
     appendHistory(store, {
       entityType: 'fix_job', entityId: nextJob.id, previousState: 'fixing', newState: 'completed',
-      reason: `Fixes pushed and validated new head ${newHeadSha}.`, actor: 'fix-worker', sha: newHeadSha, timestamp: at,
+      reason: returnsToManualReview
+        ? `Manual-review fixes pushed and validated new head ${newHeadSha}.`
+        : `Fixes pushed and validated new head ${newHeadSha}.`,
+      actor: 'fix-worker', sha: newHeadSha, timestamp: at,
     });
-    return { fixJobId: nextJob.id, newHeadSha, reviewRound: record.reviewRound };
+    return { fixJobId: nextJob.id, newHeadSha, reviewRound: record.reviewRound, returnToManualReview: returnsToManualReview };
   });
-  labelWriter(root, managed.pullRequestNumber, {
-    add: [PR_REVIEW_LABELS.queued],
-    remove: [PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.failed],
-  });
+
+  if (returnsToManualReview) {
+    enterManualReview(root, {
+      pullRequestNumber: managed.pullRequestNumber,
+      headSha: newHeadSha,
+      validationSummary: validated.validation?.details || `Validation passed for exact repaired head ${newHeadSha}.`,
+      quickFindings: [],
+      quickExhausted: false,
+      isDraft: pr.isDraft === true,
+    });
+    updateManualRunAfterFix(root, managed, newHeadSha);
+    labelWriter(root, managed.pullRequestNumber, {
+      remove: [PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.failed, PR_REVIEW_LABELS.queued],
+    });
+  } else {
+    labelWriter(root, managed.pullRequestNumber, {
+      add: [PR_REVIEW_LABELS.queued],
+      remove: [PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.failed],
+    });
+  }
   safeFixLog(root, {
     action: 'run-pr-fix',
     status: 'success',
-    message: `PR fix job ${job.id} completed and queued a new review for PR #${managed.pullRequestNumber}.`,
+    message: returnsToManualReview
+      ? `PR fix job ${job.id} completed and returned PR #${managed.pullRequestNumber} to manual review.`
+      : `PR fix job ${job.id} completed and queued a new review for PR #${managed.pullRequestNumber}.`,
     details: {
       fixJobId: job.id,
       managedPullRequestId: managed.id,
@@ -165,6 +231,7 @@ export function completeFixJob(root, fixJobId, {
       issueNumber: managed.issueNumber,
       newHeadSha,
       reviewRound: result.reviewRound,
+      returnToManualReview: returnsToManualReview,
     },
   });
   return result;

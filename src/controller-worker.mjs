@@ -1,18 +1,20 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
-  REVIEW_OUTPUT_SCHEMA,
   buildBaseUpdatePrompt,
   buildCompletionRecoveryPrompt,
   buildRepairPrompt,
-  buildReviewerPrompt,
 } from './controller-prompts.mjs';
+import {
+  enterConfiguredQuickHandoff,
+  markReviewNeedsAttention,
+  reviewRepairInstructions,
+  runConfiguredHarnessReview,
+} from './controller-review-workflow.mjs';
 import { markHumanReview, recordEvent, terminalState } from './automation.mjs';
 import { inspectBaseFreshness } from './base-freshness.mjs';
 import { currentPr, ensureDraftPr } from './controller-draft-pr.mjs';
-import { postReviewerAuditComment } from './reviewer-audit.mjs';
-import { handoffValidatedPullRequest, prReviewAutomationEnabled } from './pr-review-handoff.mjs';
 import { appendIssueLifecycle, loadConfig, loadRun, saveRun } from './state.mjs';
-import { agentCommandTimeoutMs, run, runJson } from './process.mjs';
+import { agentCommandTimeoutMs, run } from './process.mjs';
 
 const CHECK_POLL_MS = 15_000;
 const MAX_CHECK_POLLS = 120;
@@ -160,53 +162,6 @@ function requireValidatedPrWithRecovery(root, issueNumber, recovery) {
   }
 }
 
-function runReviewer(root, issueNumber, snapshot, reviewRound) {
-  const config = loadConfig(root);
-  const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
-  const issue = runJson('gh', [
-    'issue', 'view', String(issueNumber), '--json', 'number,title,body,url,comments,blockedBy,blocking',
-  ], { cwd: root });
-  if (!repository || !issue) throw new Error('Could not load repository or issue context for review.');
-  updateState(root, issueNumber, { phase: 'reviewing', prNumber: snapshot.pr.number, prUrl: snapshot.pr.url }, {
-    type: 'review-started',
-    details: `Fresh review for ${snapshot.head}.`,
-  });
-  const verdict = runJson('paseo', [
-    'run', '--provider', config.models.reviewer,
-    ...(config.models.reviewerThinking ? ['--thinking', config.models.reviewerThinking] : []),
-    '--workspace', String(snapshot.state.workspaceId),
-    '--title', `Issue #${issueNumber} Reviewer`,
-    '--output-schema', REVIEW_OUTPUT_SCHEMA,
-    buildReviewerPrompt({
-      repository,
-      issue,
-      branch: snapshot.state.branch,
-      commit: snapshot.head,
-      config,
-    }),
-  ], { cwd: root, timeoutMs: agentCommandTimeoutMs() });
-  if (!verdict || typeof verdict.approved !== 'boolean') throw new Error('Reviewer did not return the required structured verdict.');
-  recordEvent(root, issueNumber, {
-    event: 'review',
-    result: verdict.approved ? 'APPROVED' : 'CHANGES_REQUIRED',
-    commit: snapshot.head,
-    details: String(verdict.findings || ''),
-  });
-  const audit = postReviewerAuditComment(root, {
-    issueNumber,
-    prNumber: snapshot.pr.number,
-    commit: snapshot.head,
-    round: reviewRound,
-    approved: verdict.approved,
-    findings: verdict.findings,
-  });
-  updateState(root, issueNumber, {}, {
-    type: 'review-audit-posted',
-    details: `Posted ${audit.verdict} for ${audit.commit} to PR #${audit.prNumber} (round ${audit.round}).`,
-  });
-  return verdict;
-}
-
 function branchContainsLatestBase(root, issueNumber, state, baseBranch) {
   const freshness = inspectBaseFreshness(root, state, baseBranch);
   appendIssueLifecycle(root, issueNumber, {
@@ -254,30 +209,18 @@ function checkFailureDetails(checks) {
   }).join('\n');
 }
 
-function handoffToSerialReview(root, issueNumber, snapshot) {
-  const repository = runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
-  const issue = runJson('gh', [
-    'issue', 'view', String(issueNumber), '--json', 'number,title,body,url,comments,blockedBy,blocking',
-  ], { cwd: root });
-  if (!repository || !issue) throw new Error('Could not load repository or issue context for PR-review handoff.');
-  return handoffValidatedPullRequest(root, {
-    repository,
-    issue,
-    state: snapshot.state,
-    pr: snapshot.pr,
-    headSha: snapshot.head,
-  });
-}
-
 async function execute(root, issueNumber) {
   const config = loadConfig(root);
   let repairCycles = 0;
-  let completedReviews = 0;
   const completionRecovery = { attempts: 0 };
+  const maximumRepairCycles = Math.max(
+    Number(config.review?.quickMaxRounds || 0),
+    Number(config.review?.fullMaxRounds || config.maxReviewRounds || 0),
+  ) + 4;
 
   waitForCoder(root, loadRun(root, issueNumber));
 
-  while (repairCycles <= config.maxReviewRounds + 4) {
+  while (repairCycles <= maximumRepairCycles) {
     const snapshot = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
     if (snapshot.terminal) return;
 
@@ -291,21 +234,28 @@ async function execute(root, issueNumber) {
       continue;
     }
 
-    if (prReviewAutomationEnabled(root)) {
-      handoffToSerialReview(root, issueNumber, snapshot);
-      return;
-    }
-
-    if (completedReviews >= config.maxReviewRounds) {
-      throw new Error(`Maximum review rounds (${config.maxReviewRounds}) reached.`);
-    }
-    const verdict = runReviewer(root, issueNumber, snapshot, completedReviews + 1);
-    completedReviews += 1;
-    if (!verdict.approved) {
-      updateState(root, issueNumber, { phase: 'repairing' }, { type: 'review-changes-required', details: verdict.findings });
-      sendCoder(root, snapshot.state, buildRepairPrompt({ issueNumber, findings: verdict.findings }));
+    const review = runConfiguredHarnessReview(root, issueNumber, snapshot, { config });
+    if (review.decision.action === 'stale') continue;
+    if (review.decision.action === 'repair') {
+      const findings = reviewRepairInstructions(review);
+      updateState(root, issueNumber, { phase: 'repairing' }, {
+        type: 'review-changes-required',
+        details: findings,
+      });
+      sendCoder(root, snapshot.state, buildRepairPrompt({ issueNumber, findings }));
       repairCycles += 1;
       continue;
+    }
+    if (review.decision.action === 'attention') {
+      markReviewNeedsAttention(root, issueNumber, snapshot, review);
+      return;
+    }
+    if (review.decision.action === 'quick-passed' || review.decision.action === 'handoff') {
+      enterConfiguredQuickHandoff(root, issueNumber, snapshot, review, { config });
+      return;
+    }
+    if (review.decision.action !== 'full-passed') {
+      throw new Error(`Unsupported staged review decision: ${review.decision.action || '(missing)'}.`);
     }
 
     const afterReview = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
