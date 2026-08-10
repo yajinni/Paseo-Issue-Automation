@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "dashboard": {
+      "type": "service",
+      "command": "paseo-issue-automation",
+      "port": 4318
+    },
+    "dashboard-update": {
+      "command": "npm install --global github:yajinni/Paseo-Issue-Automation#main"
+    }
+  }
+}
