@@ -188,7 +188,44 @@ export async function finishSetup({ startAutomation = false } = {}, options = {}
   // Commit durable setup state before any worker is started. Coding-worker
   // availability is infrastructure; claims remain the user's automation switch.
   const config = loadConfig(root);
-  saveConfig(root, { ...config, setupComplete: true });
+  const repositorySelections = session.pages?.repository?.selections || {};
+  const harnessSelections = session.pages?.harness?.selections || {};
+  const issueSelections = session.pages?.issues?.selections || {};
+  const reviewSelections = session.pages?.review?.selections || {};
+  saveConfig(root, {
+    ...config,
+    setupComplete: true,
+    baseBranch: String(repositorySelections.baseBranch || session.baseBranch || config.baseBranch || ''),
+    maxActive: Number(issueSelections.maxActive ?? config.maxActive),
+    codingHarness: String(harnessSelections.harness || config.codingHarness || ''),
+    issueSelection: {
+      ...config.issueSelection,
+      mode: issueSelections.mode || config.issueSelection.mode,
+      excludedLabels: Array.isArray(issueSelections.excludedLabels)
+        ? issueSelections.excludedLabels
+        : config.issueSelection.excludedLabels,
+      temporaryFailureRetries: Number(issueSelections.temporaryFailureRetries ?? config.issueSelection.temporaryFailureRetries),
+    },
+    review: {
+      ...config.review,
+      workflow: reviewSelections.workflow || config.review.workflow,
+      quickMaxRounds: Number(reviewSelections.quickMaxRounds ?? config.review.quickMaxRounds),
+      fullMaxRounds: Number(reviewSelections.fullMaxRounds ?? config.review.fullMaxRounds),
+      autoMergeApproved: reviewSelections.autoMergeApproved === true,
+    },
+    models: {
+      ...config.models,
+      orchestrator: String(harnessSelections.codingModel || config.models.orchestrator || ''),
+      coder: String(harnessSelections.codingModel || config.models.coder || ''),
+      coderThinking: String(harnessSelections.codingThinking || config.models.coderThinking || ''),
+      reviewer: String(harnessSelections.reviewModel || config.models.reviewer || ''),
+      reviewerThinking: String(harnessSelections.reviewThinking || config.models.reviewerThinking || ''),
+    },
+    workspace: {
+      ...config.workspace,
+      id: repositorySelections.paseoWorkspaceId || config.workspace.id || null,
+    },
+  });
   saveRuntime(root, { ...loadRuntime(root), claimsEnabled: false });
   saveFinishSelection(startAutomation, options);
   const completed = completeSetupSession(options);

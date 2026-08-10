@@ -68,6 +68,23 @@ function fixture(t, { eligibleIssueCount = 0 } = {}) {
     managedCheckout: { path: repo, managed: false, workspaceId: 'ws-1' },
   }, { rootDir });
   saveSetupPage('issues', { selections: { eligibleIssueCount } }, { rootDir });
+  saveSetupPage('harness', {
+    selections: {
+      harness: 'paseo',
+      codingModel: 'openai/coder',
+      codingThinking: 'high',
+      reviewModel: 'openai/reviewer',
+      reviewThinking: 'max',
+    },
+  }, { rootDir });
+  saveSetupPage('review', {
+    selections: {
+      workflow: 'quick-manual',
+      quickMaxRounds: 3,
+      fullMaxRounds: 3,
+      autoMergeApproved: false,
+    },
+  }, { rootDir });
   for (const page of PRIOR_PAGES) recordSetupPageCheck(page, { ok: true, summary: `${page} ready`, blockers: [] }, { rootDir });
   return { rootDir, repo };
 }
@@ -201,6 +218,62 @@ test('Finish setup commits durable state, makes coder available while claims are
     ['review', true, true],
   ]);
   assert.equal(loadSetupSessionStore({ rootDir }).activeSession, null);
+});
+
+test('Finish setup persists the verified harness, issue, review, model, and workspace selections', async (t) => {
+  const { rootDir, repo } = fixture(t);
+  saveSetupPage('harness', {
+    selections: {
+      harness: 'opencode',
+      codingModel: 'opencode/coder',
+      codingThinking: 'xhigh',
+      reviewModel: 'opencode/reviewer',
+      reviewThinking: 'max',
+    },
+  }, { rootDir });
+  saveSetupPage('issues', {
+    selections: {
+      mode: 'recommended-labels',
+      maxActive: 1,
+      temporaryFailureRetries: 4,
+      excludedLabels: ['do-not-automate'],
+    },
+  }, { rootDir });
+  saveSetupPage('review', {
+    selections: {
+      workflow: 'quick-web-chatgpt',
+      quickMaxRounds: 2,
+      fullMaxRounds: 4,
+      autoMergeApproved: false,
+      conversationUrl: 'https://chatgpt.com/g/g-p/example/c/example',
+      reviewChatMode: 'existing',
+    },
+  }, { rootDir });
+  await runFinalReadinessChecks({ rootDir, setupPrReconciler: () => null, setupInstallationPreviewBuilder: readySetupPreview });
+  await finishSetup({ startAutomation: false }, { rootDir });
+  const config = loadConfig(repo);
+  assert.equal(config.baseBranch, 'main');
+  assert.equal(config.maxActive, 1);
+  assert.equal(config.codingHarness, 'opencode');
+  assert.deepEqual(config.issueSelection, {
+    mode: 'recommended-labels',
+    excludedLabels: ['do-not-automate'],
+    temporaryFailureRetries: 4,
+  });
+  assert.deepEqual(config.review, {
+    workflow: 'quick-web-chatgpt',
+    quickMaxRounds: 2,
+    fullMaxRounds: 4,
+    autoMergeApproved: false,
+  });
+  assert.deepEqual(config.models, {
+    orchestrator: 'opencode/coder',
+    coder: 'opencode/coder',
+    coderThinking: 'xhigh',
+    reviewer: 'opencode/reviewer',
+    reviewerThinking: 'max',
+  });
+  assert.equal(config.workspace.id, 'ws-1');
 });
 
 test('worker startup failure is recoverable and returns automation to paused state', async (t) => {
