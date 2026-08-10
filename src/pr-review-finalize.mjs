@@ -1,5 +1,5 @@
-import { markHumanReview } from './automation.mjs';
-import { managedPrSnapshot } from './pr-review-github.mjs';
+import { finalizeApprovedPullRequest } from './approved-pr-finalization.mjs';
+import { managedPrSnapshot, managerPrHealthSnapshot } from './pr-review-github.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
 import { run } from './process.mjs';
 
@@ -141,6 +141,19 @@ export function finalizeApprovedBrowserReview(root, managed, reviewJob, {
     error.gate = evaluated;
     throw error;
   }
-  recordApprovedBrowserReview(root, managed, reviewJob, { findings });
-  return markHumanReview(root, managed.issueNumber, managed.pullRequestNumber);
+  const state = recordApprovedBrowserReview(root, managed, reviewJob, { findings });
+  const health = managerPrHealthSnapshot(root, managed.pullRequestNumber);
+  if (!health) throw new Error(`Could not read PR #${managed.pullRequestNumber} for deterministic finalization.`);
+  return finalizeApprovedPullRequest(root, {
+    repository: managed.repository,
+    issueNumber: managed.issueNumber,
+    issueUrl: managed.issueUrl,
+    pullRequest: health,
+    state,
+    findings: [],
+    unresolvedFindings: false,
+    approvalSource: 'browser-review',
+    paseoOwned: String(health.headRefName || '') === String(managed.branchName || '')
+      && String(health.headRefOid || '').toLowerCase() === String(reviewJob.headSha || '').toLowerCase(),
+  });
 }
