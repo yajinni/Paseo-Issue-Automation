@@ -13,6 +13,7 @@ import { registerManualReviewPullRequest } from './manual-review-reconcile.mjs';
 import { handoffValidatedPullRequest, prReviewAutomationEnabled } from './pr-review-handoff.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { reviewJobId } from './review-prompt.mjs';
+import { postReviewerAuditComment } from './reviewer-audit.mjs';
 import {
   REVIEW_STAGES,
   REVIEW_WORKFLOW_OUTPUT_SCHEMA,
@@ -86,6 +87,33 @@ function reviewContexts({ issue, snapshot, config, state }) {
   return { issueContext, changeContext, validationContext };
 }
 
+function recordStructuredReviewAudit(root, issueNumber, snapshot, event, {
+  runner = run,
+} = {}) {
+  if (!['pass', 'changes'].includes(event.result)) return null;
+  const findings = summarizeReviewFindings(event);
+  recordEvent(root, issueNumber, {
+    event: 'review',
+    result: event.result === 'pass' ? 'APPROVED' : 'CHANGES_REQUIRED',
+    commit: event.headSha,
+    details: findings,
+    source: 'harness-review-compat',
+  });
+  const audit = postReviewerAuditComment(root, {
+    issueNumber,
+    prNumber: snapshot.pr.number,
+    commit: event.headSha,
+    round: event.round,
+    approved: event.result === 'pass',
+    findings,
+  }, { runner });
+  updateRun(root, issueNumber, {}, {
+    type: 'review-audit-posted',
+    details: `Posted ${audit.verdict} for ${audit.commit} to PR #${audit.prNumber} (round ${audit.round}).`,
+  });
+  return audit;
+}
+
 export function configuredReviewStage(config = {}) {
   return harnessReviewStage(config);
 }
@@ -108,6 +136,7 @@ export function runConfiguredHarnessReview(root, issueNumber, snapshot, {
   config = loadConfig(root),
   jsonRunner = runJson,
   agentRunner = runJson,
+  auditRunner = run,
 } = {}) {
   const state = loadRun(root, issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${issueNumber}.`);
@@ -164,6 +193,7 @@ export function runConfiguredHarnessReview(root, issueNumber, snapshot, {
     promptVersion: Number(verdict.promptVersion),
   };
   let event = createHarnessReviewEvent(checked, expected);
+  const audit = recordStructuredReviewAudit(root, issueNumber, snapshot, event, { runner: auditRunner });
   const current = currentPrHead(root, snapshot.pr.number, jsonRunner);
   if (!current || String(current.headRefOid || '').toLowerCase() !== String(snapshot.head).toLowerCase()) {
     event = createHarnessReviewEvent({
@@ -186,6 +216,7 @@ export function runConfiguredHarnessReview(root, issueNumber, snapshot, {
     state: saved,
     stage,
     round,
+    audit,
   };
 }
 
