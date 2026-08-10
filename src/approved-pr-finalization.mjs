@@ -312,6 +312,16 @@ function releaseCodingSlotForMerge(root, issueNumber, { runner = run } = {}) {
 }
 
 function humanFallback(root, issueNumber, pr, head, reason, managed, eligibility, options, extras = {}) {
+  const settled = humanReviewAlreadyMarked(loadRun(root, issueNumber), pr.number, head);
+  if (settled) {
+    return {
+      ...routeToHumanReview(root, issueNumber, pr.number, head, reason, options),
+      managed,
+      eligibility,
+      readiness: { changed: false, ready: pr?.isDraft !== true, skipped: true },
+      ...extras,
+    };
+  }
   const readiness = ensureReady(root, pr, { ...options, required: false });
   const readinessReason = readiness.ready
     ? reason
@@ -376,7 +386,7 @@ export function finalizeApprovedPullRequest(root, {
       unresolvedFindings: unresolvedFindings === true,
     },
     validation: { passed: true, headSha: head },
-    currentBaseBranch: text(pr.baseRefName),
+    currentBaseBranch: text(config.baseBranch),
     paseoOwned,
   });
 
@@ -417,7 +427,7 @@ export function finalizeApprovedPullRequest(root, {
       unresolvedFindings: unresolvedFindings === true,
     },
     validation: { passed: true, headSha: head },
-    currentBaseBranch: text(pr.baseRefName),
+    currentBaseBranch: text(config.baseBranch),
     paseoOwned,
   }, options);
   if (!request.enabled) {
