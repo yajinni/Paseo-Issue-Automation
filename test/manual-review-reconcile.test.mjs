@@ -139,6 +139,27 @@ function manualApprovedSnapshot(headSha = 'abcdef1234567890') {
   };
 }
 
+function manualMergedSnapshot(headSha = 'abcdef1234567890') {
+  return {
+    number: 11,
+    state: 'MERGED',
+    isDraft: false,
+    headRefOid: headSha,
+    mergedAt: '2026-08-10T04:10:00Z',
+    reviews: [],
+  };
+}
+
+function manualStaleSnapshot(headSha = 'fedcba9876543210') {
+  return {
+    number: 11,
+    state: 'OPEN',
+    isDraft: false,
+    headRefOid: headSha,
+    reviews: [],
+  };
+}
+
 test('manual review registration is durable but never creates a browser review job', (t) => {
   const root = repository(t);
   saveManualRun(root);
@@ -268,4 +289,46 @@ test('repeated manual approval reconciliation does not repeat GitHub side effect
   const secondStore = loadPrReviewStore(root);
   assert.equal(secondStore.history.filter((entry) => entry.entityId === managed.id
     && entry.newState === 'ready_to_merge').length, 1);
+});
+
+test('repeated merged manual reconciliation records merge observation once', (t) => {
+  const root = repository(t);
+  saveManualRun(root);
+  const managed = register(root);
+  const merged = manualMergedSnapshot();
+
+  const first = reconcileManualReview(root, managed.id, { snapshot: merged });
+  assert.equal(first.state, 'merged-pending-finalization');
+  assert.equal(first.unchanged, undefined);
+  const firstState = loadRun(root, 7);
+  assert.equal(firstState.phase, 'manual-review-merged-pending-finalization');
+  assert.equal(firstState.activity.filter((entry) => entry.type === 'manual-review-merge-observed').length, 1);
+
+  const second = reconcileManualReview(root, managed.id, { snapshot: merged });
+  assert.equal(second.state, 'merged-pending-finalization');
+  assert.equal(second.unchanged, true);
+  const secondState = loadRun(root, 7);
+  assert.equal(secondState.activity.filter((entry) => entry.type === 'manual-review-merge-observed').length, 1);
+});
+
+test('repeated unvalidated manual stale head records operator attention once', (t) => {
+  const root = repository(t);
+  saveManualRun(root);
+  const managed = register(root);
+  const stale = manualStaleSnapshot();
+
+  const first = reconcileManualReview(root, managed.id, { snapshot: stale });
+  assert.equal(first.state, 'stale');
+  assert.equal(first.needsOperator, true);
+  assert.equal(first.unchanged, undefined);
+  const firstState = loadRun(root, 7);
+  assert.equal(firstState.phase, 'manual-review-stale-head');
+  assert.equal(firstState.activity.filter((entry) => entry.type === 'manual-review-stale-head').length, 1);
+
+  const second = reconcileManualReview(root, managed.id, { snapshot: stale });
+  assert.equal(second.state, 'stale');
+  assert.equal(second.needsOperator, true);
+  assert.equal(second.unchanged, true);
+  const secondState = loadRun(root, 7);
+  assert.equal(secondState.activity.filter((entry) => entry.type === 'manual-review-stale-head').length, 1);
 });
