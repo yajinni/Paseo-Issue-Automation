@@ -22,11 +22,12 @@ import {
   loadPrReviewStore,
   mutatePrReviewStore,
 } from '../src/pr-review-store.mjs';
-import { loadRun, saveRun } from '../src/state.mjs';
+import { DEFAULT_CONFIG, loadRun, saveConfig, saveRun } from '../src/state.mjs';
 
 function repository(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-manual-review-'));
   execFileSync('git', ['init', '-q'], { cwd: root });
+  saveConfig(root, { ...DEFAULT_CONFIG, baseBranch: 'main' });
   const bin = path.join(root, 'bin');
   const callsFile = path.join(root, 'gh-calls.log');
   mkdirSync(bin, { recursive: true });
