@@ -78,7 +78,7 @@ Before changing code, confirm that the workspace is on ${managed.branchName} and
 }
 
 function issueCodingCount(root, { jsonRunner = runJson } = {}) {
-  const result = jsonRunner('gh', ['issue', 'list', '--state', 'open', '--label', 'agent-running', '--limit', '100', '--json', 'number'], {
+  const result = jsonRunner('gh', ['issue', 'list', '--state', 'open', '--label', PASEO_LABELS.coding, '--limit', '100', '--json', 'number'], {
     cwd: root,
     allowFailure: true,
   });

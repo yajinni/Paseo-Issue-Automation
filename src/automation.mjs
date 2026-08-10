@@ -162,8 +162,8 @@ export function markHumanReview(root, issueNumber, prNumber) {
   if (pr.baseRefName !== config.baseBranch) throw new Error(`PR must target ${config.baseBranch}.`);
 
   editLabels(root, issueNumber, {
-    add: [LABELS.humanReview],
-    remove: [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.failed],
+    add: [PASEO_LABELS.reviewQueued],
+    remove: [PASEO_LABELS.coding, PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.failed, PASEO_LABELS.needsAttention],
   });
   run('gh', ['issue', 'comment', String(issueNumber), '--body', `NEEDS HUMAN REVIEW FOR PR #${prNumber}`], {
     cwd: root,
@@ -245,7 +245,7 @@ export function terminalState(root, issueNumber, status, reason) {
       });
       notifyTerminalState(root, issueNumber, {
         add: [PASEO_LABELS.failed, PASEO_LABELS.needsAttention],
-        remove: [LABELS.running, LABELS.ready, LABELS.blocked, LABELS.failed, LABELS.humanReview, PASEO_LABELS.ready],
+        remove: [PASEO_LABELS.coding, PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.failed, PASEO_LABELS.reviewQueued],
         comment: `Automation failed and needs attention: ${exhaustedReason}`,
       });
       safeIssueLog(root, {
@@ -271,8 +271,8 @@ export function terminalState(root, issueNumber, status, reason) {
     updatedAt: at,
   });
   notifyTerminalState(root, issueNumber, {
-    add: [label],
-    remove: [LABELS.running, LABELS.ready, LABELS.humanReview, status === 'blocked' ? LABELS.failed : LABELS.blocked],
+    add: [status === 'blocked' ? PASEO_LABELS.needsAttention : PASEO_LABELS.failed],
+    remove: [PASEO_LABELS.coding, PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.reviewQueued, PASEO_LABELS.changesRequested, PASEO_LABELS.fixing, PASEO_LABELS.reviewing],
     comment: `Automation ${status}: ${reason}`,
   });
   safeIssueLog(root, {

@@ -7,7 +7,7 @@ import {
   reviewStageDecision,
   summarizeReviewFindings,
 } from './harness-review-stages.mjs';
-import { LEGACY_LABELS, PASEO_LABELS } from './label-catalog.mjs';
+import { PASEO_LABELS } from './label-catalog.mjs';
 import { enterManualReview } from './manual-review-lifecycle.mjs';
 import { registerManualReviewPullRequest } from './manual-review-reconcile.mjs';
 import { handoffValidatedPullRequest, prReviewAutomationEnabled } from './pr-review-handoff.mjs';
@@ -223,7 +223,7 @@ export function runConfiguredHarnessReview(root, issueNumber, snapshot, {
 function releaseCodingSlot(root, issueNumber, runner = run) {
   const released = runner('gh', [
     'issue', 'edit', String(issueNumber),
-    '--remove-label', LEGACY_LABELS.running,
+    '--remove-label', PASEO_LABELS.coding,
     '--add-label', PASEO_LABELS.reviewQueued,
   ], { cwd: root, allowFailure: true });
   if (!released.ok) {
@@ -364,7 +364,7 @@ export function markReviewNeedsAttention(root, issueNumber, snapshot, review, {
   const reason = `Heavy review exhausted round ${review.round} of ${review.decision.limit} with unresolved blocking changes.`;
   const issueLabels = runner('gh', [
     'issue', 'edit', String(issueNumber),
-    '--remove-label', LEGACY_LABELS.running,
+    '--remove-label', PASEO_LABELS.coding,
     '--add-label', PASEO_LABELS.needsAttention,
   ], { cwd: root, allowFailure: true });
   if (!issueLabels.ok) throw new Error(issueLabels.stderr || issueLabels.stdout || reason);

@@ -311,6 +311,6 @@ test('functional acceptance: one eligible issue reaches exact-head human review 
   assert.match(reviewerRun.args.at(-1), /This is a FULL review/);
 
   const issueEdits = commands.filter((entry) => entry.command === 'gh' && entry.args[0] === 'issue' && entry.args[1] === 'edit');
-  assert.equal(issueEdits.some((entry) => entry.args.includes('--add-label') && entry.args.includes('agent-running')), true);
-  assert.equal(issueEdits.some((entry) => entry.args.includes('--add-label') && entry.args.includes('human-review')), true);
+  assert.equal(issueEdits.some((entry) => entry.args.includes('--add-label') && entry.args.includes('paseo:coding')), true);
+  assert.equal(issueEdits.some((entry) => entry.args.includes('--add-label') && entry.args.includes('paseo:review-queued')), true);
 });
