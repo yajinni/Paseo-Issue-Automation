@@ -4,13 +4,13 @@ import path from 'node:path';
 import { CONTROLLER_MODES, loadControllerMode } from './controller-mode.mjs';
 import { runJson } from './process.mjs';
 import {
-  LABEL_DETAILS,
   PASEO_SERVICE,
   PASEO_SERVICE_NAME,
   issueTemplatePath,
   npmUninstallCommand,
   paseoJsonPath,
 } from './install-legacy.mjs';
+import { LIFECYCLE_LABEL_CATALOG } from './label-catalog.mjs';
 import {
   loadConfig,
   loadIntegration,
@@ -106,14 +106,14 @@ function paseoManagement(root, integrationState) {
 
 function labelManagement(existingRows, integrationState) {
   const existing = new Map(existingRows.map((label) => [label.name, label]));
-  return Object.fromEntries(Object.entries(LABEL_DETAILS).map(([name, [color, description]]) => {
-    const current = existing.get(name);
-    const owned = integrationState.labels?.[name]?.createdByPackage === true;
+  return Object.fromEntries(Object.values(LIFECYCLE_LABEL_CATALOG).map((managed) => {
+    const current = existing.get(managed.name);
+    const owned = integrationState.labels?.[managed.name]?.createdByPackage === true;
     const matches = Boolean(current)
-      && String(current.color || '').toLowerCase() === color.toLowerCase()
-      && String(current.description || '') === description;
-    return [name, {
-      name,
+      && String(current.color || '').toLowerCase() === managed.color.toLowerCase()
+      && String(current.description || '') === managed.description;
+    return [managed.name, {
+      name: managed.name,
       present: Boolean(current),
       createdByPackage: owned,
       matchesExpected: matches,
