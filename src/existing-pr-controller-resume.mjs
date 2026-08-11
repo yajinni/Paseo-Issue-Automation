@@ -5,6 +5,8 @@ import { inspectBaseFreshness } from './base-freshness.mjs';
 import { currentPr, remoteBranchHead } from './controller-draft-pr.mjs';
 import { PASEO_LABELS } from './label-catalog.mjs';
 import { expectedWorkspaceAgent, inspectWorkspaceAgents, verifyWorkspaceIdentity } from './launch-retry.mjs';
+import { pauseManagedPr } from './pr-review-queue.mjs';
+import { loadPrReviewStore } from './pr-review-store.mjs';
 import { run, runJson } from './process.mjs';
 import { LABELS, loadConfig, loadRun, saveRun } from './state.mjs';
 
@@ -85,6 +87,16 @@ function humanReviewRefreshEligibility(state) {
   return { eligible: true, refresh: true, reason: null };
 }
 
+function pauseExistingReviewForRefresh(root, issueNumber, pullRequestNumber) {
+  const store = loadPrReviewStore(root);
+  const matches = (store.managedPullRequests || []).filter((managed) => (
+    Number(managed.issueNumber) === Number(issueNumber)
+      && Number(managed.pullRequestNumber) === Number(pullRequestNumber)
+  ));
+  if (matches.length > 1) throw new Error(`Paseo found multiple managed records for issue #${issueNumber} and PR #${pullRequestNumber}.`);
+  if (matches[0]) pauseManagedPr(root, matches[0].id, true);
+}
+
 function verifyRecordedCoder(root, state, {
   runner,
   inspectAgents,
@@ -158,6 +170,7 @@ export function resumeExistingPrController(root, number, {
   controllerAlive = controllerProcessAlive,
   refreshHumanReview = false,
   jsonRunner = runJson,
+  pauseReview = pauseExistingReviewForRefresh,
   spawnFn = spawn,
   executable = process.execPath,
   workerPath = controllerWorkerPath,
@@ -197,6 +210,7 @@ export function resumeExistingPrController(root, number, {
     if (freshness.ok) {
       return { resumed: false, recovered: false, issueNumber, reason: 'The human-review PR already contains the latest base; no refresh was needed.' };
     }
+    pauseReview(root, issueNumber, pr.number);
   }
 
   editResumeLabels(root, issueNumber, true, runner);
