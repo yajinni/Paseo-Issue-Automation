@@ -8,6 +8,7 @@ import {
 
 function schemaError(detail = 'Unterminated string in JSON at position 855') {
   const error = new Error(`paseo run --secret-prompt failed: INVALID_OUTPUT_SCHEMA ${detail}`);
+  error.command = 'paseo';
   error.stderr = `INVALID_OUTPUT_SCHEMA\nFailed to parse output schema JSON: ${detail}`;
   return error;
 }
@@ -93,6 +94,7 @@ test('structured review fails closed after the bounded retry without leaking the
 test('non-schema reviewer failures are not retried', () => {
   let attempts = 0;
   const original = new Error('reviewer transport timed out');
+  original.command = 'paseo';
   assert.throws(
     () => runStructuredReviewWithRetry({
       expectedHeadSha: '1a3097b84539f48eb0b793cb1183916ea6613b94',
@@ -106,6 +108,26 @@ test('non-schema reviewer failures are not retried', () => {
     original,
   );
   assert.equal(attempts, 1);
+});
+
+test('GitHub invalid JSON is not treated as malformed reviewer output', () => {
+  let attempts = 0;
+  const original = new Error('gh returned invalid JSON: Unexpected end of JSON input');
+  original.command = 'gh';
+  assert.throws(
+    () => runStructuredReviewWithRetry({
+      expectedHeadSha: '1a3097b84539f48eb0b793cb1183916ea6613b94',
+      requestId: 'issue-239:pr-246:1a3097b:quick:round-1',
+      currentHead: () => '1a3097b84539f48eb0b793cb1183916ea6613b94',
+      runReview() {
+        attempts += 1;
+        throw original;
+      },
+    }),
+    original,
+  );
+  assert.equal(attempts, 1);
+  assert.equal(structuredReviewSchemaFailureDetail(original), null);
 });
 
 test('schema failure detail prefers stderr over command text', () => {
