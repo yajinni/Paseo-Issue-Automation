@@ -154,7 +154,12 @@ export function validateHarnessReviewVerdict(verdict, expected = {}) {
     ['promptVersion', Number(expected.promptVersion ?? REVIEW_WORKFLOW_PROMPT_VERSION)],
   ];
   for (const [field, value] of checks) {
-    if (verdict[field] !== value) throw new Error(`Reviewer verdict ${field} does not match the requested review.`);
+    if (verdict[field] !== value) {
+      const error = new Error(`Reviewer verdict ${field} does not match the requested review.`);
+      error.code = 'REVIEW_METADATA_MISMATCH';
+      error.command = 'paseo';
+      throw error;
+    }
   }
   if (!REVIEW_WORKFLOW_RESULTS.includes(verdict.result)) throw new Error('Reviewer verdict result is invalid.');
   return verdict;

@@ -31,6 +31,7 @@ export function structuredReviewSchemaFailureDetail(error) {
     if (detail) return detail;
   }
   if (error.code === 'INVALID_OUTPUT_SCHEMA') return 'INVALID_OUTPUT_SCHEMA';
+  if (error.code === 'REVIEW_METADATA_MISMATCH') return 'REVIEW_METADATA_MISMATCH';
 
   const message = text(error.message);
   const schemaDetail = safeSchemaDetail(message);
