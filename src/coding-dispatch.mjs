@@ -2,6 +2,7 @@ import path from 'node:path';
 import { recoverFailedAttempt } from './attempt-recovery.mjs';
 import { dispatchSpecificIssue, restartIssue } from './attempts.mjs';
 import { acquireLease, releaseLease, renewLease } from './durable-lease.mjs';
+import { resumeExistingPrController } from './existing-pr-controller-resume.mjs';
 import { activeCodingCount } from './fix-jobs.mjs';
 import { appendIssueLifecycle, loadConfig, loadRun, statePaths } from './state.mjs';
 
@@ -73,8 +74,45 @@ export function recoverOrRestartCodingIssue(root, number, options = {}) {
         branch: state?.branch || null,
         workspaceId: state?.workspaceId || null,
         coderAgentId: state?.coderAgentId || state?.agentId || null,
+        prNumber: state?.prNumber || null,
       },
     });
+
+    const existingPr = resumeExistingPrController(root, issueNumber, { branchAction });
+    if (existingPr.resumed) {
+      appendIssueLifecycle(root, issueNumber, {
+        attempt: existingPr.attempt || state?.attempt || null,
+        type: 'recover-first-resumed-existing-pr',
+        status: 'success',
+        source: 'controller',
+        message: `Resumed existing managed PR #${existingPr.prNumber} without creating a fresh attempt.`,
+        evidence: {
+          branch: existingPr.branch || null,
+          workspaceId: existingPr.workspaceId || null,
+          coderAgentId: existingPr.coderAgentId || null,
+          prNumber: existingPr.prNumber || null,
+          headSha: existingPr.head || null,
+          controllerPid: existingPr.controllerPid || null,
+        },
+      });
+      return existingPr;
+    }
+
+    appendIssueLifecycle(root, issueNumber, {
+      attempt: state?.attempt || null,
+      type: 'recover-first-existing-pr-unavailable',
+      status: 'skipped',
+      source: 'controller',
+      message: existingPr.reason || 'No safely reusable existing PR was available for controller-only resume.',
+      evidence: {
+        branchAction,
+        branch: state?.branch || null,
+        workspaceId: state?.workspaceId || null,
+        coderAgentId: state?.coderAgentId || state?.agentId || null,
+        prNumber: state?.prNumber || null,
+      },
+    });
+
     const recovery = recoverFailedAttempt(root, issueNumber, { branchAction });
     if (recovery.recovered) {
       appendIssueLifecycle(root, issueNumber, {
@@ -109,6 +147,7 @@ export function recoverOrRestartCodingIssue(root, number, options = {}) {
     return {
       ...fresh,
       recovered: false,
+      existingPrResumeFallbackReason: existingPr.reason || null,
       recoveryFallbackReason: recovery.reason || null,
     };
   });

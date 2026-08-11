@@ -45,7 +45,7 @@ export function queueCodingIssueRestart(root, number, {
     restartPreviousPhase: state.phase || null,
     restartPreviousReason: state.reason || null,
     reason: recoverFirst
-      ? 'Recover-first restart queued. Existing work will be reused when it can be verified safely; otherwise a fresh attempt will start.'
+      ? 'Recover-first restart queued. A verified existing managed PR/controller will be resumed first; otherwise failed work will be reused when safe before any fresh attempt starts.'
       : 'Fresh restart queued with branch deletion.',
     updatedAt: queuedAt,
     activity: withActivity(
@@ -87,7 +87,7 @@ export function queueCodingIssueRestart(root, number, {
     branchAction,
     phase: 'queued',
     message: recoverFirst
-      ? `Issue #${issueNumber} restart queued. Paseo will recover the existing failed attempt first and create a fresh attempt only if reuse is unsafe or already exhausted.`
+      ? `Issue #${issueNumber} restart queued. Paseo will first resume a verified existing managed PR/controller, then try failed-attempt recovery, and create a fresh attempt only if neither can be reused safely.`
       : `Issue #${issueNumber} fresh restart queued with branch deletion.`,
   };
 }

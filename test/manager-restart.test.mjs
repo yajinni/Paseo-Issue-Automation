@@ -35,8 +35,9 @@ test('manager restart records a recover-first queued state and detaches slow res
   assert.equal(writes[0].restartPending, true);
   assert.equal(writes[0].restartPreviousPhase, 'failed');
   assert.equal(writes[0].restartPreviousReason, 'Completion evidence was missing.');
-  assert.match(writes[0].reason, /Recover-first restart queued/);
-  assert.match(result.message, /recover the existing failed attempt first/i);
+  assert.match(writes[0].reason, /verified existing managed PR\/controller/i);
+  assert.match(result.message, /first resume a verified existing managed PR\/controller/i);
+  assert.match(result.message, /failed-attempt recovery/i);
   assert.equal(spawns.length, 1);
   assert.equal(spawns[0].command, '/node');
   assert.deepEqual(spawns[0].args, ['/restart-worker.mjs', '/repo', '274', 'keep']);
