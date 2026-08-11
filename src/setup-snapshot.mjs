@@ -10,6 +10,7 @@ import {
   issueTemplatePath,
   npmUninstallCommand,
   paseoJsonPath,
+  templateMatchesExpected,
 } from './install-legacy.mjs';
 import {
   loadConfig,
@@ -59,7 +60,7 @@ function issueTemplateManagement(root, integrationState) {
   const managed = integrationState.issueTemplate;
   let unchanged = false;
   if (present && managed?.expectedSha256) {
-    unchanged = sha256(readFileSync(target, 'utf8')) === managed.expectedSha256;
+    unchanged = templateMatchesExpected(readFileSync(target, 'utf8'), managed.expectedSha256);
   }
   return {
     path: path.relative(root, target),
