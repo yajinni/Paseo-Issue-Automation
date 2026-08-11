@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 import {
   existingPrControllerResumeEligibility,
@@ -102,7 +103,7 @@ test('controller-only resume preserves an exhausted failed attempt with an exact
   assert.equal(writes.length, 2);
   assert.ok(!calls.some(([command, args]) => command === 'paseo' && args[0] === 'send'));
   assert.equal(spawns.length, 1);
-  assert.deepEqual(spawns[0].args, ['/recovery-controller-worker.mjs', '/repo', '239']);
+  assert.deepEqual(spawns[0].args, ['/recovery-controller-worker.mjs', path.resolve('/repo'), '239']);
 });
 
 test('existing PR controller resume does not depend on remaining failed-attempt recovery budget', () => {
@@ -110,6 +111,21 @@ test('existing PR controller resume does not depend on remaining failed-attempt 
     branchAction: 'keep',
   });
   assert.equal(decision.eligible, true);
+});
+
+test('controller-only resume can recover an active attempt whose controller process is gone', () => {
+  const state = failedCanaryState({
+    status: 'agent-running',
+    phase: 'updating-from-base',
+    controllerPid: 106532,
+    completedAt: null,
+  });
+  const decision = existingPrControllerResumeEligibility(state, {
+    branchAction: 'keep',
+    controllerAlive: () => false,
+  });
+  assert.equal(decision.eligible, true);
+  assert.equal(decision.orphanedController, true);
 });
 
 test('controller-only resume fails closed when pushed branch head differs from local HEAD', () => {

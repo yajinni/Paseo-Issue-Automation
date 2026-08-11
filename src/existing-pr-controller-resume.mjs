@@ -14,6 +14,17 @@ function text(value) {
   return value === undefined || value === null ? '' : String(value).trim();
 }
 
+function controllerProcessAlive(pid) {
+  const value = Number(pid);
+  if (!Number.isInteger(value) || value <= 0) return false;
+  try {
+    process.kill(value, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
 function appendActivity(state, type, details, at = now()) {
   return [...(state?.activity || []), { type, at, details }];
 }
@@ -31,14 +42,22 @@ function terminalFailureState(state) {
     || state?.restartPreviousPhase === 'launch-failed';
 }
 
-export function existingPrControllerResumeEligibility(state, { branchAction = 'keep' } = {}) {
+export function existingPrControllerResumeEligibility(state, {
+  branchAction = 'keep',
+  controllerAlive = controllerProcessAlive,
+} = {}) {
   if (branchAction !== 'keep') return { eligible: false, reason: 'Deleting the branch explicitly requests a fresh attempt.' };
   if (!state) return { eligible: false, reason: 'No recorded attempt exists.' };
-  if (!terminalFailureState(state)) return { eligible: false, reason: 'Only failed attempts are eligible for existing-PR controller resume.' };
+  const orphanedController = state.status === LABELS.running
+    && Number.isInteger(Number(state.controllerPid))
+    && !controllerAlive(state.controllerPid);
+  if (!terminalFailureState(state) && !orphanedController) {
+    return { eligible: false, reason: 'Only failed attempts or orphaned running controllers are eligible for existing-PR controller resume.' };
+  }
   if (!state.branch) return { eligible: false, reason: 'The failed attempt has no recorded branch.' };
   if (!state.workspaceId || !state.worktreePath) return { eligible: false, reason: 'The failed attempt has no reusable Paseo workspace.' };
   if (!(state.coderAgentId || state.agentId)) return { eligible: false, reason: 'The failed attempt has no reusable coder agent.' };
-  return { eligible: true, reason: null };
+  return { eligible: true, reason: null, orphanedController };
 }
 
 function editResumeLabels(root, issueNumber, running, runner) {
@@ -123,13 +142,14 @@ export function resumeExistingPrController(root, number, {
   verifyWorkspace = verifyWorkspaceIdentity,
   prReader = currentPr,
   remoteHeadReader = remoteBranchHead,
+  controllerAlive = controllerProcessAlive,
   spawnFn = spawn,
   executable = process.execPath,
   workerPath = controllerWorkerPath,
 } = {}) {
   const issueNumber = Number(number);
   const state = readRun(root, issueNumber);
-  const eligibility = existingPrControllerResumeEligibility(state, { branchAction });
+  const eligibility = existingPrControllerResumeEligibility(state, { branchAction, controllerAlive });
   if (!eligibility.eligible) return { resumed: false, recovered: false, issueNumber, reason: eligibility.reason };
 
   const coder = verifyRecordedCoder(root, state, { runner, inspectAgents, verifyWorkspace });
@@ -150,11 +170,14 @@ export function resumeExistingPrController(root, number, {
 
   editResumeLabels(root, issueNumber, true, runner);
   const startedAt = now();
+  const resumeDescription = eligibility.orphanedController
+    ? `Resuming orphaned controller PID ${state.controllerPid} for existing managed PR #${pr.number} at exact head ${exact.head} without starting a fresh attempt.`
+    : `Resuming the existing managed PR #${pr.number} at exact head ${exact.head} without starting a fresh attempt.`;
   let resumedState = writeRun(root, issueNumber, {
     ...state,
     status: LABELS.running,
     phase: 'resuming-existing-pr-controller',
-    reason: `Resuming the existing managed PR #${pr.number} at exact head ${exact.head} without starting a fresh attempt.`,
+    reason: resumeDescription,
     completedAt: null,
     controllerPid: null,
     heartbeatAt: startedAt,
