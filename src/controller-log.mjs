@@ -10,6 +10,7 @@ import {
   statSync,
 } from 'node:fs';
 import path from 'node:path';
+import { sanitizeDurableText } from './persistent-text-safety.mjs';
 import { statePaths } from './state.mjs';
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
@@ -47,7 +48,7 @@ function archiveFiles(root) {
 }
 
 function truncateString(value) {
-  const text = String(value ?? '');
+  const text = sanitizeDurableText(String(value ?? ''));
   return text.length <= MAX_STRING_LENGTH ? text : `${text.slice(0, MAX_STRING_LENGTH)}…`;
 }
 
@@ -80,12 +81,23 @@ export function sanitizeLogDetails(value, depth = 0, seen = new WeakSet()) {
   return result;
 }
 
+function sanitizeStoredEvent(event) {
+  if (!event || typeof event !== 'object') return event;
+  return {
+    ...event,
+    message: typeof event.message === 'string' ? truncateString(event.message) : event.message,
+    details: event.details && typeof event.details === 'object'
+      ? sanitizeLogDetails(event.details)
+      : event.details,
+  };
+}
+
 function parseLogFile(file) {
   return readFileSync(file, 'utf8')
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => {
-      try { return JSON.parse(line); } catch { return null; }
+      try { return sanitizeStoredEvent(JSON.parse(line)); } catch { return null; }
     })
     .filter(Boolean)
     .reverse();

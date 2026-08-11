@@ -5,6 +5,7 @@ import {
 } from './issue-contract.mjs';
 import { issueFailureRetryDecision } from './issue-failure-policy.mjs';
 import { PASEO_LABELS } from './label-catalog.mjs';
+import { sanitizeDurableText } from './persistent-text-safety.mjs';
 import { run, runJson } from './process.mjs';
 import { LABELS, loadConfig, loadRun, loadRuntime, saveRun, saveRuntime } from './state.mjs';
 
@@ -191,8 +192,9 @@ export function markHumanReview(root, issueNumber, prNumber) {
 
 export function terminalState(root, issueNumber, status, reason) {
   const state = requireRun(root, issueNumber);
+  const safeReason = sanitizeDurableText(reason);
   if (status === 'failed') {
-    const retry = issueFailureRetryDecision({ message: String(reason || '') }, loadConfig(root), state);
+    const retry = issueFailureRetryDecision({ message: safeReason }, loadConfig(root), state);
     if (retry.transient && retry.retry) {
       const at = new Date().toISOString();
       const saved = saveRun(root, issueNumber, {
@@ -265,7 +267,7 @@ export function terminalState(root, issueNumber, status, reason) {
     ...state,
     status: label,
     phase: status,
-    reason,
+    reason: safeReason,
     controllerPid: null,
     completedAt: at,
     updatedAt: at,
@@ -273,14 +275,14 @@ export function terminalState(root, issueNumber, status, reason) {
   notifyTerminalState(root, issueNumber, {
     add: [status === 'blocked' ? PASEO_LABELS.needsAttention : PASEO_LABELS.failed],
     remove: [PASEO_LABELS.coding, PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.reviewQueued, PASEO_LABELS.changesRequested, PASEO_LABELS.fixing, PASEO_LABELS.reviewing],
-    comment: `Automation ${status}: ${reason}`,
+    comment: `Automation ${status}: ${safeReason}`,
   });
   safeIssueLog(root, {
     level: status === 'failed' ? 'error' : 'warn',
     action: status === 'blocked' ? 'issue-blocked' : 'issue-failed',
     status: status === 'blocked' ? 'waiting' : 'failed',
-    message: `Issue #${Number(issueNumber)} was ${status}: ${reason}`,
-    details: { issueNumber: Number(issueNumber), status, reason },
+    message: `Issue #${Number(issueNumber)} was ${status}: ${safeReason}`,
+    details: { issueNumber: Number(issueNumber), status, reason: safeReason },
   });
   return saved;
 }
