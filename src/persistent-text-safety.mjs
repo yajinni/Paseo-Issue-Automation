@@ -20,18 +20,18 @@ export function sanitizeDurableText(value) {
   let markerLength = 0;
   FAILURE_MARKER.lastIndex = 0;
   for (let match = FAILURE_MARKER.exec(text); match; match = FAILURE_MARKER.exec(text)) {
+    if (match.index <= command.index) continue;
     markerIndex = match.index;
     markerLength = match[0].length;
   }
   FAILURE_MARKER.lastIndex = 0;
+  if (markerIndex < 0) return text;
 
   const subcommand = command[1].toLowerCase();
-  const detail = markerIndex >= 0
-    ? conciseFailureDetail(text.slice(markerIndex + markerLength))
-    : '';
+  const detail = conciseFailureDetail(text.slice(markerIndex + markerLength));
   return detail
     ? `Paseo ${subcommand} failed: ${detail}`
-    : `Paseo ${subcommand} failure details redacted.`;
+    : `Paseo ${subcommand} failed.`;
 }
 
 function sanitizeTextFields(value, fields) {
