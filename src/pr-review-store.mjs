@@ -217,6 +217,7 @@ export function normalizeManagedPullRequest(record) {
     lastError: record.lastError || null,
     issueClosurePending: record.issueClosurePending === true,
     lifecycleCompletionPending: record.lifecycleCompletionPending === true,
+    issueLifecycleLabelsClearedAt: record.issueLifecycleLabelsClearedAt || null,
     reviewEvidenceMissing: record.reviewEvidenceMissing === true,
     diagnosticScreenshot: record.diagnosticScreenshot || null,
   };
