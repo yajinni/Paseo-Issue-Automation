@@ -44,7 +44,12 @@ test('restart worker safely reuses one failed attempt without creating a duplica
   const callsFile = path.join(fixture, 'calls.jsonl');
   mkdirSync(root, { recursive: true });
   mkdirSync(bin, { recursive: true });
-  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  t.after(() => rmSync(fixture, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 50,
+  }));
 
   git(root, 'init', '--quiet', '-b', 'main');
   git(root, 'config', 'user.name', 'Paseo Acceptance');
