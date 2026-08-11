@@ -7,10 +7,10 @@ function appendActivity(state, type, details, at) {
   return [...(state?.activity || []), { type, at, details }];
 }
 
-const [root, issueNumberText, branchAction = 'keep'] = process.argv.slice(2);
+const [root, issueNumberText, branchAction = 'keep', restartMode = 'recover'] = process.argv.slice(2);
 const issueNumber = Number(issueNumberText);
 
-if (!root || !Number.isInteger(issueNumber) || issueNumber <= 0 || !['keep', 'delete'].includes(branchAction)) {
+if (!root || !Number.isInteger(issueNumber) || issueNumber <= 0 || !['keep', 'delete'].includes(branchAction) || !['recover', 'refresh'].includes(restartMode)) {
   process.exitCode = 2;
 } else {
   try {
@@ -22,19 +22,23 @@ if (!root || !Number.isInteger(issueNumber) || issueNumber <= 0 || !['keep', 'de
       phase: 'starting-agent',
       restartPending: true,
       reason: branchAction === 'keep'
-        ? 'Checking whether the failed attempt can be recovered before creating a fresh attempt.'
+        ? (restartMode === 'refresh'
+          ? 'Refreshing the existing human-review PR against the current base without reusing prior approval.'
+          : 'Checking whether the failed attempt can be recovered before creating a fresh attempt.')
         : 'A fresh coding attempt was explicitly requested with branch deletion.',
       updatedAt: startedAt,
       activity: appendActivity(
         state,
         'restart-started',
         branchAction === 'keep'
-          ? 'Background restart worker started in recover-first mode.'
+        ? (restartMode === 'refresh'
+          ? 'Background existing human-review PR refresh worker started.'
+          : 'Background restart worker started in recover-first mode.')
           : 'Background restart worker started in explicit fresh mode.',
         startedAt,
       ),
     });
-    recoverOrRestartCodingIssue(root, issueNumber, { branchAction });
+    recoverOrRestartCodingIssue(root, issueNumber, { branchAction, refreshExistingPr: restartMode === 'refresh' });
   } catch (error) {
     const state = loadRun(root, issueNumber) || { issueNumber };
     const failedAt = now();
