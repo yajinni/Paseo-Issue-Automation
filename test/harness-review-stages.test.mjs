@@ -111,7 +111,10 @@ test('verdict identity is bound to repository PR issue SHA stage round and promp
     findings: [],
   };
   assert.equal(validateHarnessReviewVerdict(verdict, expected), verdict);
-  assert.throws(() => validateHarnessReviewVerdict({ ...verdict, headSha: 'deadbee' }, expected), /headSha/);
+  assert.throws(
+    () => validateHarnessReviewVerdict({ ...verdict, headSha: 'deadbee' }, expected),
+    (error) => error.code === 'REVIEW_METADATA_MISMATCH' && /headSha/.test(error.message),
+  );
   assert.deepEqual(createHarnessReviewEvent(verdict, expected, { at: '2026-08-07T00:00:00.000Z' }), {
     event: 'harness-review',
     stage: 'quick',
