@@ -331,6 +331,14 @@ function updateMergedIssueStatus(root, effect, patch) {
   });
 }
 
+function clearIssueLifecycleLabelsOnce(root, effect, issueLabelCleaner) {
+  const managed = loadPrReviewStore(root).managedPullRequests.find((record) => record.id === effect.managedId);
+  if (managed?.issueLifecycleLabelsClearedAt) return { changed: false, skipped: true };
+  const result = issueLabelCleaner(root, effect.issueNumber);
+  updateMergedIssueStatus(root, effect, { issueLifecycleLabelsClearedAt: nowIso() });
+  return result;
+}
+
 function completeMergedLifecycle(root, effect) {
   const completed = markIssueMerged(root, {
     issueNumber: effect.issueNumber,
@@ -364,14 +372,14 @@ export function applyMergedIssueEffect(root, effect, {
     return { issueClosed: false, needsOperator: true, reviewEvidenceMissing: true };
   }
   if (!effect.verifyIssueClosure) {
-    issueLabelCleaner(root, effect.issueNumber);
+    clearIssueLifecycleLabelsOnce(root, effect, issueLabelCleaner);
     lifecycleCompleter(root, effect);
     return { issueClosed: true, verificationSkipped: true };
   }
   const issue = issueReader(root, effect.issueNumber);
   if (!issue) throw new Error(`Could not verify associated issue #${effect.issueNumber} after merge.`);
   if (String(issue.state).toUpperCase() === 'CLOSED') {
-    issueLabelCleaner(root, effect.issueNumber);
+    clearIssueLifecycleLabelsOnce(root, effect, issueLabelCleaner);
     lifecycleCompleter(root, effect);
     return { issueClosed: true };
   }
@@ -397,7 +405,7 @@ export function applyMergedIssueEffect(root, effect, {
     });
     return { issueClosed: false, retryPending: true };
   }
-  issueLabelCleaner(root, effect.issueNumber);
+  clearIssueLifecycleLabelsOnce(root, effect, issueLabelCleaner);
   lifecycleCompleter(root, effect);
   return { issueClosed: true, closedByPaseo: true };
 }
@@ -492,7 +500,7 @@ export function reconcileManagedPullRequests(root, options = {}) {
   const records = store.managedPullRequests.filter((managed) => {
     if (managed.reviewState === 'paused') return false;
     const pendingMergedCompletion = managed.reviewState === 'merged'
-      && (managed.issueClosurePending || managed.lifecycleCompletionPending);
+      && (managed.issueClosurePending || managed.lifecycleCompletionPending || !managed.issueLifecycleLabelsClearedAt);
     return !TERMINAL_PR_STATES.has(managed.reviewState) || pendingMergedCompletion;
   });
   const result = { checked: 0, changed: 0, errors: [] };

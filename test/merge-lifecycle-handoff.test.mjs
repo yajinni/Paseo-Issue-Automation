@@ -249,6 +249,58 @@ test('verified merged issue completion clears lifecycle labels before durable co
   assert.equal(loadRun(root, 101).phase, 'completed');
 });
 
+test('legacy terminal merged records reconcile lifecycle labels once', (t) => {
+  const root = repo(t);
+  const managed = prepareMergedManaged(root);
+  mutatePrReviewStore(root, (store) => {
+    const record = store.managedPullRequests[0];
+    record.issueClosurePending = false;
+    record.lifecycleCompletionPending = false;
+    const job = store.reviewJobs[0];
+    job.reviewRequestId = 'review-seed';
+    job.state = 'completed';
+    job.result = 'approved';
+    job.resultSourceId = 'review-seed';
+    job.completedAt = '2026-08-09T01:01:00.000Z';
+  });
+
+  const snapshot = {
+    number: 45,
+    state: 'MERGED',
+    mergedAt: '2026-08-09T01:02:00.000Z',
+    headRefOid: head,
+    body: 'Closes #101',
+    closingIssuesReferences: [{ number: 101 }],
+    labels: [],
+    comments: [],
+    reviews: [],
+  };
+  let cleanupCalls = 0;
+  const options = {
+    snapshot,
+    effectRunner(effectRoot, _managedId, effects) {
+      return effects.map((effect) => {
+        if (effect.type !== 'verify-merged-issue') return { cleared: true };
+        return applyMergedIssueEffect(effectRoot, effect, {
+          issueReader: () => ({ number: 101, state: 'CLOSED' }),
+          issueLabelCleaner: () => { cleanupCalls += 1; return { changed: true }; },
+        });
+      });
+    },
+  };
+
+  const first = reconcileManagedPullRequests(root, options);
+  assert.deepEqual(first.errors, []);
+  assert.equal(first.checked, 1);
+  assert.equal(cleanupCalls, 1);
+  assert.ok(loadPrReviewStore(root).managedPullRequests.find((record) => record.id === managed.id).issueLifecycleLabelsClearedAt);
+
+  const second = reconcileManagedPullRequests(root, options);
+  assert.deepEqual(second.errors, []);
+  assert.equal(second.checked, 0);
+  assert.equal(cleanupCalls, 1);
+});
+
 test('merged issue completion stays fail-closed when the PR association is ambiguous', (t) => {
   const root = repo(t);
   const managed = prepareMergedManaged(root);
@@ -450,6 +502,7 @@ test('merged records with pending lifecycle completion remain eligible after per
   mutatePrReviewStore(root, (store) => {
     store.managedPullRequests[0].issueClosurePending = false;
     store.managedPullRequests[0].lifecycleCompletionPending = false;
+    store.managedPullRequests[0].issueLifecycleLabelsClearedAt = '2026-08-09T01:03:00.000Z';
   });
   const second = reconcileManagedPullRequests(root, {
     now: 6000,
