@@ -4,7 +4,7 @@ function text(value) {
   return value === undefined || value === null ? '' : String(value).trim();
 }
 
-function safeSchemaDetail(value) {
+function safeSchemaDetail(value, { allowGenericInvalidJson = false } = {}) {
   const raw = text(value);
   if (!raw) return null;
   if (/INVALID_OUTPUT_SCHEMA/i.test(raw)) {
@@ -14,19 +14,31 @@ function safeSchemaDetail(value) {
   }
   const parseJson = /Failed to parse output schema JSON:\s*([^\r\n]+)/i.exec(raw);
   if (parseJson) return `Failed to parse output schema JSON: ${text(parseJson[1])}`.slice(0, 700);
-  const invalidJson = /returned invalid JSON:\s*([^\r\n]+)/i.exec(raw);
-  if (invalidJson) return `returned invalid JSON: ${text(invalidJson[1])}`.slice(0, 700);
+  if (allowGenericInvalidJson) {
+    const invalidJson = /returned invalid JSON:\s*([^\r\n]+)/i.exec(raw);
+    if (invalidJson) return `returned invalid JSON: ${text(invalidJson[1])}`.slice(0, 700);
+  }
   return null;
 }
 
 export function structuredReviewSchemaFailureDetail(error) {
   if (!error) return null;
+  const command = text(error.command).toLowerCase();
+  if (command && command !== 'paseo') return null;
+
   for (const candidate of [error.stderr, error.stdout]) {
     const detail = safeSchemaDetail(candidate);
     if (detail) return detail;
   }
   if (error.code === 'INVALID_OUTPUT_SCHEMA') return 'INVALID_OUTPUT_SCHEMA';
-  return safeSchemaDetail(error.message);
+
+  const message = text(error.message);
+  const schemaDetail = safeSchemaDetail(message);
+  if (schemaDetail) return schemaDetail;
+  if (/^paseo returned invalid JSON:/i.test(message)) {
+    return safeSchemaDetail(message, { allowGenericInvalidJson: true });
+  }
+  return null;
 }
 
 export function reviewRequestIdentity({
