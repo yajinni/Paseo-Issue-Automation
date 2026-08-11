@@ -21,21 +21,53 @@ import {
   safeCommandErrorArgs,
   safeCommandErrorLabel,
   sanitizeDurableText,
+  sanitizeLifecycleEventForPersistence,
   sanitizeRunStateForPersistence,
 } from '../src/persistent-text-safety.mjs';
 import { run } from '../src/process.mjs';
-import { loadRun, runFile, saveRun } from '../src/state.mjs';
+import {
+  issueLifecycleFile,
+  loadIssueLifecycle,
+  loadRun,
+  runFile,
+  saveRun,
+} from '../src/state.mjs';
 
 const PROMPT_SENTINEL = 'FULL REVIEW PROMPT MUST NEVER BE DURABLE';
 const SCHEMA_SENTINEL = '{"type":"object","properties":{"summary":{"type":"string"}}}';
 const PARSE_DETAIL = 'Unterminated string in JSON at position 855 (line 1 column 856)';
 const LEGACY_FAILURE = `paseo run --provider fixture/reviewer --workspace wks_49e6c624fad052b4 --output-schema ${SCHEMA_SENTINEL} ${PROMPT_SENTINEL} failed: {"error":{"code":"INVALID_OUTPUT_SCHEMA","message":"Failed to parse output schema JSON","details":"${PARSE_DETAIL}"}}`;
+const CANARY_HEAD = '160b1eb866ff91406c9dc4e470c55cf33efffefd';
+const REVIEW_REQUEST_ID = `issue-239:pr-246:${CANARY_HEAD}:quick:round-1`;
 
 function repository(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-persistent-text-'));
   execFileSync('git', ['init', '-q'], { cwd: root });
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
+}
+
+function legacyLifecycleEvent(overrides = {}) {
+  return {
+    id: 'legacy-review-failure',
+    at: '2026-08-11T05:00:00.000Z',
+    issueNumber: 239,
+    attempt: 1,
+    type: 'review-schema-retry-exhausted',
+    status: 'error',
+    source: 'controller',
+    message: `Structured review failed: ${LEGACY_FAILURE}`,
+    evidence: {
+      reviewRequestId: REVIEW_REQUEST_ID,
+      pullRequestNumber: 246,
+      headSha: CANARY_HEAD,
+      stage: 'quick',
+      round: 1,
+      restartPreviousReason: LEGACY_FAILURE,
+      diagnostics: { reason: LEGACY_FAILURE },
+    },
+    ...overrides,
+  };
 }
 
 test('legacy Paseo run failures keep useful parse evidence but remove command schema and prompt', () => {
@@ -104,6 +136,112 @@ test('run state sanitizer does not rewrite unrelated activity and event text', (
     events: [{ event: 'review', summary: 'Reviewer requested one code change.' }],
   };
   assert.deepEqual(sanitizeRunStateForPersistence(state), state);
+});
+
+test('legacy lifecycle event sanitizer preserves identity while scrubbing nested prompt-bearing evidence', () => {
+  const stored = legacyLifecycleEvent();
+  const sanitized = sanitizeLifecycleEventForPersistence(stored);
+  assert.equal(sanitized.id, stored.id);
+  assert.equal(sanitized.at, stored.at);
+  assert.equal(sanitized.issueNumber, 239);
+  assert.equal(sanitized.attempt, 1);
+  assert.equal(sanitized.type, stored.type);
+  assert.equal(sanitized.status, stored.status);
+  assert.equal(sanitized.source, stored.source);
+  assert.equal(sanitized.evidence.reviewRequestId, REVIEW_REQUEST_ID);
+  assert.equal(sanitized.evidence.headSha, CANARY_HEAD);
+  assert.equal(sanitized.evidence.pullRequestNumber, 246);
+  assert.equal(sanitized.evidence.stage, 'quick');
+  assert.equal(sanitized.evidence.round, 1);
+  assert.match(sanitized.message, /INVALID_OUTPUT_SCHEMA/);
+  assert.match(sanitized.evidence.restartPreviousReason, /position 855/);
+  assert.match(sanitized.evidence.diagnostics.reason, /position 855/);
+  assert.doesNotMatch(JSON.stringify(sanitized), new RegExp(PROMPT_SENTINEL));
+  assert.doesNotMatch(JSON.stringify(sanitized), /fixture\/reviewer/);
+  assert.doesNotMatch(JSON.stringify(sanitized), /output-schema/);
+});
+
+test('loadIssueLifecycle atomically migrates legacy prompt-bearing JSONL on read', (t) => {
+  const root = repository(t);
+  const file = issueLifecycleFile(root, 239);
+  const stored = legacyLifecycleEvent();
+  writeFileSync(file, `${JSON.stringify(stored)}\n`, { encoding: 'utf8', mode: 0o600 });
+
+  const loaded = loadIssueLifecycle(root, 239, { limit: 20 });
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].id, stored.id);
+  assert.equal(loaded[0].at, stored.at);
+  assert.equal(loaded[0].evidence.reviewRequestId, REVIEW_REQUEST_ID);
+  assert.equal(loaded[0].evidence.headSha, CANARY_HEAD);
+  assert.match(loaded[0].message, /INVALID_OUTPUT_SCHEMA/);
+  assert.match(loaded[0].message, /position 855/);
+
+  const raw = readFileSync(file, 'utf8');
+  assert.doesNotMatch(raw, new RegExp(PROMPT_SENTINEL));
+  assert.doesNotMatch(raw, /fixture\/reviewer/);
+  assert.doesNotMatch(raw, /output-schema/);
+  assert.doesNotMatch(raw, /properties/);
+  assert.match(raw, /INVALID_OUTPUT_SCHEMA/);
+  assert.match(raw, /position 855/);
+  assert.match(raw, new RegExp(CANARY_HEAD));
+  assert.match(raw, new RegExp(REVIEW_REQUEST_ID));
+});
+
+test('ordinary lifecycle JSONL is not rewritten when sanitization makes no change', (t) => {
+  const root = repository(t);
+  const file = issueLifecycleFile(root, 239);
+  const raw = '{"id": "ordinary", "at": "2026-08-11T05:00:00.000Z", "issueNumber": 239, "attempt": 1, "type": "review-started", "status": "success", "source": "controller", "message": "Quick review started.", "evidence": {"headSha": "160b1eb866ff91406c9dc4e470c55cf33efffefd"}}\n';
+  writeFileSync(file, raw, { encoding: 'utf8', mode: 0o600 });
+
+  const loaded = loadIssueLifecycle(root, 239, { limit: 20 });
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].id, 'ordinary');
+  assert.equal(readFileSync(file, 'utf8'), raw);
+});
+
+test('malformed lifecycle JSONL is never partially rewritten or stripped during migration', (t) => {
+  const root = repository(t);
+  const file = issueLifecycleFile(root, 239);
+  const first = JSON.stringify(legacyLifecycleEvent());
+  const last = JSON.stringify({
+    id: 'ordinary-after-malformed',
+    at: '2026-08-11T05:01:00.000Z',
+    issueNumber: 239,
+    attempt: 1,
+    type: 'controller-stopped',
+    status: 'success',
+    source: 'controller',
+    message: 'Controller stopped.',
+    evidence: { headSha: CANARY_HEAD },
+  });
+  const raw = `${first}\n{malformed lifecycle json\n${last}\n`;
+  writeFileSync(file, raw, { encoding: 'utf8', mode: 0o600 });
+
+  const loaded = loadIssueLifecycle(root, 239, { all: true });
+  assert.equal(loaded.length, 2);
+  assert.equal(loaded[0].id, 'legacy-review-failure');
+  assert.equal(loaded[1].id, 'ordinary-after-malformed');
+  assert.doesNotMatch(JSON.stringify(loaded[0]), new RegExp(PROMPT_SENTINEL));
+  assert.equal(readFileSync(file, 'utf8'), raw);
+});
+
+test('Logs consumes loadIssueLifecycle and migrates legacy lifecycle history before projection', (t) => {
+  const root = repository(t);
+  const file = issueLifecycleFile(root, 239);
+  writeFileSync(file, `${JSON.stringify(legacyLifecycleEvent())}\n`, { encoding: 'utf8', mode: 0o600 });
+
+  const logs = listControllerLogs(root, { since: '2026-08-11T00:00:00.000Z', limit: 20 }).events;
+  const lifecycle = logs.find((event) => event.id === 'issue-lifecycle:legacy-review-failure');
+  assert.ok(lifecycle);
+  assert.match(lifecycle.message, /INVALID_OUTPUT_SCHEMA/);
+  assert.match(lifecycle.details.evidence.restartPreviousReason, /position 855/);
+  assert.equal(lifecycle.details.evidence.headSha, CANARY_HEAD);
+  assert.doesNotMatch(JSON.stringify(lifecycle), new RegExp(PROMPT_SENTINEL));
+
+  const raw = readFileSync(file, 'utf8');
+  assert.doesNotMatch(raw, new RegExp(PROMPT_SENTINEL));
+  assert.doesNotMatch(raw, /output-schema/);
+  assert.match(raw, /INVALID_OUTPUT_SCHEMA/);
 });
 
 test('controller logs sanitize new and historical prompt-bearing free-form strings', (t) => {
