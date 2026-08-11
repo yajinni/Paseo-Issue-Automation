@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { markIssueMerged } from '../src/issue-merge-state.mjs';
+import { LIFECYCLE_LABEL_CATALOG } from '../src/label-catalog.mjs';
+import { clearIssueLifecycleLabels } from '../src/pr-review-github.mjs';
 import {
   claimNextReview,
   markReviewSubmitted,
@@ -108,6 +110,29 @@ function mergedEffect(managed, overrides = {}) {
   };
 }
 
+test('issue lifecycle label cleanup is deterministic and repeatable', () => {
+  const calls = [];
+  const first = clearIssueLifecycleLabels('/repo', 101, {
+    runner(_command, args) {
+      calls.push(args);
+      return { ok: true };
+    },
+  });
+  const second = clearIssueLifecycleLabels('/repo', 101, {
+    runner(_command, args) {
+      calls.push(args);
+      return { ok: true };
+    },
+  });
+  const expected = Object.keys(LIFECYCLE_LABEL_CATALOG);
+  assert.deepEqual(first, { changed: true, removed: expected });
+  assert.deepEqual(second, first);
+  assert.deepEqual(calls, [
+    ['issue', 'edit', '101', ...expected.flatMap((label) => ['--remove-label', label])],
+    ['issue', 'edit', '101', ...expected.flatMap((label) => ['--remove-label', label])],
+  ]);
+});
+
 test('review prompt leaves repair dispatch to Paseo and requires approval evidence before merge', () => {
   const prompt = renderReviewPrompt({
     repository: 'owner/repo',
@@ -179,6 +204,7 @@ test('merged integration-branch PR closes an explicitly associated open issue wi
 
   let issueState = 'OPEN';
   let closeCalls = 0;
+  let labelCleanup = null;
   const result = applyMergedIssueEffect(root, mergedEffect(managed), {
     issueReader() { return { number: 101, state: issueState }; },
     issueCloser(_root, issueNumber, prNumber) {
@@ -188,10 +214,14 @@ test('merged integration-branch PR closes an explicitly associated open issue wi
       issueState = 'CLOSED';
       return { closed: true };
     },
+    issueLabelCleaner(_root, issueNumber) {
+      labelCleanup = { issueNumber, labels: Object.keys(LIFECYCLE_LABEL_CATALOG) };
+    },
   });
 
   assert.deepEqual(result, { issueClosed: true, closedByPaseo: true });
   assert.equal(closeCalls, 1);
+  assert.deepEqual(labelCleanup, { issueNumber: 101, labels: Object.keys(LIFECYCLE_LABEL_CATALOG) });
   const run = loadRun(root, 101);
   assert.equal(run.status, 'completed');
   assert.equal(run.phase, 'completed');
@@ -201,6 +231,22 @@ test('merged integration-branch PR closes an explicitly associated open issue wi
   assert.equal(stored.issueClosurePending, false);
   assert.equal(stored.lifecycleCompletionPending, false);
   assert.equal(stored.lastError, null);
+});
+
+test('verified merged issue completion clears lifecycle labels before durable completion', (t) => {
+  const root = repo(t);
+  const managed = prepareMergedManaged(root);
+  const cleanupCalls = [];
+
+  applyMergedIssueEffect(root, mergedEffect(managed), {
+    issueReader() { return { number: 101, state: 'CLOSED' }; },
+    issueLabelCleaner(_root, issueNumber) {
+      cleanupCalls.push({ issueNumber, labels: Object.keys(LIFECYCLE_LABEL_CATALOG) });
+    },
+  });
+
+  assert.deepEqual(cleanupCalls, [{ issueNumber: 101, labels: Object.keys(LIFECYCLE_LABEL_CATALOG) }]);
+  assert.equal(loadRun(root, 101).phase, 'completed');
 });
 
 test('merged issue completion stays fail-closed when the PR association is ambiguous', (t) => {

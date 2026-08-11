@@ -542,6 +542,7 @@ test('release matrix: merged PR closes and verifies only the explicitly associat
         return applyMergedIssueEffect(effectRoot, effect, {
           issueReader: () => ({ number: ISSUE, state: closed ? 'CLOSED' : 'OPEN' }),
           issueCloser: (_root, issueNumber) => { closedIssues.push(issueNumber); closed = true; },
+          issueLabelCleaner: () => ({ changed: false }),
           lifecycleCompleter: (lifecycleRoot, lifecycleEffect) => markIssueMerged(lifecycleRoot, lifecycleEffect),
         });
       });

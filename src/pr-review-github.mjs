@@ -1,3 +1,4 @@
+import { LIFECYCLE_LABEL_CATALOG } from './label-catalog.mjs';
 import { PR_REVIEW_LABELS } from './pr-review-store.mjs';
 import { run, runJson } from './process.mjs';
 
@@ -33,6 +34,15 @@ export function setPrReviewLabels(root, prNumber, { add = [], remove = [] } = {}
   const result = run('gh', args, { cwd: root, allowFailure: true });
   if (!result.ok) throw new Error(result.stderr || result.stdout || `Could not update labels on PR #${prNumber}.`);
   return { changed: true };
+}
+
+export function clearIssueLifecycleLabels(root, issueNumber, { runner = run } = {}) {
+  const labels = Object.keys(LIFECYCLE_LABEL_CATALOG);
+  const args = ['issue', 'edit', String(issueNumber)];
+  for (const label of labels) args.push('--remove-label', label);
+  const result = runner('gh', args, { cwd: root, allowFailure: true });
+  if (!result.ok) throw new Error(result.stderr || result.stdout || `Could not clear lifecycle labels from issue #${issueNumber}.`);
+  return { changed: true, removed: labels };
 }
 
 export function managedPrSnapshot(root, prNumber) {

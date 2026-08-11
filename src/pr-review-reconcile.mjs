@@ -15,6 +15,7 @@ import {
   recordApprovedBrowserReview,
 } from './pr-review-finalize.mjs';
 import {
+  clearIssueLifecycleLabels,
   closeAssociatedIssue,
   issueSnapshot,
   managedPrSnapshot,
@@ -351,6 +352,7 @@ export function applyMergedIssueEffect(root, effect, {
   issueReader = issueSnapshot,
   issueCloser = closeAssociatedIssue,
   lifecycleCompleter = completeMergedLifecycle,
+  issueLabelCleaner = clearIssueLifecycleLabels,
 } = {}) {
   if (!effect.reviewVerified) {
     const message = `PR #${effect.pullRequestNumber} merged, but exact approved review evidence for ${effect.headSha} was not recorded.`;
@@ -362,12 +364,14 @@ export function applyMergedIssueEffect(root, effect, {
     return { issueClosed: false, needsOperator: true, reviewEvidenceMissing: true };
   }
   if (!effect.verifyIssueClosure) {
+    issueLabelCleaner(root, effect.issueNumber);
     lifecycleCompleter(root, effect);
     return { issueClosed: true, verificationSkipped: true };
   }
   const issue = issueReader(root, effect.issueNumber);
   if (!issue) throw new Error(`Could not verify associated issue #${effect.issueNumber} after merge.`);
   if (String(issue.state).toUpperCase() === 'CLOSED') {
+    issueLabelCleaner(root, effect.issueNumber);
     lifecycleCompleter(root, effect);
     return { issueClosed: true };
   }
@@ -393,6 +397,7 @@ export function applyMergedIssueEffect(root, effect, {
     });
     return { issueClosed: false, retryPending: true };
   }
+  issueLabelCleaner(root, effect.issueNumber);
   lifecycleCompleter(root, effect);
   return { issueClosed: true, closedByPaseo: true };
 }
