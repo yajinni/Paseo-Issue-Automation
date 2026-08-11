@@ -5,6 +5,7 @@ import {
   buildRepairPrompt,
 } from './controller-prompts.mjs';
 import {
+  configuredReviewRound,
   enterConfiguredQuickHandoff,
   markReviewNeedsAttention,
   reviewRepairInstructions,
@@ -14,6 +15,10 @@ import { finalizeApprovedPullRequest } from './approved-pr-finalization.mjs';
 import { recordEvent, terminalState } from './automation.mjs';
 import { inspectBaseFreshness } from './base-freshness.mjs';
 import { currentPr, ensureDraftPr } from './controller-draft-pr.mjs';
+import {
+  reviewRequestIdentity,
+  runStructuredReviewWithRetry,
+} from './review-output-retry.mjs';
 import { appendIssueLifecycle, loadConfig, loadRun, saveRun } from './state.mjs';
 import { agentCommandTimeoutMs, run } from './process.mjs';
 
@@ -235,7 +240,96 @@ async function execute(root, issueNumber) {
       continue;
     }
 
-    const review = runConfiguredHarnessReview(root, issueNumber, snapshot, { config });
+    const reviewRound = configuredReviewRound(snapshot.state, config);
+    const reviewRequestId = reviewRequestIdentity({
+      issueNumber,
+      pullRequestNumber: snapshot.pr.number,
+      headSha: snapshot.head,
+      stage: reviewRound.stage,
+      round: reviewRound.round,
+    });
+    updateState(root, issueNumber, {
+      reviewRequestId,
+      reviewSchemaRetryCount: 0,
+    });
+    const reviewAttempt = runStructuredReviewWithRetry({
+      expectedHeadSha: snapshot.head,
+      requestId: reviewRequestId,
+      currentHead: () => currentPr(root, snapshot.state)?.headRefOid || null,
+      runReview: () => runConfiguredHarnessReview(root, issueNumber, snapshot, { config }),
+      onRetry: ({ attempt, detail }) => {
+        updateState(root, issueNumber, {
+          reviewRequestId,
+          reviewSchemaRetryCount: attempt - 1,
+        }, {
+          type: 'review-schema-retry',
+          details: `Structured review output was invalid; retrying the same exact-head review request (${reviewRequestId}) once. ${detail}`,
+        });
+        appendIssueLifecycle(root, issueNumber, {
+          attempt: snapshot.state.attempt,
+          type: 'review-schema-retry',
+          status: 'warning',
+          source: 'controller',
+          message: `Retrying malformed structured review output for exact head ${snapshot.head}.`,
+          evidence: {
+            reviewRequestId,
+            pullRequestNumber: snapshot.pr.number,
+            headSha: snapshot.head,
+            stage: reviewRound.stage,
+            round: reviewRound.round,
+            retryAttempt: attempt,
+          },
+        });
+      },
+      onStale: ({ currentHeadSha }) => {
+        updateState(root, issueNumber, {
+          reviewRequestId,
+          reviewSchemaRetryCount: 0,
+        }, {
+          type: 'review-schema-retry-stale',
+          details: `Structured review retry was skipped because PR #${snapshot.pr.number} moved from ${snapshot.head} to ${currentHeadSha || '(missing)'}.`,
+        });
+        appendIssueLifecycle(root, issueNumber, {
+          attempt: snapshot.state.attempt,
+          type: 'review-schema-retry-stale',
+          status: 'warning',
+          source: 'controller',
+          message: 'Malformed review output was discarded because the exact PR head changed before retry.',
+          evidence: {
+            reviewRequestId,
+            pullRequestNumber: snapshot.pr.number,
+            requestedHeadSha: snapshot.head,
+            currentHeadSha: currentHeadSha || null,
+          },
+        });
+      },
+      onExhausted: ({ attempt, detail }) => {
+        updateState(root, issueNumber, {
+          reviewRequestId,
+          reviewSchemaRetryCount: attempt - 1,
+        }, {
+          type: 'review-schema-retry-exhausted',
+          details: `Structured review output remained invalid after the bounded retry for ${reviewRequestId}. ${detail}`,
+        });
+        appendIssueLifecycle(root, issueNumber, {
+          attempt: snapshot.state.attempt,
+          type: 'review-schema-retry-exhausted',
+          status: 'error',
+          source: 'controller',
+          message: `Structured review output remained invalid after ${attempt} attempts for exact head ${snapshot.head}.`,
+          evidence: {
+            reviewRequestId,
+            pullRequestNumber: snapshot.pr.number,
+            headSha: snapshot.head,
+            stage: reviewRound.stage,
+            round: reviewRound.round,
+            attempts: attempt,
+          },
+        });
+      },
+    });
+    if (reviewAttempt.stale) continue;
+    const review = reviewAttempt.review;
     if (review.decision.action === 'stale') continue;
     if (review.decision.action === 'repair') {
       const findings = reviewRepairInstructions(review);
