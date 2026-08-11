@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import path from 'node:path';
 import {
   FAILED_ATTEMPT_RECOVERY_MAX,
   failedAttemptRecoveryEligibility,
@@ -74,7 +75,7 @@ test('failed attempt recovery reuses the same workspace, branch, attempt, and co
 
   assert.equal(spawns.length, 1);
   assert.equal(spawns[0].command, '/node');
-  assert.deepEqual(spawns[0].args, ['/controller-worker.mjs', '/repo', '274']);
+  assert.deepEqual(spawns[0].args, ['/controller-worker.mjs', path.resolve('/repo'), '274']);
   assert.equal(spawns[0].options.detached, true);
 });
 
