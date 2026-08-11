@@ -2,6 +2,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  safeCommandErrorArgs,
+  safeCommandErrorLabel,
+  sanitizeDurableText,
+} from './persistent-text-safety.mjs';
 
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
 export const DEFAULT_AGENT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -278,9 +283,10 @@ export function run(command, args = [], options = {}) {
       const detail = timedOut
         ? `timed out after ${timeoutMs}ms`
         : output.stderr || output.stdout || output.error?.message || `exit ${output.exitCode}`;
-      const error = new Error(`${command} ${effectiveArgs.join(' ')} failed: ${detail}`);
+      const label = safeCommandErrorLabel(command, effectiveArgs);
+      const error = new Error(sanitizeDurableText(`${label} failed: ${detail}`));
       error.command = command;
-      error.args = [...effectiveArgs];
+      error.args = safeCommandErrorArgs(command, effectiveArgs);
       error.exitCode = output.exitCode;
       error.timedOut = timedOut;
       error.timeoutMs = timeoutMs;
