@@ -36,6 +36,15 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function normalizeIssueTemplate(value) {
+  return String(value || '').replace(/\r\n/g, '\n').trimEnd() + '\n';
+}
+
+export function templateMatchesExpected(value, expectedSha256) {
+  const raw = String(value || '');
+  return [raw, normalizeIssueTemplate(raw)].some((candidate) => sha256(candidate) === expectedSha256);
+}
+
 function sameJson(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -121,14 +130,14 @@ export function activeAutomationIssues(root) {
 
 export function installIssueTemplate(root, { overwriteManaged = false } = {}) {
   const target = issueTemplatePath(root);
-  const expected = readFileSync(templateFile, 'utf8');
+  const expected = normalizeIssueTemplate(readFileSync(templateFile, 'utf8'));
   const integration = loadIntegration(root);
   const existed = existsSync(target);
 
   if (existed) {
     const current = readFileSync(target, 'utf8');
     const managed = integration.issueTemplate?.createdByPackage === true;
-    if (current !== expected && !(overwriteManaged && managed)) {
+    if (normalizeIssueTemplate(current) !== expected && !(overwriteManaged && managed)) {
       throw new Error(`${path.relative(root, target)} already exists with different content. It was not overwritten.`);
     }
   }
@@ -247,7 +256,7 @@ export function removeIssueTemplate(root) {
 
   if (existsSync(target)) {
     const current = readFileSync(target, 'utf8');
-    if (sha256(current) !== managed.expectedSha256) {
+    if (!templateMatchesExpected(current, managed.expectedSha256)) {
       throw new Error('The installed issue template has been changed since installation. It was not deleted.');
     }
     rmSync(target);
@@ -418,7 +427,7 @@ function issueTemplateManagement(root, integrationState) {
   const managed = integrationState.issueTemplate;
   let unchanged = false;
   if (present && managed?.expectedSha256) {
-    unchanged = sha256(readFileSync(target, 'utf8')) === managed.expectedSha256;
+    unchanged = templateMatchesExpected(readFileSync(target, 'utf8'), managed.expectedSha256);
   }
   return {
     path: path.relative(root, target),
