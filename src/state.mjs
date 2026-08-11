@@ -88,7 +88,22 @@ export function atomicWrite(file, content, options = {}) {
     ? { encoding: 'utf8', mode: options.mode }
     : { encoding: 'utf8' };
   writeFileSync(temporary, content, writeOptions);
-  renameSync(temporary, file);
+  const rename = options.rename || renameSync;
+  const wait = options.wait || ((milliseconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds));
+  const retries = Number.isInteger(options.renameRetries) && options.renameRetries >= 0 ? options.renameRetries : 8;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      rename(temporary, file);
+      return;
+    } catch (error) {
+      const transient = ['EACCES', 'EBUSY', 'EPERM'].includes(error?.code);
+      if (!transient || attempt === retries) {
+        try { rmSync(temporary, { force: true }); } catch {}
+        throw error;
+      }
+      wait(25 * (attempt + 1));
+    }
+  }
 }
 
 function readJson(file, fallback) {
