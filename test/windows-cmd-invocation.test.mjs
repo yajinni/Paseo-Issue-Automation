@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,16 +8,9 @@ import {
   materializePaseoOutputSchemaArgs,
   run,
 } from '../src/process.mjs';
+import { REVIEW_WORKFLOW_OUTPUT_SCHEMA } from '../src/review-workflow-prompts.mjs';
 
-const structuredSchema = JSON.stringify({
-  type: 'object',
-  additionalProperties: false,
-  required: ['summary'],
-  properties: {
-    summary: { type: 'string' },
-    headSha: { type: 'string', pattern: '^[0-9a-fA-F]{7,64}$' },
-  },
-});
+const structuredSchema = REVIEW_WORKFLOW_OUTPUT_SCHEMA;
 
 test('Windows batch shims use call with a verbatim cmd payload', () => {
   const executable = String.raw`C:\Users\Yajinni\AppData\Local\Programs\Paseo\resources\bin\paseo.cmd`;
@@ -135,7 +128,7 @@ test('run executes a real cmd file with spaces in its path and arguments', {
   }
 });
 
-test('Windows paseo run transports inline output schema through a temporary file', {
+test('Windows paseo run transports the exact managed-review schema through a temporary file', {
   skip: process.platform !== 'win32',
 }, () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'paseo schema live cmd-'));
@@ -162,6 +155,45 @@ test('Windows paseo run transports inline output schema through a temporary file
     });
     assert.equal(result.ok, true);
     assert.equal(readFileSync(capture, 'utf8'), structuredSchema);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Windows paseo run removes the temporary schema after a failed reviewer invocation', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'paseo schema failed cmd-'));
+  const bin = path.join(directory, 'bin');
+  const capture = path.join(directory, 'captured-schema.json');
+  const pathCapture = path.join(directory, 'schema-path.txt');
+  const script = path.join(bin, 'paseo.cmd');
+  mkdirSync(bin, { recursive: true });
+  try {
+    writeFileSync(
+      script,
+      '@echo off\r\ncopy /y "%~3" "%PASEO_SCHEMA_CAPTURE%" >nul\r\n> "%PASEO_SCHEMA_PATH_CAPTURE%" echo %~3\r\necho reviewer failed 1>&2\r\nexit /b 7\r\n',
+      'utf8',
+    );
+    const inheritedPath = process.env.Path || process.env.PATH || '';
+    const env = {
+      ...process.env,
+      Path: `${bin}${path.delimiter}${inheritedPath}`,
+      PATH: `${bin}${path.delimiter}${inheritedPath}`,
+      PASEO_SCHEMA_CAPTURE: capture,
+      PASEO_SCHEMA_PATH_CAPTURE: pathCapture,
+    };
+
+    assert.throws(
+      () => run('paseo', ['run', '--output-schema', structuredSchema, 'review this pull request'], {
+        env,
+        timeoutMs: 5_000,
+      }),
+      /reviewer failed/,
+    );
+    const temporarySchemaPath = readFileSync(pathCapture, 'utf8').trim();
+    assert.equal(readFileSync(capture, 'utf8'), structuredSchema);
+    assert.equal(existsSync(temporarySchemaPath), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
