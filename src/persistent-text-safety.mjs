@@ -25,7 +25,7 @@ export function sanitizeDurableText(value) {
     markerLength = match[0].length;
   }
   FAILURE_MARKER.lastIndex = 0;
-  if (markerIndex < 0) return text;
+  if (markerIndex < 0) return `Paseo ${command[1].toLowerCase()} failed.`;
 
   const subcommand = command[1].toLowerCase();
   const detail = conciseFailureDetail(text.slice(markerIndex + markerLength));

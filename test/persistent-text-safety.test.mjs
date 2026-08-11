@@ -82,6 +82,15 @@ test('legacy Paseo run failures keep useful parse evidence but remove command sc
   assert.doesNotMatch(sanitized, /properties/);
 });
 
+test('truncated Paseo run failures fail closed when the parser detail was cut off', () => {
+  const truncated = LEGACY_FAILURE.slice(0, LEGACY_FAILURE.indexOf(' failed:'));
+  const sanitized = sanitizeDurableText(truncated);
+  assert.equal(sanitized, 'Paseo run failed.');
+  assert.doesNotMatch(sanitized, /fixture\/reviewer/);
+  assert.doesNotMatch(sanitized, /output-schema/);
+  assert.doesNotMatch(sanitized, new RegExp(PROMPT_SENTINEL));
+});
+
 test('normal durable reasons are unchanged', () => {
   const reason = 'GitHub reports merge conflicts with the current base branch.';
   assert.equal(sanitizeDurableText(reason), reason);
