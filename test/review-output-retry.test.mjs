@@ -13,6 +13,13 @@ function schemaError(detail = 'Unterminated string in JSON at position 855') {
   return error;
 }
 
+function metadataError() {
+  const error = new Error('Reviewer verdict stage does not match the requested review.');
+  error.command = 'paseo';
+  error.code = 'REVIEW_METADATA_MISMATCH';
+  return error;
+}
+
 test('structured review retries one malformed schema result with the same request identity', () => {
   const requestId = reviewRequestIdentity({
     issueNumber: 239,
@@ -63,6 +70,24 @@ test('structured review does not retry stale exact-head work', () => {
   assert.equal(result.stale, true);
   assert.equal(attempts, 1);
   assert.equal(stale.currentHeadSha, 'deadbee84539f48eb0b793cb1183916ea6613b94');
+});
+
+test('structured review retries an exact-request metadata mismatch without accepting it', () => {
+  let attempts = 0;
+  const result = runStructuredReviewWithRetry({
+    expectedHeadSha: '1a3097b84539f48eb0b793cb1183916ea6613b94',
+    requestId: 'issue-239:pr-246:1a3097b:quick:round-2',
+    currentHead: () => '1a3097b84539f48eb0b793cb1183916ea6613b94',
+    runReview() {
+      attempts += 1;
+      if (attempts === 1) throw metadataError();
+      return { decision: { action: 'quick-passed' } };
+    },
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(result.stale, false);
+  assert.equal(result.attempts, 2);
 });
 
 test('structured review fails closed after the bounded retry without leaking the original prompt', () => {
