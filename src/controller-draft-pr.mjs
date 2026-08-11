@@ -1,7 +1,9 @@
 import { loadConfig } from './state.mjs';
 import { run, runJson } from './process.mjs';
 
-const PR_JSON_FIELDS = 'number,url,isDraft,headRefOid,baseRefName,baseRefOid,mergeable,mergeStateStatus,statusCheckRollup';
+const PR_JSON_FIELDS = 'number,url,isDraft,headRefOid,baseRefName,baseRefOid,mergeable,mergeStateStatus,statusCheckRollup,body';
+export const CONTROLLER_HANDOFF_START = '<!-- paseo-controller-handoff:v1 -->';
+export const CONTROLLER_HANDOFF_END = '<!-- /paseo-controller-handoff:v1 -->';
 
 function text(value) {
   return value === undefined || value === null ? '' : String(value).trim();
@@ -133,11 +135,70 @@ export function ensureRemoteBranchHead(root, state, headSha, {
   return { head: remoteHead, pushed: true };
 }
 
+function controllerHandoffSection({ issueNumber, baseBranch, baseSha, branch, headSha }) {
+  return `${CONTROLLER_HANDOFF_START}\n## Controller-created draft handoff\n\nPaseo Issue Automation created this draft PR after the coder returned with a clean worktree and the pushed branch head matched local HEAD. The initial handoff SHA is immutable historical evidence; the current-head line is refreshed by the controller when the managed PR advances.\n\n- Issue: #${issueNumber}\n- Base: \`${baseBranch}\` @ \`${baseSha || 'not-recorded'}\`\n- Initial handoff head: \`${branch}\` @ \`${headSha}\`\n- Current head: \`${branch}\` @ \`${headSha}\`\n${CONTROLLER_HANDOFF_END}`;
+}
+
 export function controllerDraftPrBody({ issueNumber, baseBranch, baseSha, branch, headSha, changedFiles = [] }) {
   const files = changedFiles.length
     ? changedFiles.map((file) => `- \`${file}\``).join('\n')
     : '- Changed files could not be enumerated automatically.';
-  return `Closes #${issueNumber}\n\n## Controller-created draft handoff\n\nPaseo Issue Automation created this draft PR after the coder returned with a clean worktree and the pushed branch head matched local HEAD.\n\n- Issue: #${issueNumber}\n- Base: \`${baseBranch}\` @ \`${baseSha || 'not-recorded'}\`\n- Head: \`${branch}\` @ \`${headSha}\`\n\n## Changed files\n\n${files}\n\n## Validation and completion evidence\n\nThe coder remains responsible for the issue-required validation and substantive completion evidence. Independent review and GitHub CI still gate progression. If issue-specific PR evidence is missing from this scaffold, the review/fix cycle must add it before human review.\n`;
+  return `Closes #${issueNumber}\n\n${controllerHandoffSection({ issueNumber, baseBranch, baseSha, branch, headSha })}\n\n## Changed files\n\n${files}\n\n## Validation and completion evidence\n\nThe coder remains responsible for the issue-required validation and substantive completion evidence. Independent review and GitHub CI still gate progression. If issue-specific PR evidence is missing from this scaffold, the review/fix cycle must add it before human review.\n`;
+}
+
+function controllerHandoffBounds(body) {
+  const source = String(body || '');
+  const markedStart = source.indexOf(CONTROLLER_HANDOFF_START);
+  if (markedStart >= 0) {
+    const markedEnd = source.indexOf(CONTROLLER_HANDOFF_END, markedStart + CONTROLLER_HANDOFF_START.length);
+    if (markedEnd < 0) return null;
+    return { start: markedStart, end: markedEnd + CONTROLLER_HANDOFF_END.length };
+  }
+  const heading = source.indexOf('## Controller-created draft handoff');
+  if (heading < 0) return null;
+  const nextHeading = source.indexOf('\n## ', heading + '## Controller-created draft handoff'.length);
+  return { start: heading, end: nextHeading >= 0 ? nextHeading : source.length };
+}
+
+export function refreshControllerDraftPrHandoffBody(body, { branch, currentHeadSha } = {}) {
+  const source = String(body || '');
+  const branchName = text(branch);
+  const head = text(currentHeadSha);
+  if (!branchName || !/^[0-9a-f]{7,64}$/i.test(head)) return source;
+  const bounds = controllerHandoffBounds(source);
+  if (!bounds) return source;
+
+  const currentLine = `- Current head: \`${branchName}\` @ \`${head}\``;
+  let section = source.slice(bounds.start, bounds.end);
+  if (/^- Current head: .*$/m.test(section)) {
+    section = section.replace(/^- Current head: .*$/m, currentLine);
+  } else if (/^- Initial handoff head: .*$/m.test(section)) {
+    section = section.replace(/^- Initial handoff head: .*$/m, (line) => `${line}\n${currentLine}`);
+  } else if (/^- Head: .*$/m.test(section)) {
+    section = section.replace(/^- Head: (.*)$/m, (_match, initial) => `- Initial handoff head: ${initial}\n${currentLine}`);
+  } else {
+    return source;
+  }
+  return `${source.slice(0, bounds.start)}${section}${source.slice(bounds.end)}`;
+}
+
+export function refreshControllerDraftPrHandoff(root, state, pr, currentHeadSha, {
+  runner = run,
+} = {}) {
+  if (!pr?.number || typeof pr.body !== 'string') return { updated: false, body: pr?.body || '' };
+  const body = refreshControllerDraftPrHandoffBody(pr.body, {
+    branch: state.branch,
+    currentHeadSha,
+  });
+  if (body === pr.body) return { updated: false, body };
+  const cwd = state.worktreePath || root;
+  const edited = runner('gh', ['pr', 'edit', String(pr.number), '--body', body], { cwd, allowFailure: true });
+  if (!edited?.ok) {
+    const error = new Error(edited?.stderr || edited?.stdout || `Could not refresh controller handoff metadata for PR #${pr.number}.`);
+    error.code = 'CONTROLLER_PR_HANDOFF_UPDATE_FAILED';
+    throw error;
+  }
+  return { updated: true, body };
 }
 
 function changedFiles(root, state, baseSha, headSha, { runner = run } = {}) {
