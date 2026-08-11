@@ -11,6 +11,7 @@ import {
 const branch = 'ai/issue-239-canary-verify-managed-autonomous-coding-lifecycl';
 const initialHead = '797229072404fc772fed10606ab7eda3097141e2';
 const currentHead = '1a3097b84539f48eb0b793cb1183916ea6613b94';
+const repairedHead = '2b4198c95649f58fc1c804dc2294a27fb7724ca5';
 
 test('controller-created draft body marks immutable initial head and refreshable current head', () => {
   const body = controllerDraftPrBody({
@@ -40,7 +41,7 @@ test('legacy controller handoff is upgraded without rewriting closing or manual 
   assert.doesNotMatch(refreshed, /^- Head:/m);
 });
 
-test('versioned controller handoff refresh changes only current head evidence', () => {
+test('base freshness update then review repair keep initial evidence while advancing current head twice', () => {
   const body = controllerDraftPrBody({
     issueNumber: 239,
     baseBranch: 'main',
@@ -50,13 +51,21 @@ test('versioned controller handoff refresh changes only current head evidence', 
     changedFiles: ['docs/autonomous-release-canary.md'],
   });
   const withManual = `${body}\n## Manual context\n\nDo not remove this.\n`;
-  const refreshed = refreshControllerDraftPrHandoffBody(withManual, { branch, currentHeadSha: currentHead });
+  const afterBaseUpdate = refreshControllerDraftPrHandoffBody(withManual, {
+    branch,
+    currentHeadSha: currentHead,
+  });
+  const afterReviewRepair = refreshControllerDraftPrHandoffBody(afterBaseUpdate, {
+    branch,
+    currentHeadSha: repairedHead,
+  });
 
-  assert.match(refreshed, new RegExp(`Initial handoff head: .*${initialHead}`));
-  assert.match(refreshed, new RegExp(`Current head: .*${currentHead}`));
-  assert.doesNotMatch(refreshed, new RegExp(`Current head: .*${initialHead}`));
-  assert.match(refreshed, /Do not remove this\./);
-  assert.match(refreshed, /Closes #239/);
+  assert.match(afterReviewRepair, new RegExp(`Initial handoff head: .*${initialHead}`));
+  assert.match(afterReviewRepair, new RegExp(`Current head: .*${repairedHead}`));
+  assert.doesNotMatch(afterReviewRepair, new RegExp(`Current head: .*${initialHead}`));
+  assert.doesNotMatch(afterReviewRepair, new RegExp(`Current head: .*${currentHead}`));
+  assert.match(afterReviewRepair, /Do not remove this\./);
+  assert.match(afterReviewRepair, /Closes #239/);
 });
 
 test('controller refresh edits only a recognized controller handoff PR body', () => {
@@ -84,6 +93,24 @@ test('controller refresh edits only a recognized controller handoff PR body', ()
   assert.match(calls[0].args[4], /Closes #239/);
   assert.match(calls[0].args[4], /manual/);
   assert.equal(calls[0].options.cwd, '/worktree');
+});
+
+test('controller handoff edit failure fails closed', () => {
+  const legacy = `Closes #239\n\n## Controller-created draft handoff\n\n- Head: \`${branch}\` @ \`${initialHead}\`\n`;
+  assert.throws(
+    () => refreshControllerDraftPrHandoff('/repo', {
+      branch,
+      worktreePath: '/worktree',
+    }, {
+      number: 246,
+      body: legacy,
+    }, currentHead, {
+      runner() {
+        return { ok: false, stdout: '', stderr: 'permission denied' };
+      },
+    }),
+    (error) => error.code === 'CONTROLLER_PR_HANDOFF_UPDATE_FAILED' && /permission denied/.test(error.message),
+  );
 });
 
 test('non-controller PR bodies are left untouched', () => {
