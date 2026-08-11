@@ -106,9 +106,8 @@ function normalizedStoredRun(file, stored) {
 }
 
 function normalizedStoredLifecycle(file) {
-  const lines = readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .filter(Boolean);
+  const original = readFileSync(file, 'utf8');
+  const lines = original.split(/\r?\n/).filter(Boolean);
   const events = [];
   let malformed = false;
   let changed = false;
@@ -121,12 +120,16 @@ function normalizedStoredLifecycle(file) {
       malformed = true;
       continue;
     }
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      malformed = true;
+      continue;
+    }
     const normalized = sanitizeLifecycleEventForPersistence(stored);
     if (JSON.stringify(normalized) !== JSON.stringify(stored)) changed = true;
     events.push(normalized);
   }
 
-  if (changed && !malformed) {
+  if (changed && !malformed && readFileSync(file, 'utf8') === original) {
     const content = events.length ? `${events.map((event) => JSON.stringify(event)).join('\n')}\n` : '';
     atomicWrite(file, content, { mode: 0o600 });
   }
