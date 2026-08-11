@@ -157,6 +157,7 @@ test('explicit human-review refresh preserves the existing PR identity and inval
     jsonRunner: (command, args) => command === 'gh' && args[0] === 'repo'
       ? { nameWithOwner: 'yajinni/Paseo-Issue-Automation' }
       : { status: 'behind', behind_by: 2, ahead_by: 4 },
+    pauseReview: () => {},
     runner(command, args) {
       calls.push([command, args]);
       if (command === 'git' && args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/main') return { ok: true, stdout: 'ac63dd12bf9de7affa0bf4fb58bbe7be6ce0899a', stderr: '' };
