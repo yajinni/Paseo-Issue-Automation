@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 import { queueCodingIssueRestart } from '../src/manager-restart.mjs';
 
@@ -40,7 +41,7 @@ test('manager restart records a recover-first queued state and detaches slow res
   assert.match(result.message, /failed-attempt recovery/i);
   assert.equal(spawns.length, 1);
   assert.equal(spawns[0].command, '/node');
-  assert.deepEqual(spawns[0].args, ['/restart-worker.mjs', '/repo', '274', 'keep']);
+  assert.deepEqual(spawns[0].args, ['/restart-worker.mjs', path.resolve('/repo'), '274', 'keep']);
   assert.equal(spawns[0].options.detached, true);
   assert.equal(spawns[0].options.stdio, 'ignore');
   assert.equal(unrefCalled, true);
@@ -56,6 +57,35 @@ test('duplicate restart clicks are idempotent while a background restart is pend
   assert.equal(result.queued, true);
   assert.equal(result.alreadyQueued, true);
   assert.equal(spawned, false);
+});
+
+test('manager restart can explicitly queue a same-PR human-review refresh', () => {
+  const writes = [];
+  const spawns = [];
+  const state = {
+    issueNumber: 239,
+    status: 'human-review',
+    phase: 'human-review',
+    reason: 'Automatic merge is disabled.',
+    activity: [],
+  };
+  const result = queueCodingIssueRestart('/repo', 239, {
+    branchAction: 'keep',
+    refreshExistingPr: true,
+    readRun: () => state,
+    writeRun: (_root, _number, next) => { writes.push(next); return next; },
+    executable: '/node',
+    restartWorkerPath: '/restart-worker.mjs',
+    spawnFn: (command, args, options) => {
+      spawns.push({ command, args, options });
+      return { pid: 1234, unref() {} };
+    },
+  });
+
+  assert.equal(result.queued, true);
+  assert.equal(writes[0].restartPreviousPhase, 'human-review');
+  assert.match(writes[0].reason, /existing human-review PR refresh/i);
+  assert.deepEqual(spawns[0].args, ['/restart-worker.mjs', path.resolve('/repo'), '239', 'keep', 'refresh']);
 });
 
 test('restart queue failure restores a visible failed state', () => {

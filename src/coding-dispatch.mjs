@@ -78,7 +78,31 @@ export function recoverOrRestartCodingIssue(root, number, options = {}) {
       },
     });
 
-    const existingPr = resumeExistingPrController(root, issueNumber, { branchAction });
+    const existingPr = resumeExistingPrController(root, issueNumber, {
+      branchAction,
+      refreshHumanReview: options.refreshExistingPr === true,
+    });
+    if (options.refreshExistingPr === true) {
+      if (!existingPr.resumed || existingPr.refreshed !== true) {
+        throw new Error(existingPr.reason || 'The existing human-review PR could not be refreshed safely.');
+      }
+      appendIssueLifecycle(root, issueNumber, {
+        attempt: existingPr.attempt || state?.attempt || null,
+        type: 'recover-first-refreshed-existing-pr',
+        status: 'success',
+        source: 'controller',
+        message: `Refreshed existing managed PR #${existingPr.prNumber} without creating a fresh attempt or reusing its prior approval.`,
+        evidence: {
+          branch: existingPr.branch || null,
+          workspaceId: existingPr.workspaceId || null,
+          coderAgentId: existingPr.coderAgentId || null,
+          prNumber: existingPr.prNumber || null,
+          headSha: existingPr.head || null,
+          controllerPid: existingPr.controllerPid || null,
+        },
+      });
+      return existingPr;
+    }
     if (existingPr.resumed) {
       appendIssueLifecycle(root, issueNumber, {
         attempt: existingPr.attempt || state?.attempt || null,

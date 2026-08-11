@@ -12,6 +12,7 @@ function withActivity(state, type, details, at) {
 
 export function queueCodingIssueRestart(root, number, {
   branchAction = 'keep',
+  refreshExistingPr = false,
   spawnFn = spawn,
   readRun = loadRun,
   writeRun = saveRun,
@@ -37,6 +38,7 @@ export function queueCodingIssueRestart(root, number, {
 
   const queuedAt = now();
   const recoverFirst = branchAction === 'keep';
+  const restartMode = refreshExistingPr === true ? 'refresh' : 'recover';
   const queuedState = {
     ...state,
     phase: 'queued',
@@ -45,14 +47,18 @@ export function queueCodingIssueRestart(root, number, {
     restartPreviousPhase: state.phase || null,
     restartPreviousReason: state.reason || null,
     reason: recoverFirst
-      ? 'Recover-first restart queued. A verified existing managed PR/controller will be resumed first; otherwise failed work will be reused when safe before any fresh attempt starts.'
+      ? (refreshExistingPr === true
+        ? 'Existing human-review PR refresh queued. The same branch, workspace, coder, and PR will be refreshed against the current base; no prior approval or fresh attempt will be used.'
+        : 'Recover-first restart queued. A verified existing managed PR/controller will be resumed first; otherwise failed work will be reused when safe before any fresh attempt starts.')
       : 'Fresh restart queued with branch deletion.',
     updatedAt: queuedAt,
     activity: withActivity(
       state,
       'restart-queued',
       recoverFirst
-        ? 'Recover-first restart requested from the manager.'
+        ? (refreshExistingPr === true
+          ? 'Existing human-review PR refresh requested from the manager.'
+          : 'Recover-first restart requested from the manager.')
         : 'Explicit fresh restart with branch deletion requested from the manager.',
       queuedAt,
     ),
@@ -61,7 +67,9 @@ export function queueCodingIssueRestart(root, number, {
 
   let child;
   try {
-    child = spawnFn(executable, [restartWorkerPath, path.resolve(root), String(issueNumber), branchAction], {
+    const workerArgs = [restartWorkerPath, path.resolve(root), String(issueNumber), branchAction];
+    if (refreshExistingPr === true) workerArgs.push(restartMode);
+    child = spawnFn(executable, workerArgs, {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
@@ -87,7 +95,9 @@ export function queueCodingIssueRestart(root, number, {
     branchAction,
     phase: 'queued',
     message: recoverFirst
-      ? `Issue #${issueNumber} restart queued. Paseo will first resume a verified existing managed PR/controller, then try failed-attempt recovery, and create a fresh attempt only if neither can be reused safely.`
+      ? (refreshExistingPr === true
+        ? `Issue #${issueNumber} existing human-review PR refresh queued; Paseo will preserve the current attempt, workspace, coder, branch, and PR.`
+        : `Issue #${issueNumber} restart queued. Paseo will first resume a verified existing managed PR/controller, then try failed-attempt recovery, and create a fresh attempt only if neither can be reused safely.`)
       : `Issue #${issueNumber} fresh restart queued with branch deletion.`,
   };
 }

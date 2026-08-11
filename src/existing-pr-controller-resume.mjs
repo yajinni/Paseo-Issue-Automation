@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { inspectBaseFreshness } from './base-freshness.mjs';
 import { currentPr, remoteBranchHead } from './controller-draft-pr.mjs';
 import { PASEO_LABELS } from './label-catalog.mjs';
 import { expectedWorkspaceAgent, inspectWorkspaceAgents, verifyWorkspaceIdentity } from './launch-retry.mjs';
-import { run } from './process.mjs';
+import { run, runJson } from './process.mjs';
 import { LABELS, loadConfig, loadRun, saveRun } from './state.mjs';
 
 const controllerWorkerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'recovery-controller-worker.mjs');
@@ -64,12 +65,24 @@ function editResumeLabels(root, issueNumber, running, runner) {
   const args = ['issue', 'edit', String(issueNumber)];
   const add = running ? [PASEO_LABELS.coding] : [PASEO_LABELS.failed];
   const remove = running
-    ? [PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.failed, PASEO_LABELS.needsAttention]
+    ? [PASEO_LABELS.ready, PASEO_LABELS.queued, PASEO_LABELS.reviewQueued, PASEO_LABELS.failed, PASEO_LABELS.needsAttention]
     : [PASEO_LABELS.coding];
   add.forEach((label) => args.push('--add-label', label));
   remove.forEach((label) => args.push('--remove-label', label));
   const result = runner('gh', args, { cwd: root, allowFailure: true });
   if (!result?.ok) throw new Error(result?.stderr || result?.stdout || 'Could not update issue labels for controller resume.');
+}
+
+function humanReviewRefreshEligibility(state) {
+  const humanReview = state?.status === LABELS.humanReview
+    && (state.phase === 'human-review' || state.restartPreviousPhase === 'human-review');
+  if (!humanReview) return { eligible: false, reason: 'Only a recorded human-review attempt can use the explicit existing-PR refresh.' };
+  if (!state.approvedCommit) return { eligible: false, reason: 'The human-review attempt has no exact approved head to invalidate.' };
+  if (!state.prNumber) return { eligible: false, reason: 'The human-review attempt has no recorded pull request.' };
+  if (!state.branch || !state.workspaceId || !state.worktreePath || !(state.coderAgentId || state.agentId)) {
+    return { eligible: false, reason: 'The human-review attempt is missing reusable branch, workspace, worktree, or coder identity.' };
+  }
+  return { eligible: true, refresh: true, reason: null };
 }
 
 function verifyRecordedCoder(root, state, {
@@ -143,6 +156,8 @@ export function resumeExistingPrController(root, number, {
   prReader = currentPr,
   remoteHeadReader = remoteBranchHead,
   controllerAlive = controllerProcessAlive,
+  refreshHumanReview = false,
+  jsonRunner = runJson,
   spawnFn = spawn,
   executable = process.execPath,
   workerPath = controllerWorkerPath,
@@ -150,14 +165,17 @@ export function resumeExistingPrController(root, number, {
   const issueNumber = Number(number);
   const state = readRun(root, issueNumber);
   const eligibility = existingPrControllerResumeEligibility(state, { branchAction, controllerAlive });
-  if (!eligibility.eligible) return { resumed: false, recovered: false, issueNumber, reason: eligibility.reason };
+  const selectedEligibility = refreshHumanReview
+    ? humanReviewRefreshEligibility(state)
+    : eligibility;
+  if (!selectedEligibility.eligible) return { resumed: false, recovered: false, issueNumber, reason: selectedEligibility.reason };
 
   const coder = verifyRecordedCoder(root, state, { runner, inspectAgents, verifyWorkspace });
   if (!coder.ok) return { resumed: false, recovered: false, issueNumber, reason: coder.reason };
 
   const config = configLoader(root);
   const pr = prReader(root, state, { configLoader: () => config });
-  if (!pr) return { resumed: false, recovered: false, issueNumber, reason: 'The failed attempt has no open PR on its recorded branch.' };
+  if (!pr) return { resumed: false, recovered: false, issueNumber, reason: 'The existing attempt has no open PR on its recorded branch.' };
   if (state.prNumber && Number(pr.number) !== Number(state.prNumber)) {
     return { resumed: false, recovered: false, issueNumber, reason: `The open PR #${pr.number} does not match recorded PR #${state.prNumber}.` };
   }
@@ -168,9 +186,24 @@ export function resumeExistingPrController(root, number, {
   const exact = exactHeadEvidence(root, state, pr, { runner, remoteHeadReader });
   if (!exact.ok) return { resumed: false, recovered: false, issueNumber, reason: exact.reason };
 
+  if (selectedEligibility.refresh) {
+    if (text(state.approvedCommit).toLowerCase() !== exact.head.toLowerCase()) {
+      return { resumed: false, recovered: false, issueNumber, reason: `The recorded approved head ${text(state.approvedCommit) || '(missing)'} does not match the current PR head ${exact.head}.` };
+    }
+    const freshness = inspectBaseFreshness(root, state, config.baseBranch, { runner, jsonRunner });
+    if (freshness.status === 'indeterminate' || freshness.status === 'inconsistent') {
+      return { resumed: false, recovered: false, issueNumber, reason: freshness.reason };
+    }
+    if (freshness.ok) {
+      return { resumed: false, recovered: false, issueNumber, reason: 'The human-review PR already contains the latest base; no refresh was needed.' };
+    }
+  }
+
   editResumeLabels(root, issueNumber, true, runner);
   const startedAt = now();
-  const resumeDescription = eligibility.orphanedController
+  const resumeDescription = selectedEligibility.refresh
+    ? `Refreshing human-review PR #${pr.number} at exact head ${exact.head}; the prior approval will not be reused.`
+    : selectedEligibility.orphanedController
     ? `Resuming orphaned controller PID ${state.controllerPid} for existing managed PR #${pr.number} at exact head ${exact.head} without starting a fresh attempt.`
     : `Resuming the existing managed PR #${pr.number} at exact head ${exact.head} without starting a fresh attempt.`;
   let resumedState = writeRun(root, issueNumber, {
@@ -186,9 +219,15 @@ export function resumeExistingPrController(root, number, {
     restartRequestedAt: null,
     prNumber: pr.number,
     prUrl: pr.url || state.prUrl || null,
+    ...(selectedEligibility.refresh ? {
+      approvedCommit: null,
+      reviewRequestId: null,
+      reviewExpectedHeadSha: null,
+      reviewSchemaRetryCount: 0,
+    } : {}),
     activity: appendActivity(
       state,
-      'existing-pr-controller-resume-started',
+      selectedEligibility.refresh ? 'existing-pr-controller-refresh-started' : 'existing-pr-controller-resume-started',
       `Reusing attempt ${state.attempt || 1}, workspace ${state.workspaceId}, branch ${state.branch}, coder ${coder.coderId}, and PR #${pr.number} at exact head ${exact.head}.`,
       startedAt,
     ),
@@ -226,8 +265,8 @@ export function resumeExistingPrController(root, number, {
     updatedAt: controllerStartedAt,
     activity: appendActivity(
       resumedState,
-      'controller-restarted-for-existing-pr',
-      `Issue Execution Controller PID ${child.pid} resumed existing PR #${pr.number} for attempt ${state.attempt || 1}.`,
+      selectedEligibility.refresh ? 'controller-started-for-existing-pr-refresh' : 'controller-restarted-for-existing-pr',
+      `Issue Execution Controller PID ${child.pid} ${selectedEligibility.refresh ? 'started refresh for' : 'resumed'} existing PR #${pr.number} for attempt ${state.attempt || 1}.`,
       controllerStartedAt,
     ),
   });
@@ -235,6 +274,7 @@ export function resumeExistingPrController(root, number, {
   return {
     resumed: true,
     recovered: true,
+    refreshed: selectedEligibility.refresh === true,
     claimed: true,
     issueNumber,
     branch: state.branch,
