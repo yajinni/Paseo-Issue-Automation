@@ -50,6 +50,7 @@ function actionDetails(pathname, body = {}) {
   if (body.pullRequestNumber !== undefined) details.pullRequestNumber = Number(body.pullRequestNumber) || body.pullRequestNumber;
   if (body.expectedHeadSha) details.expectedHeadSha = String(body.expectedHeadSha);
   if (body.branchAction) details.branchAction = body.branchAction;
+  if (body.refreshExistingPr === true) details.refreshExistingPr = true;
   if (pathname === '/api/config') {
     details.baseBranch = body.baseBranch || null;
     details.pollIntervalSeconds = body.pollIntervalSeconds ?? null;
@@ -183,6 +184,7 @@ export function managerRepositoryAction(root, pathname, body = {}, actions = def
   if (pathname === '/api/restart-issue') {
     return runLoggedAction(root, pathname, body, actions, () => actions.queueCodingIssueRestart(root, issueNumber(body), {
       branchAction: body.branchAction || 'keep',
+      refreshExistingPr: body.refreshExistingPr === true,
     }));
   }
   return null;

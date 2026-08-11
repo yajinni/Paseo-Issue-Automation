@@ -128,6 +128,66 @@ test('controller-only resume can recover an active attempt whose controller proc
   assert.equal(decision.orphanedController, true);
 });
 
+test('explicit human-review refresh preserves the existing PR identity and invalidates prior approval', () => {
+  const calls = [];
+  const writes = [];
+  const spawns = [];
+  let current = failedCanaryState({
+    status: 'human-review',
+    phase: 'human-review',
+    restartPreviousPhase: 'human-review',
+    approvedCommit: head,
+    reviewRuntimeStage: 'quick',
+    reviewExpectedHeadSha: head,
+    completedAt: '2026-08-11T11:21:48.512Z',
+  });
+  const result = resumeExistingPrController('/repo', 239, {
+    refreshHumanReview: true,
+    readRun: () => current,
+    writeRun: (_root, _number, next) => {
+      current = next;
+      writes.push(next);
+      return next;
+    },
+    configLoader: () => ({ baseBranch: 'main' }),
+    verifyWorkspace: () => {},
+    inspectAgents: () => verifiedAgents(),
+    prReader: () => reusablePr(),
+    remoteHeadReader: () => head,
+    jsonRunner: (command, args) => command === 'gh' && args[0] === 'repo'
+      ? { nameWithOwner: 'yajinni/Paseo-Issue-Automation' }
+      : { status: 'behind', behind_by: 2, ahead_by: 4 },
+    runner(command, args) {
+      calls.push([command, args]);
+      if (command === 'git' && args[0] === 'rev-parse' && args[1] === 'refs/remotes/origin/main') return { ok: true, stdout: 'ac63dd12bf9de7affa0bf4fb58bbe7be6ce0899a', stderr: '' };
+      if (command === 'git' && args[0] === 'rev-parse') return { ok: true, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'status') return { ok: true, stdout: '', stderr: '' };
+      if (command === 'git' && args[0] === 'merge-base' && args[1] === '--is-ancestor') return { ok: false, exitCode: 1, stdout: '', stderr: '' };
+      if (command === 'git' && args[0] === 'rev-list') return { ok: true, stdout: '2\t4', stderr: '' };
+      return { ok: true, stdout: '', stderr: '' };
+    },
+    executable: '/node',
+    workerPath: '/recovery-controller-worker.mjs',
+    spawnFn(command, args, options) {
+      spawns.push({ command, args, options });
+      return { pid: 104560, unref() {} };
+    },
+  });
+
+  assert.equal(result.resumed, true);
+  assert.equal(result.refreshed, true);
+  assert.equal(result.attempt, 1);
+  assert.equal(result.prNumber, 246);
+  assert.equal(current.status, 'agent-running');
+  assert.equal(current.approvedCommit, null);
+  assert.equal(current.reviewExpectedHeadSha, null);
+  assert.match(current.reason, /prior approval will not be reused/i);
+  assert.equal(writes.length, 2);
+  assert.equal(spawns.length, 1);
+  assert.deepEqual(spawns[0].args, ['/recovery-controller-worker.mjs', path.resolve('/repo'), '239']);
+  assert.ok(calls.some(([command, args]) => command === 'gh' && args.includes('paseo:coding')));
+});
+
 test('controller-only resume fails closed when pushed branch head differs from local HEAD', () => {
   const state = failedCanaryState();
   let writes = 0;
