@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { sanitizeDurableText } from './persistent-text-safety.mjs';
-import { statePaths } from './state.mjs';
+import { loadIssueLifecycle, statePaths } from './state.mjs';
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 const RETENTION_DAYS = 7;
@@ -202,12 +202,13 @@ function lifecycleLogEvents(root, since) {
   if (!existsSync(directory)) return [];
   const events = [];
   for (const name of readdirSync(directory)) {
-    if (!/^issue-\d+\.jsonl$/.test(name)) continue;
-    const file = path.join(directory, name);
-    for (const lifecycle of parseLogFile(file)) {
+    const match = /^issue-(\d+)\.jsonl$/.exec(name);
+    if (!match) continue;
+    const fileIssueNumber = Number(match[1]);
+    for (const lifecycle of loadIssueLifecycle(root, fileIssueNumber, { all: true })) {
       const timestamp = lifecycle.at || lifecycle.timestamp || null;
       if (!timestamp || timestamp < since) continue;
-      const issueNumber = Number(lifecycle.issueNumber) || null;
+      const issueNumber = Number(lifecycle.issueNumber) || fileIssueNumber || null;
       const level = lifecycleLevel(lifecycle.status);
       events.push({
         id: `issue-lifecycle:${lifecycle.id || `${issueNumber}:${timestamp}:${lifecycle.type || 'event'}`}`,
