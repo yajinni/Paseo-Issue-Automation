@@ -43,6 +43,15 @@ function sanitizeTextFields(value, fields) {
   return next;
 }
 
+function sanitizeDurableValue(value) {
+  if (typeof value === 'string') return sanitizeDurableText(value);
+  if (Array.isArray(value)) return value.map(sanitizeDurableValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, sanitizeDurableValue(item)]),
+  );
+}
+
 const RUN_FIELDS = Object.freeze([
   'reason',
   'restartPreviousReason',
@@ -56,6 +65,13 @@ const NESTED_FIELDS = Object.freeze([
   'reason',
   'summary',
 ]);
+const LIFECYCLE_FREE_TEXT_FIELDS = Object.freeze([
+  'message',
+  'details',
+  'detail',
+  'reason',
+  'summary',
+]);
 
 export function sanitizeRunStateForPersistence(state) {
   if (!state || typeof state !== 'object') return state;
@@ -66,6 +82,16 @@ export function sanitizeRunStateForPersistence(state) {
   if (Array.isArray(state.events)) {
     next.events = state.events.map((item) => sanitizeTextFields(item, NESTED_FIELDS));
   }
+  return next;
+}
+
+export function sanitizeLifecycleEventForPersistence(event) {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return event;
+  const next = { ...event };
+  for (const field of LIFECYCLE_FREE_TEXT_FIELDS) {
+    if (Object.hasOwn(next, field)) next[field] = sanitizeDurableValue(next[field]);
+  }
+  if (Object.hasOwn(event, 'evidence')) next.evidence = sanitizeDurableValue(event.evidence);
   return next;
 }
 

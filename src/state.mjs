@@ -4,6 +4,7 @@ import path from 'node:path';
 import { LEGACY_LABELS } from './label-catalog.mjs';
 import {
   sanitizeDurableText,
+  sanitizeLifecycleEventForPersistence,
   sanitizeRunStateForPersistence,
 } from './persistent-text-safety.mjs';
 import { run } from './process.mjs';
@@ -80,10 +81,13 @@ export function statePaths(root) {
   };
 }
 
-export function atomicWrite(file, content) {
+export function atomicWrite(file, content, options = {}) {
   mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temporary, content, 'utf8');
+  const writeOptions = Number.isInteger(options.mode)
+    ? { encoding: 'utf8', mode: options.mode }
+    : { encoding: 'utf8' };
+  writeFileSync(temporary, content, writeOptions);
   renameSync(temporary, file);
 }
 
@@ -99,6 +103,37 @@ function normalizedStoredRun(file, stored) {
     atomicWrite(file, `${JSON.stringify(normalized, null, 2)}\n`);
   }
   return normalized;
+}
+
+function normalizedStoredLifecycle(file) {
+  const original = readFileSync(file, 'utf8');
+  const lines = original.split(/\r?\n/).filter(Boolean);
+  const events = [];
+  let malformed = false;
+  let changed = false;
+
+  for (const line of lines) {
+    let stored;
+    try {
+      stored = JSON.parse(line);
+    } catch {
+      malformed = true;
+      continue;
+    }
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      malformed = true;
+      continue;
+    }
+    const normalized = sanitizeLifecycleEventForPersistence(stored);
+    if (JSON.stringify(normalized) !== JSON.stringify(stored)) changed = true;
+    events.push(normalized);
+  }
+
+  if (changed && !malformed && readFileSync(file, 'utf8') === original) {
+    const content = events.length ? `${events.map((event) => JSON.stringify(event)).join('\n')}\n` : '';
+    atomicWrite(file, content, { mode: 0o600 });
+  }
+  return events;
 }
 
 export function validateConfig(input = {}) {
@@ -188,17 +223,12 @@ export function appendIssueLifecycle(root, issueNumber, input = {}) {
   return event;
 }
 
-export function loadIssueLifecycle(root, issueNumber, { limit = 250 } = {}) {
+export function loadIssueLifecycle(root, issueNumber, { limit = 250, all = false } = {}) {
   const file = issueLifecycleFile(root, issueNumber);
   if (!existsSync(file)) return [];
+  const events = normalizedStoredLifecycle(file);
+  if (all) return events;
   const maximum = Math.max(1, Math.min(5_000, Number(limit) || 250));
-  const events = readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      try { return JSON.parse(line); } catch { return null; }
-    })
-    .filter(Boolean);
   return events.slice(-maximum);
 }
 
