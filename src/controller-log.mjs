@@ -10,7 +10,8 @@ import {
   statSync,
 } from 'node:fs';
 import path from 'node:path';
-import { statePaths } from './state.mjs';
+import { sanitizeDurableText } from './persistent-text-safety.mjs';
+import { loadIssueLifecycle, statePaths } from './state.mjs';
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 const RETENTION_DAYS = 7;
@@ -47,7 +48,7 @@ function archiveFiles(root) {
 }
 
 function truncateString(value) {
-  const text = String(value ?? '');
+  const text = sanitizeDurableText(String(value ?? ''));
   return text.length <= MAX_STRING_LENGTH ? text : `${text.slice(0, MAX_STRING_LENGTH)}…`;
 }
 
@@ -80,12 +81,23 @@ export function sanitizeLogDetails(value, depth = 0, seen = new WeakSet()) {
   return result;
 }
 
+function sanitizeStoredEvent(event) {
+  if (!event || typeof event !== 'object') return event;
+  return {
+    ...event,
+    message: typeof event.message === 'string' ? truncateString(event.message) : event.message,
+    details: event.details && typeof event.details === 'object'
+      ? sanitizeLogDetails(event.details)
+      : event.details,
+  };
+}
+
 function parseLogFile(file) {
   return readFileSync(file, 'utf8')
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => {
-      try { return JSON.parse(line); } catch { return null; }
+      try { return sanitizeStoredEvent(JSON.parse(line)); } catch { return null; }
     })
     .filter(Boolean)
     .reverse();
@@ -190,12 +202,13 @@ function lifecycleLogEvents(root, since) {
   if (!existsSync(directory)) return [];
   const events = [];
   for (const name of readdirSync(directory)) {
-    if (!/^issue-\d+\.jsonl$/.test(name)) continue;
-    const file = path.join(directory, name);
-    for (const lifecycle of parseLogFile(file)) {
+    const match = /^issue-(\d+)\.jsonl$/.exec(name);
+    if (!match) continue;
+    const fileIssueNumber = Number(match[1]);
+    for (const lifecycle of loadIssueLifecycle(root, fileIssueNumber, { all: true })) {
       const timestamp = lifecycle.at || lifecycle.timestamp || null;
       if (!timestamp || timestamp < since) continue;
-      const issueNumber = Number(lifecycle.issueNumber) || null;
+      const issueNumber = Number(lifecycle.issueNumber) || fileIssueNumber || null;
       const level = lifecycleLevel(lifecycle.status);
       events.push({
         id: `issue-lifecycle:${lifecycle.id || `${issueNumber}:${timestamp}:${lifecycle.type || 'event'}`}`,

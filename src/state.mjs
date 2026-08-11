@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { LEGACY_LABELS } from './label-catalog.mjs';
+import {
+  sanitizeDurableText,
+  sanitizeLifecycleEventForPersistence,
+  sanitizeRunStateForPersistence,
+} from './persistent-text-safety.mjs';
 import { run } from './process.mjs';
 import {
   DEFAULT_REPOSITORY_CONFIG,
@@ -42,7 +47,7 @@ const TRACKED_RUN_FIELDS = Object.freeze([
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 
 function lifecycleSafeText(value) {
-  const text = String(value ?? '')
+  const text = sanitizeDurableText(String(value ?? ''))
     .replace(/\b(password|secret|token|api[-_]?key|authorization)\s*[:=]\s*\S+/gi, '$1=[REDACTED]');
   return text.length <= LIFECYCLE_TEXT_LIMIT ? text : `${text.slice(0, LIFECYCLE_TEXT_LIMIT)}…`;
 }
@@ -76,16 +81,59 @@ export function statePaths(root) {
   };
 }
 
-export function atomicWrite(file, content) {
+export function atomicWrite(file, content, options = {}) {
   mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temporary, content, 'utf8');
+  const writeOptions = Number.isInteger(options.mode)
+    ? { encoding: 'utf8', mode: options.mode }
+    : { encoding: 'utf8' };
+  writeFileSync(temporary, content, writeOptions);
   renameSync(temporary, file);
 }
 
 function readJson(file, fallback) {
   if (!existsSync(file)) return clone(fallback);
   return JSON.parse(readFileSync(file, 'utf8'));
+}
+
+function normalizedStoredRun(file, stored) {
+  if (!stored) return null;
+  const normalized = sanitizeRunStateForPersistence(stored);
+  if (JSON.stringify(normalized) !== JSON.stringify(stored)) {
+    atomicWrite(file, `${JSON.stringify(normalized, null, 2)}\n`);
+  }
+  return normalized;
+}
+
+function normalizedStoredLifecycle(file) {
+  const original = readFileSync(file, 'utf8');
+  const lines = original.split(/\r?\n/).filter(Boolean);
+  const events = [];
+  let malformed = false;
+  let changed = false;
+
+  for (const line of lines) {
+    let stored;
+    try {
+      stored = JSON.parse(line);
+    } catch {
+      malformed = true;
+      continue;
+    }
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      malformed = true;
+      continue;
+    }
+    const normalized = sanitizeLifecycleEventForPersistence(stored);
+    if (JSON.stringify(normalized) !== JSON.stringify(stored)) changed = true;
+    events.push(normalized);
+  }
+
+  if (changed && !malformed && readFileSync(file, 'utf8') === original) {
+    const content = events.length ? `${events.map((event) => JSON.stringify(event)).join('\n')}\n` : '';
+    atomicWrite(file, content, { mode: 0o600 });
+  }
+  return events;
 }
 
 export function validateConfig(input = {}) {
@@ -175,17 +223,12 @@ export function appendIssueLifecycle(root, issueNumber, input = {}) {
   return event;
 }
 
-export function loadIssueLifecycle(root, issueNumber, { limit = 250 } = {}) {
+export function loadIssueLifecycle(root, issueNumber, { limit = 250, all = false } = {}) {
   const file = issueLifecycleFile(root, issueNumber);
   if (!existsSync(file)) return [];
+  const events = normalizedStoredLifecycle(file);
+  if (all) return events;
   const maximum = Math.max(1, Math.min(5_000, Number(limit) || 250));
-  const events = readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      try { return JSON.parse(line); } catch { return null; }
-    })
-    .filter(Boolean);
   return events.slice(-maximum);
 }
 
@@ -285,13 +328,17 @@ function appendRunLifecycleDelta(root, issueNumber, previous, state) {
   }
 }
 
-export function loadRun(root, issueNumber) { return readJson(runFile(root, issueNumber), null); }
+export function loadRun(root, issueNumber) {
+  const file = runFile(root, issueNumber);
+  return normalizedStoredRun(file, readJson(file, null));
+}
 
 export function saveRun(root, issueNumber, state) {
   const previous = loadRun(root, issueNumber);
-  atomicWrite(runFile(root, issueNumber), `${JSON.stringify(state, null, 2)}\n`);
-  try { appendRunLifecycleDelta(root, issueNumber, previous, state); } catch {}
-  return state;
+  const normalized = sanitizeRunStateForPersistence(state);
+  atomicWrite(runFile(root, issueNumber), `${JSON.stringify(normalized, null, 2)}\n`);
+  try { appendRunLifecycleDelta(root, issueNumber, previous, normalized); } catch {}
+  return normalized;
 }
 
 export function removeRun(root, issueNumber) {
@@ -303,7 +350,10 @@ export function listRuns(root) {
   const directory = statePaths(root).runs;
   return readdirSync(directory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /^issue-\d+\.json$/.test(entry.name))
-    .map((entry) => readJson(path.join(directory, entry.name), null))
+    .map((entry) => {
+      const file = path.join(directory, entry.name);
+      return normalizedStoredRun(file, readJson(file, null));
+    })
     .filter(Boolean)
     .sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber));
 }

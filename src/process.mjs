@@ -1,6 +1,12 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  safeCommandErrorArgs,
+  safeCommandErrorLabel,
+  sanitizeDurableText,
+} from './persistent-text-safety.mjs';
 
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
 export const DEFAULT_AGENT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -172,6 +178,46 @@ export function paseoRunArgsWithThinking(args = [], options = {}) {
   return next;
 }
 
+function noopPreparedArgs(args) {
+  return {
+    args: [...args],
+    schemaPath: null,
+    cleanup() {},
+  };
+}
+
+export function materializePaseoOutputSchemaArgs(args = [], options = {}) {
+  const next = [...args];
+  if (next[0] !== 'run') return noopPreparedArgs(next);
+  const schemaIndex = next.indexOf('--output-schema');
+  if (schemaIndex < 0 || schemaIndex + 1 >= next.length) return noopPreparedArgs(next);
+
+  const inlineSchema = String(next[schemaIndex + 1] ?? '');
+  const trimmed = inlineSchema.trim();
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return noopPreparedArgs(next);
+  try {
+    JSON.parse(trimmed);
+  } catch {
+    return noopPreparedArgs(next);
+  }
+
+  const tempRoot = options.tempRoot || os.tmpdir();
+  const directory = mkdtempSync(path.join(tempRoot, 'paseo-output-schema-'));
+  const schemaPath = path.join(directory, 'schema.json');
+  writeFileSync(schemaPath, inlineSchema, { encoding: 'utf8', mode: 0o600 });
+  next[schemaIndex + 1] = schemaPath;
+  let cleaned = false;
+  return {
+    args: next,
+    schemaPath,
+    cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      rmSync(directory, { recursive: true, force: true });
+    },
+  };
+}
+
 function resolvedSpawn(command, args, options) {
   const env = options.env || process.env;
   const resolution = process.platform === 'win32' && String(command).toLowerCase() === 'paseo'
@@ -197,53 +243,63 @@ function preservesLeadingWhitespace(command, args = []) {
 export function run(command, args = [], options = {}) {
   const timeoutMs = commandTimeout(options);
   const env = options.env || process.env;
-  const effectiveArgs = String(command).toLowerCase() === 'paseo'
-    ? paseoRunArgsWithThinking(args, { cwd: options.cwd })
-    : [...args];
-  const resolved = resolvedSpawn(command, effectiveArgs, { ...options, env });
-  const result = spawnSync(resolved.executable, resolved.args, {
-    cwd: options.cwd,
-    env,
-    encoding: 'utf8',
-    windowsHide: true,
-    windowsVerbatimArguments: resolved.windowsVerbatimArguments === true,
-    stdio: options.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-    timeout: timeoutMs,
-    killSignal: 'SIGTERM',
-    maxBuffer: Number(options.maxBuffer || 16 * 1024 * 1024),
-  });
+  const paseoCommand = String(command).toLowerCase() === 'paseo';
+  const prepared = paseoCommand && process.platform === 'win32'
+    ? materializePaseoOutputSchemaArgs(args)
+    : noopPreparedArgs(args);
+  const effectiveArgs = paseoCommand
+    ? paseoRunArgsWithThinking(prepared.args, { cwd: options.cwd })
+    : prepared.args;
 
-  const timedOut = result.error?.code === 'ETIMEDOUT';
-  const rawStdout = String(result.stdout || '');
-  const output = {
-    ok: !result.error && result.status === 0,
-    exitCode: result.status ?? 1,
-    stdout: preservesLeadingWhitespace(command, effectiveArgs) ? rawStdout.trimEnd() : rawStdout.trim(),
-    stderr: String(result.stderr || '').trim(),
-    error: result.error || null,
-    timedOut,
-    timeoutMs,
-    resolvedCommand: resolved.resolution.path || String(command),
-    resolutionSource: resolved.resolution.source,
-  };
+  try {
+    const resolved = resolvedSpawn(command, effectiveArgs, { ...options, env });
+    const result = spawnSync(resolved.executable, resolved.args, {
+      cwd: options.cwd,
+      env,
+      encoding: 'utf8',
+      windowsHide: true,
+      windowsVerbatimArguments: resolved.windowsVerbatimArguments === true,
+      stdio: options.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+      timeout: timeoutMs,
+      killSignal: 'SIGTERM',
+      maxBuffer: Number(options.maxBuffer || 16 * 1024 * 1024),
+    });
 
-  if (!output.ok && !options.allowFailure) {
-    const detail = timedOut
-      ? `timed out after ${timeoutMs}ms`
-      : output.stderr || output.stdout || output.error?.message || `exit ${output.exitCode}`;
-    const error = new Error(`${command} ${effectiveArgs.join(' ')} failed: ${detail}`);
-    error.command = command;
-    error.args = [...effectiveArgs];
-    error.exitCode = output.exitCode;
-    error.timedOut = timedOut;
-    error.timeoutMs = timeoutMs;
-    error.resolvedCommand = output.resolvedCommand;
-    error.stdout = output.stdout;
-    error.stderr = output.stderr;
-    throw error;
+    const timedOut = result.error?.code === 'ETIMEDOUT';
+    const rawStdout = String(result.stdout || '');
+    const output = {
+      ok: !result.error && result.status === 0,
+      exitCode: result.status ?? 1,
+      stdout: preservesLeadingWhitespace(command, effectiveArgs) ? rawStdout.trimEnd() : rawStdout.trim(),
+      stderr: String(result.stderr || '').trim(),
+      error: result.error || null,
+      timedOut,
+      timeoutMs,
+      resolvedCommand: resolved.resolution.path || String(command),
+      resolutionSource: resolved.resolution.source,
+    };
+
+    if (!output.ok && !options.allowFailure) {
+      const detail = timedOut
+        ? `timed out after ${timeoutMs}ms`
+        : output.stderr || output.stdout || output.error?.message || `exit ${output.exitCode}`;
+      const label = safeCommandErrorLabel(command, effectiveArgs);
+      const error = new Error(sanitizeDurableText(`${label} failed: ${detail}`));
+      error.command = command;
+      error.args = safeCommandErrorArgs(command, effectiveArgs);
+      error.exitCode = output.exitCode;
+      error.timedOut = timedOut;
+      error.timeoutMs = timeoutMs;
+      error.resolvedCommand = output.resolvedCommand;
+      error.stdout = output.stdout;
+      error.stderr = output.stderr;
+      throw error;
+    }
+
+    return output;
+  } finally {
+    prepared.cleanup();
   }
-
-  return output;
 }
 
 export function runJson(command, args = [], options = {}) {
