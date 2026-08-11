@@ -14,7 +14,11 @@ import {
 import { finalizeApprovedPullRequest } from './approved-pr-finalization.mjs';
 import { recordEvent, terminalState } from './automation.mjs';
 import { inspectBaseFreshness } from './base-freshness.mjs';
-import { currentPr, ensureDraftPr } from './controller-draft-pr.mjs';
+import {
+  currentPr,
+  ensureDraftPr,
+  refreshControllerDraftPrHandoff,
+} from './controller-draft-pr.mjs';
 import {
   reviewRequestIdentity,
   runStructuredReviewWithRetry,
@@ -137,6 +141,14 @@ function requireValidatedPr(root, issueNumber) {
 
   if (!pr || head !== pr.headRefOid) {
     throw completionEvidenceError('Worktree HEAD and pull-request HEAD do not identify the same exact commit.');
+  }
+  const handoff = refreshControllerDraftPrHandoff(root, state, pr, head);
+  if (handoff.updated) {
+    pr = { ...pr, body: handoff.body };
+    updateState(root, issueNumber, {}, {
+      type: 'controller-draft-pr-handoff-refreshed',
+      details: `Refreshed controller-owned PR #${pr.number} handoff metadata for current exact head ${head}.`,
+    });
   }
   const recorded = controllerValidation(root, issueNumber, state, head);
   return { terminal: false, state: recorded.state, validation: recorded.validation, pr, head };
