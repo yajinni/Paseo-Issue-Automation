@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { LEGACY_LABELS } from './label-catalog.mjs';
+import {
+  sanitizeDurableText,
+  sanitizeRunStateForPersistence,
+} from './persistent-text-safety.mjs';
 import { run } from './process.mjs';
 import {
   DEFAULT_REPOSITORY_CONFIG,
@@ -42,7 +46,7 @@ const TRACKED_RUN_FIELDS = Object.freeze([
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 
 function lifecycleSafeText(value) {
-  const text = String(value ?? '')
+  const text = sanitizeDurableText(String(value ?? ''))
     .replace(/\b(password|secret|token|api[-_]?key|authorization)\s*[:=]\s*\S+/gi, '$1=[REDACTED]');
   return text.length <= LIFECYCLE_TEXT_LIMIT ? text : `${text.slice(0, LIFECYCLE_TEXT_LIMIT)}…`;
 }
@@ -289,9 +293,10 @@ export function loadRun(root, issueNumber) { return readJson(runFile(root, issue
 
 export function saveRun(root, issueNumber, state) {
   const previous = loadRun(root, issueNumber);
-  atomicWrite(runFile(root, issueNumber), `${JSON.stringify(state, null, 2)}\n`);
-  try { appendRunLifecycleDelta(root, issueNumber, previous, state); } catch {}
-  return state;
+  const normalized = sanitizeRunStateForPersistence(state);
+  atomicWrite(runFile(root, issueNumber), `${JSON.stringify(normalized, null, 2)}\n`);
+  try { appendRunLifecycleDelta(root, issueNumber, previous, normalized); } catch {}
+  return normalized;
 }
 
 export function removeRun(root, issueNumber) {
