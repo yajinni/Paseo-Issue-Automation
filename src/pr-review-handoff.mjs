@@ -1,5 +1,6 @@
 import { pauseManagedPr, registerManagedPullRequest } from './pr-review-queue.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
+import { PASEO_LABELS } from './label-catalog.mjs';
 import { PR_REVIEW_LABELS, ensurePrReviewLabels, setPrReviewLabels } from './pr-review-github.mjs';
 import { loadRun, saveRun } from './state.mjs';
 import { run } from './process.mjs';
@@ -15,8 +16,11 @@ export function handoffValidatedPullRequest(root, {
   state,
   pr,
   headSha,
+  runner = run,
+  ensureLabels = ensurePrReviewLabels,
+  setLabels = setPrReviewLabels,
 }) {
-  ensurePrReviewLabels(root);
+  ensureLabels(root);
   const registered = registerManagedPullRequest(root, {
     repository,
     issueNumber: issue.number,
@@ -30,11 +34,11 @@ export function handoffValidatedPullRequest(root, {
     currentHeadSha: headSha,
     reviewRound: 1,
   });
-  setPrReviewLabels(root, pr.number, {
+  setLabels(root, pr.number, {
     add: [PR_REVIEW_LABELS.queued],
     remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.failed],
   });
-  const released = run('gh', ['issue', 'edit', String(issue.number), '--remove-label', 'agent-running'], {
+  const released = runner('gh', ['issue', 'edit', String(issue.number), '--remove-label', PASEO_LABELS.coding], {
     cwd: root,
     allowFailure: true,
   });
@@ -46,7 +50,7 @@ export function handoffValidatedPullRequest(root, {
     });
     throw new Error(released.stderr || released.stdout || `Could not release the coding slot for issue #${issue.number}.`);
   }
-  run('gh', ['issue', 'comment', String(issue.number), '--body', `Coding completed for PR #${pr.number}. The coding slot was released and the PR entered Paseo's serial review queue at ${headSha}.`], {
+  runner('gh', ['issue', 'comment', String(issue.number), '--body', `Coding completed for PR #${pr.number}. The coding slot was released and the PR entered Paseo's serial review queue at ${headSha}.`], {
     cwd: root,
     allowFailure: true,
   });

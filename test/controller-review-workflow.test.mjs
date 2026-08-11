@@ -247,7 +247,7 @@ test('Quick to Manual handoff marks draft ready, releases coding capacity, and r
   assert.equal(loadIssueLifecycle(root, 7, { limit: 20 }).some((event) => event.type === 'pr-review-queued'), true);
 });
 
-test('Quick to Web ChatGPT pre-seeds full-stage metadata before the serial job is visible', { skip: process.platform === 'win32' }, (t) => {
+test('Quick to Web ChatGPT pre-seeds full-stage metadata before the serial job is visible', (t) => {
   const root = repository(t);
   installFakeGh(t, root);
   initialRun(root);
@@ -262,6 +262,7 @@ test('Quick to Web ChatGPT pre-seeds full-stage metadata before the serial job i
     },
     reviewQueue: { paused: false },
   });
+  const calls = [];
   const review = {
     repository: 'octo/app',
     issue: {
@@ -278,6 +279,9 @@ test('Quick to Web ChatGPT pre-seeds full-stage metadata before the serial job i
   };
   const result = enterConfiguredQuickHandoff(root, 7, snapshot(root), review, {
     config: config('quick-web-chatgpt', 3, 4),
+    runner: fakeRunner(calls),
+    ensureLabels: () => [],
+    setLabels: () => ({ changed: true }),
   });
   assert.equal(result.target, 'web-chatgpt');
   const store = loadPrReviewStore(root);
@@ -288,6 +292,8 @@ test('Quick to Web ChatGPT pre-seeds full-stage metadata before the serial job i
   assert.equal(metadata.maxStageRounds, 4);
   assert.match(reviewWorkerPath(root, job.id), /web-chatgpt-full-review-worker\.mjs$/);
   assert.equal(loadRun(root, 7).reviewRuntimeStage, 'full-web-chatgpt');
+  const release = calls.find((call) => call.command === 'gh' && call.args[0] === 'issue' && call.args[1] === 'edit');
+  assert.deepEqual(release.args, ['issue', 'edit', '7', '--remove-label', 'paseo:coding']);
 });
 
 test('Heavy review exhaustion releases coding capacity and records Needs Attention', (t) => {

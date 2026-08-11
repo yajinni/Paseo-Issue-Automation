@@ -249,6 +249,8 @@ function validationSummary(state, headSha) {
 export function enterConfiguredQuickHandoff(root, issueNumber, snapshot, review, {
   config = loadConfig(root),
   runner = run,
+  ensureLabels,
+  setLabels,
 } = {}) {
   if (!['quick-passed', 'handoff'].includes(review?.decision?.action)) {
     throw new Error('Quick review has not reached a handoff decision.');
@@ -328,6 +330,9 @@ export function enterConfiguredQuickHandoff(root, issueNumber, snapshot, review,
       state: snapshot.state,
       pr: snapshot.pr,
       headSha: snapshot.head,
+      runner,
+      ensureLabels,
+      setLabels,
     });
     if (registered.reviewJob?.id !== id) {
       throw new Error('Staged Web ChatGPT review registration did not produce the expected exact-head review job.');
