@@ -92,6 +92,15 @@ function readJson(file, fallback) {
   return JSON.parse(readFileSync(file, 'utf8'));
 }
 
+function normalizedStoredRun(file, stored) {
+  if (!stored) return null;
+  const normalized = sanitizeRunStateForPersistence(stored);
+  if (JSON.stringify(normalized) !== JSON.stringify(stored)) {
+    atomicWrite(file, `${JSON.stringify(normalized, null, 2)}\n`);
+  }
+  return normalized;
+}
+
 export function validateConfig(input = {}) {
   return validateRepositoryConfig(input, { workspaceTitle: WORKSPACE_TITLE });
 }
@@ -289,7 +298,10 @@ function appendRunLifecycleDelta(root, issueNumber, previous, state) {
   }
 }
 
-export function loadRun(root, issueNumber) { return readJson(runFile(root, issueNumber), null); }
+export function loadRun(root, issueNumber) {
+  const file = runFile(root, issueNumber);
+  return normalizedStoredRun(file, readJson(file, null));
+}
 
 export function saveRun(root, issueNumber, state) {
   const previous = loadRun(root, issueNumber);
@@ -308,7 +320,10 @@ export function listRuns(root) {
   const directory = statePaths(root).runs;
   return readdirSync(directory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /^issue-\d+\.json$/.test(entry.name))
-    .map((entry) => readJson(path.join(directory, entry.name), null))
+    .map((entry) => {
+      const file = path.join(directory, entry.name);
+      return normalizedStoredRun(file, readJson(file, null));
+    })
     .filter(Boolean)
     .sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber));
 }
