@@ -65,10 +65,7 @@ const NESTED_FIELDS = Object.freeze([
   'reason',
   'summary',
 ]);
-const LIFECYCLE_FIELDS = Object.freeze([
-  'type',
-  'status',
-  'source',
+const LIFECYCLE_FREE_TEXT_FIELDS = Object.freeze([
   'message',
   'details',
   'detail',
@@ -90,10 +87,11 @@ export function sanitizeRunStateForPersistence(state) {
 
 export function sanitizeLifecycleEventForPersistence(event) {
   if (!event || typeof event !== 'object' || Array.isArray(event)) return event;
-  const next = sanitizeTextFields(event, LIFECYCLE_FIELDS);
-  if (event.evidence && typeof event.evidence === 'object') {
-    next.evidence = sanitizeDurableValue(event.evidence);
+  const next = { ...event };
+  for (const field of LIFECYCLE_FREE_TEXT_FIELDS) {
+    if (Object.hasOwn(next, field)) next[field] = sanitizeDurableValue(next[field]);
   }
+  if (Object.hasOwn(event, 'evidence')) next.evidence = sanitizeDurableValue(event.evidence);
   return next;
 }
 
