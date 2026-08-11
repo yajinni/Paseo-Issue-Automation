@@ -10,7 +10,7 @@ import {
   saveControllerMode,
   usesExternalController,
 } from '../src/controller-mode.mjs';
-import { LABEL_DETAILS } from '../src/install-legacy.mjs';
+import { LIFECYCLE_LABEL_CATALOG } from '../src/label-catalog.mjs';
 import { buildSetupSnapshot } from '../src/setup-snapshot.mjs';
 import {
   EXTERNAL_SETUP_COMMIT_FILES,
@@ -85,10 +85,10 @@ test('external setup is ready without a paseo.json service or npm dependency', (
   saveIntegration(root, {
     issueTemplate: { path: '.github/ISSUE_TEMPLATE/automated-coding-task.md', createdByPackage: true },
     paseoJson: null,
-    labels: Object.fromEntries(Object.keys(LABEL_DETAILS).map((name) => [name, { createdByPackage: true }])),
+    labels: Object.fromEntries(Object.keys(LIFECYCLE_LABEL_CATALOG).map((name) => [name, { createdByPackage: true }])),
     workspace: { id: 'workspace-one', createdByPackage: true },
   });
-  const labels = Object.entries(LABEL_DETAILS).map(([name, [color, description]]) => ({ name, color, description }));
+  const labels = Object.values(LIFECYCLE_LABEL_CATALOG).map(({ name, color, description }) => ({ name, color, description }));
   const requirements = {
     git: true,
     githubCli: true,
