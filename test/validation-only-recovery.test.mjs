@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { completeFixJob, validateFixedHead } from '../src/fix-worker.mjs';
 import { evaluateApprovedReviewGate } from '../src/pr-review-finalize.mjs';
-import { createFixJobInStore, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
+import { createFixJobInStore, enqueueReviewInStore, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
 import {
   findManaged,
   loadPrReviewStore,
@@ -179,7 +179,11 @@ test('existing validation-only fix job resumes the prior exact-head approval wit
   let fixJobId;
   mutatePrReviewStore(root, (store) => {
     const managed = findManaged(store, registered.managed.id);
-    const reviewJob = store.reviewJobs[0];
+    const reviewJob = enqueueReviewInStore(store, managed, {
+      headSha: HEAD,
+      immediate: true,
+      now: 1500,
+    });
     reviewJob.state = 'awaiting_result';
     const fix = createFixJobInStore(store, managed, reviewJob, VALIDATION_REASON, {
       sourceCommentId: 77,
