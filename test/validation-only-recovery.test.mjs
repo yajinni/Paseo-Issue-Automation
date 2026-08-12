@@ -244,6 +244,6 @@ test('existing validation-only fix job resumes the prior exact-head approval wit
   assert.equal(recordedReview.managedId, managed.id);
   assert.equal(recordedReview.reviewRequestId, store.reviewJobs[0].reviewRequestId);
   assert.equal(labels.pullRequestNumber, 289);
-  assert.ok(labels.update.remove.includes('paseo:failed'));
+  assert.ok(labels.update.remove.includes('paseo:review-failed'));
   assert.equal(labels.update.add, undefined);
 });
