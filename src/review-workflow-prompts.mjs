@@ -1,4 +1,4 @@
-export const REVIEW_WORKFLOW_PROMPT_VERSION = 1;
+export const REVIEW_WORKFLOW_PROMPT_VERSION = 2;
 
 export const REVIEW_STAGES = Object.freeze({
   quick: 'quick',
@@ -9,16 +9,6 @@ export const REVIEW_WORKFLOW_RESULTS = Object.freeze([
   'pass',
   'changes',
   'stale',
-]);
-
-const METADATA_FIELDS = Object.freeze([
-  'repository',
-  'pullRequestNumber',
-  'issueNumber',
-  'headSha',
-  'stage',
-  'round',
-  'promptVersion',
 ]);
 
 const COMMON_PREAMBLE = `You are reviewing a Paseo-managed pull request.
@@ -36,6 +26,10 @@ Exact head SHA: {{headSha}}
 Review stage: {{stage}}
 Review round: {{round}}
 Prompt version: {{promptVersion}}
+
+The request identity above is controller-owned context. Do not repeat repository,
+PR, issue, head SHA, stage, round, or prompt version in your JSON output. The
+controller binds that trusted identity to accepted review evidence.
 
 Before returning a verdict, re-fetch or otherwise verify the current PR head.
 If it no longer equals {{headSha}}, return result "stale" and do not judge the
@@ -113,19 +107,11 @@ export const REVIEW_WORKFLOW_OUTPUT_SCHEMA = JSON.stringify({
   type: 'object',
   additionalProperties: false,
   required: [
-    ...METADATA_FIELDS,
     'result',
     'summary',
     'findings',
   ],
   properties: {
-    repository: { type: 'string', minLength: 1 },
-    pullRequestNumber: { type: 'integer', minimum: 1 },
-    issueNumber: { type: 'integer', minimum: 1 },
-    headSha: { type: 'string', pattern: '^[0-9a-fA-F]{7,64}$' },
-    stage: { type: 'string', enum: Object.values(REVIEW_STAGES) },
-    round: { type: 'integer', minimum: 1, maximum: 20 },
-    promptVersion: { type: 'integer', minimum: 1 },
     result: { type: 'string', enum: REVIEW_WORKFLOW_RESULTS },
     summary: { type: 'string' },
     findings: {
