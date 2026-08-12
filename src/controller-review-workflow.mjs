@@ -97,7 +97,7 @@ function recordStructuredReviewAudit(root, issueNumber, snapshot, event, {
     result: event.result === 'pass' ? 'APPROVED' : 'CHANGES_REQUIRED',
     commit: event.headSha,
     details: findings,
-    source: 'harness-review-compat',
+    source: event.stage === REVIEW_STAGES.full ? 'harness-review-compat' : 'harness-review-light-compat',
   });
   const audit = postReviewerAuditComment(root, {
     issueNumber,
