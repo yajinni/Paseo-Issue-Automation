@@ -91,6 +91,7 @@ function seedRun(root, overrides = {}) {
     branch: BRANCH,
     attempt: 1,
     workspaceId: 'workspace-7',
+    worktreePath: path.join(root, 'managed-issue-worktree'),
     coderAgentId: 'coder-7',
     prNumber: PR,
     prUrl: `https://example.invalid/${REPOSITORY}/pull/${PR}`,
