@@ -113,69 +113,59 @@ export function reviewStageDecision({ config = {}, state = {}, stage, verdict })
   };
 }
 
+function controllerReviewIdentity(expected = {}) {
+  const identity = {
+    repository: String(expected.repository || '').trim(),
+    pullRequestNumber: Number(expected.pullRequestNumber),
+    issueNumber: Number(expected.issueNumber),
+    headSha: String(expected.headSha || '').trim(),
+    stage: String(expected.stage || '').trim(),
+    round: Number(expected.round),
+    promptVersion: Number(expected.promptVersion ?? REVIEW_WORKFLOW_PROMPT_VERSION),
+  };
+  if (!identity.repository
+      || !Number.isInteger(identity.pullRequestNumber) || identity.pullRequestNumber < 1
+      || !Number.isInteger(identity.issueNumber) || identity.issueNumber < 1
+      || !/^[0-9a-f]{7,64}$/i.test(identity.headSha)
+      || !Object.values(REVIEW_STAGES).includes(identity.stage)
+      || !Number.isInteger(identity.round) || identity.round < 1 || identity.round > 20
+      || !Number.isInteger(identity.promptVersion) || identity.promptVersion < 1) {
+    throw new Error('Controller did not provide a valid staged-review request identity.');
+  }
+  return identity;
+}
+
 export function validateHarnessReviewVerdict(verdict, expected = {}) {
   if (!verdict || typeof verdict !== 'object' || Array.isArray(verdict)) {
     throw new Error('Reviewer did not return the required structured verdict.');
   }
-  const requiredFields = [
-    'repository',
-    'pullRequestNumber',
-    'issueNumber',
-    'headSha',
-    'stage',
-    'round',
-    'promptVersion',
-    'result',
-    'summary',
-    'findings',
-  ];
+  const requiredFields = ['result', 'summary', 'findings'];
   const missing = requiredFields.filter((field) => !Object.hasOwn(verdict, field));
   if (missing.length) {
     throw new Error(`Reviewer did not return the required structured verdict fields: ${missing.join(', ')}.`);
   }
-  if (typeof verdict.repository !== 'string' || !verdict.repository.trim()
-      || !Number.isInteger(verdict.pullRequestNumber) || verdict.pullRequestNumber < 1
-      || !Number.isInteger(verdict.issueNumber) || verdict.issueNumber < 1
-      || !/^[0-9a-f]{7,64}$/i.test(String(verdict.headSha || ''))
-      || !Object.values(REVIEW_STAGES).includes(verdict.stage)
-      || !Number.isInteger(verdict.round) || verdict.round < 1 || verdict.round > 20
-      || !Number.isInteger(verdict.promptVersion) || verdict.promptVersion < 1
+  if (!REVIEW_WORKFLOW_RESULTS.includes(verdict.result)
       || typeof verdict.summary !== 'string'
       || !Array.isArray(verdict.findings)) {
     throw new Error('Reviewer did not return the required structured verdict shape.');
   }
-  const checks = [
-    ['repository', String(expected.repository || '')],
-    ['pullRequestNumber', Number(expected.pullRequestNumber)],
-    ['issueNumber', Number(expected.issueNumber)],
-    ['headSha', String(expected.headSha || '')],
-    ['stage', String(expected.stage || '')],
-    ['round', Number(expected.round)],
-    ['promptVersion', Number(expected.promptVersion ?? REVIEW_WORKFLOW_PROMPT_VERSION)],
-  ];
-  for (const [field, value] of checks) {
-    if (verdict[field] !== value) {
-      const error = new Error(`Reviewer verdict ${field} does not match the requested review.`);
-      error.code = 'REVIEW_METADATA_MISMATCH';
-      error.command = 'paseo';
-      throw error;
-    }
-  }
-  if (!REVIEW_WORKFLOW_RESULTS.includes(verdict.result)) throw new Error('Reviewer verdict result is invalid.');
-  return verdict;
+  return {
+    ...verdict,
+    ...controllerReviewIdentity(expected),
+  };
 }
 
 export function createHarnessReviewEvent(verdict, expected = {}, { at = new Date().toISOString() } = {}) {
-  validateHarnessReviewVerdict(verdict, expected);
+  const bound = validateHarnessReviewVerdict(verdict, expected);
   return Object.freeze({
     event: HARNESS_REVIEW_EVENTS.result,
-    stage: verdict.stage,
-    round: verdict.round,
-    result: verdict.result,
-    headSha: verdict.headSha,
-    promptVersion: verdict.promptVersion,
-    summary: String(verdict.summary || ''),
-    findings: verdict.findings.map((finding) => ({ ...finding })),
+    stage: bound.stage,
+    round: bound.round,
+    result: bound.result,
+    headSha: bound.headSha,
+    promptVersion: bound.promptVersion,
+    summary: String(bound.summary || ''),
+    findings: bound.findings.map((finding) => ({ ...finding })),
     at,
   });
 }

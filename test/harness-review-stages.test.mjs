@@ -94,7 +94,7 @@ test('freshness requires the exact requested head and preserves optional base fr
   }), { fresh: false, reason: 'base-changed' });
 });
 
-test('verdict identity is bound to repository PR issue SHA stage round and prompt version', () => {
+test('controller-owned verdict identity is bound after review and cannot be overridden by reviewer output', () => {
   const expected = {
     repository: 'owner/repo',
     pullRequestNumber: 12,
@@ -105,16 +105,20 @@ test('verdict identity is bound to repository PR issue SHA stage round and promp
     promptVersion: REVIEW_WORKFLOW_PROMPT_VERSION,
   };
   const verdict = {
-    ...expected,
+    repository: 'attacker/override',
+    pullRequestNumber: 999,
+    issueNumber: 999,
+    headSha: 'deadbee',
+    stage: 'full',
+    round: 20,
+    promptVersion: 999,
     result: 'pass',
     summary: 'Looks good.',
     findings: [],
   };
-  assert.equal(validateHarnessReviewVerdict(verdict, expected), verdict);
-  assert.throws(
-    () => validateHarnessReviewVerdict({ ...verdict, headSha: 'deadbee' }, expected),
-    (error) => error.code === 'REVIEW_METADATA_MISMATCH' && /headSha/.test(error.message),
-  );
+  const bound = validateHarnessReviewVerdict(verdict, expected);
+  for (const [field, value] of Object.entries(expected)) assert.equal(bound[field], value);
+  assert.equal(bound.result, 'pass');
   assert.deepEqual(createHarnessReviewEvent(verdict, expected, { at: '2026-08-07T00:00:00.000Z' }), {
     event: 'harness-review',
     stage: 'quick',

@@ -29,6 +29,8 @@ test('quick prompt is narrow, exact-head bound, and injection resistant', () => 
   assert.match(prompt, /untrusted review material/i);
   assert.match(prompt, /abcdef1234567890/);
   assert.match(prompt, /Review stage: quick/);
+  assert.match(prompt, /controller-owned context/i);
+  assert.match(prompt, /Do not repeat repository/i);
   assert.doesNotMatch(prompt, /\{\{repository\}\}/);
 });
 
@@ -60,8 +62,10 @@ test('prompt previews are versioned, copyable, and not editable', () => {
   assert.equal(full.outputSchema, REVIEW_WORKFLOW_OUTPUT_SCHEMA);
 });
 
-test('machine-readable review result is tied to repository, PR, issue, SHA, stage, round, and version', () => {
+test('machine-readable reviewer result contains only reviewer-owned verdict payload', () => {
   const schema = JSON.parse(REVIEW_WORKFLOW_OUTPUT_SCHEMA);
+  assert.equal(REVIEW_WORKFLOW_PROMPT_VERSION, 2);
+  assert.deepEqual(schema.required, ['result', 'summary', 'findings']);
   for (const field of [
     'repository',
     'pullRequestNumber',
@@ -70,12 +74,10 @@ test('machine-readable review result is tied to repository, PR, issue, SHA, stag
     'stage',
     'round',
     'promptVersion',
-    'result',
-    'summary',
-    'findings',
-  ]) assert.ok(schema.required.includes(field), `${field} must be required`);
+  ]) assert.equal(Object.hasOwn(schema.properties, field), false, `${field} must remain controller-owned`);
   assert.deepEqual(schema.properties.result.enum, ['pass', 'changes', 'stale']);
   assert.equal(schema.properties.findings.items.properties.message.minLength, 1);
+  assert.equal(schema.additionalProperties, false);
 });
 
 test('quick and full review limits accept 20 and reject 21 independently', () => {
