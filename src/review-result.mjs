@@ -1,3 +1,5 @@
+import { REVIEW_WORKFLOW_PROMPT_VERSION } from './review-workflow-prompts.mjs';
+
 export const REVIEW_MARKER_VERSION = 1;
 const MARKER_PATTERN = /<!--\s*paseo-review:v1\s*([\s\S]*?)\s*-->/g;
 
@@ -5,6 +7,15 @@ function normalizedResult(value) {
   const result = String(value || '').trim().toLowerCase();
   if (!['changes_requested', 'approved', 'stale'].includes(result)) throw new Error(`Unsupported review result: ${result || 'missing'}`);
   return result;
+}
+
+function promptVersionMatches(result, expected) {
+  const expectedVersion = Number(expected.promptVersion);
+  if (result.promptVersion === expectedVersion) return true;
+  return result.stage === 'full'
+    && result.promptVersion === REVIEW_WORKFLOW_PROMPT_VERSION
+    && Number.isInteger(result.round)
+    && result.reviewRound === result.round;
 }
 
 export function parsePaseoReviewMarker(body) {
@@ -56,7 +67,7 @@ export function matchingReviewResult({ comments = [], reviews = [] }, expected) 
       && result.pullRequestNumber === Number(expected.pullRequestNumber)
       && result.issueNumber === Number(expected.issueNumber)
       && result.headSha === String(expected.headSha).toLowerCase()
-      && result.promptVersion === Number(expected.promptVersion)
+      && promptVersionMatches(result, expected)
       && (expectedStage === null || result.stage === expectedStage)
       && (expectedRound === null || result.round === expectedRound));
   return candidates.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))).at(-1) || null;
