@@ -140,6 +140,11 @@ export function runConfiguredHarnessReview(root, issueNumber, snapshot, {
 } = {}) {
   const state = loadRun(root, issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${issueNumber}.`);
+  const workspaceId = String(snapshot?.state?.workspaceId || '').trim();
+  const worktreePath = String(snapshot?.state?.worktreePath || '').trim();
+  if (!workspaceId || !worktreePath) {
+    throw new Error('Staged review requires managed workspaceId and worktreePath.');
+  }
   const repository = jsonRunner('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root })?.nameWithOwner;
   const issue = jsonRunner('gh', [
     'issue', 'view', String(issueNumber),
@@ -177,7 +182,8 @@ export function runConfiguredHarnessReview(root, issueNumber, snapshot, {
   const verdict = agentRunner('paseo', [
     'run', '--provider', config.models.reviewer,
     ...(config.models.reviewerThinking ? ['--thinking', config.models.reviewerThinking] : []),
-    '--workspace', String(snapshot.state.workspaceId),
+    '--workspace', workspaceId,
+    '--cwd', worktreePath,
     '--title', `Issue #${issueNumber} ${label} Reviewer`,
     '--output-schema', REVIEW_WORKFLOW_OUTPUT_SCHEMA,
     prompt,
