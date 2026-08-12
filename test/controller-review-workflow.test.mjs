@@ -44,6 +44,7 @@ function initialRun(root, overrides = {}) {
     branch: 'ai/issue-7-fix-review-workflow',
     attempt: 1,
     workspaceId: 'workspace-7',
+    worktreePath: path.join(root, 'managed-issue-worktree'),
     coderAgentId: 'coder-7',
     events: [{
       event: 'validation-summary',
