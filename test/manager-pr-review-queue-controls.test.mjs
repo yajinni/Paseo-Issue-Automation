@@ -33,7 +33,7 @@ test('manager PR review summary exposes durable queue state without conflating i
       config: {
         enabled: true,
         browserReview: { enabled: true },
-        reviewQueue: { paused: true },
+         reviewQueue: { paused: true },
       },
       reviewJobs: [
         { id: 'queued-a', state: 'queued' },
@@ -44,9 +44,9 @@ test('manager PR review summary exposes durable queue state without conflating i
     }),
   });
 
-  assert.deepEqual(summary, {
+   assert.deepEqual(summary, {
     available: true,
-    enabled: true,
+    enabled: false,
     browserReviewEnabled: true,
     queuePaused: true,
     waitingReviewCount: 2,
@@ -65,12 +65,9 @@ test('manager PR review summary fails closed when durable review state cannot be
   assert.match(summary.error, /corrupt review state/);
 });
 
-test('PR Reviews UI shows queue state, scheduler reason, and explicit queue controls', () => {
+test('PR Reviews UI shows queue state and lifecycle controls without separate worker toggles', () => {
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /Review queue/);
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /Scheduler result/);
-  assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /pr-review\/resume/);
-  assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /Resume PR reviews/);
-  assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /pr-review\/pause/);
-  assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /Pause PR reviews/);
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /lastReviewResult/);
+  assert.doesNotMatch(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /review-worker\/(start|stop|restart)/);
 });

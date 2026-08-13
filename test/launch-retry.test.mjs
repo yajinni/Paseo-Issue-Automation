@@ -7,6 +7,7 @@ import {
   inspectWorkspaceAgents,
   nextReconciliationAttempt,
   PASEO_WORKTREE_SLUG_MAX_LENGTH,
+  refreshConfiguredBase,
   verifyWorkspaceIdentity,
   worktreeSlugForBranch,
   workspaceCreateArgs,
@@ -121,6 +122,49 @@ test('workspace identity rejects an attempt or branch mismatch', () => {
   }, {
     runner: () => ({ ok: true, stdout: 'ai/issue-274-attempt-2', stderr: '' }),
   }), /instead of/);
+});
+
+test('configured base refresh fetches and verifies the exact remote SHA', () => {
+  const calls = [];
+  const result = refreshConfiguredBase('/repo', 'openspec', {
+    now: () => '2026-08-13T12:00:00.000Z',
+    runner(command, args) {
+      calls.push([command, args]);
+      if (args[0] === 'fetch') return { ok: true, stdout: '', stderr: '' };
+      if (args[0] === 'rev-parse') return { ok: true, stdout: 'A'.repeat(40), stderr: '' };
+      return { ok: true, stdout: `${'A'.repeat(40)}\trefs/heads/openspec\n`, stderr: '' };
+    },
+  });
+  assert.deepEqual(result, {
+    baseBranch: 'openspec',
+    baseRef: 'refs/remotes/origin/openspec',
+    baseSha: 'a'.repeat(40),
+    verifiedAt: '2026-08-13T12:00:00.000Z',
+  });
+  assert.deepEqual(calls[0], ['git', ['fetch', '--prune', 'origin', '+refs/heads/openspec:refs/remotes/origin/openspec']]);
+  assert.deepEqual(calls[1], ['git', ['rev-parse', 'refs/remotes/origin/openspec^{commit}']]);
+  assert.deepEqual(calls[2], ['git', ['ls-remote', 'origin', 'refs/heads/openspec']]);
+});
+
+test('configured base refresh fails closed before workspace creation evidence can proceed', () => {
+  assert.throws(() => refreshConfiguredBase('/repo', 'main', {
+    runner: (_command, args) => args[0] === 'fetch'
+      ? { ok: false, stdout: '', stderr: 'remote unavailable' }
+      : { ok: true, stdout: '', stderr: '' },
+  }), /Could not fetch origin\/main.*remote unavailable/);
+});
+
+test('workspace identity verifies the initial HEAD against the recorded base SHA', () => {
+  const calls = [];
+  assert.doesNotThrow(() => verifyWorkspaceIdentity('/repo', {
+    workspaceId: 'wks-main', worktreePath: '/worktrees/main', workspaceName: 'branch',
+  }, { title: 'branch', branch: 'ai/issue-1', baseSha: 'b'.repeat(40) }, {
+    runner: (_command, args) => {
+      calls.push(args);
+      return { ok: true, stdout: args.includes('branch') ? 'ai/issue-1' : 'b'.repeat(40), stderr: '' };
+    },
+  }));
+  assert.equal(calls.length, 2);
 });
 
 

@@ -114,6 +114,16 @@ export function recoverFailedAttempt(root, number, {
   }
 
   const prompt = recoveryPrompt(state, issueNumber, configLoader(root).baseBranch);
+  const promptAt = now();
+  const promptState = {
+    ...state,
+    coderPrompt: prompt,
+    coderPromptRecordedAt: promptAt,
+    coderPromptKind: 'recover-first',
+    coderPrompts: [...(state.coderPrompts || []), { attempt: state.attempt || 1, kind: 'recover-first', at: promptAt, prompt }],
+    updatedAt: promptAt,
+  };
+  writeRun(root, issueNumber, promptState);
   const sent = runner('paseo', ['send', coderId, '--no-wait', prompt], { cwd: root, allowFailure: true });
   if (!sent?.ok) {
     return {
@@ -127,7 +137,7 @@ export function recoverFailedAttempt(root, number, {
   const startedAt = now();
   const recoveryCount = Number(state.failedAttemptRecoveryCount || 0) + 1;
   let recoveredState = writeRun(root, issueNumber, {
-    ...state,
+    ...promptState,
     status: LABELS.running,
     phase: 'recovering-failed-attempt',
     reason: 'Recovering the existing failed attempt before creating any fresh attempt.',

@@ -19,6 +19,7 @@ import { enhanceManagerWithUiFoundation, enhanceSetupWithSharedUiTheme } from '.
 import { enhanceManagerWithWorkQueue } from './manager-work-queue-ui.mjs';
 import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
+import { loadPrReviewStore } from './pr-review-store.mjs';
 import { listRepositories } from './repository-registry.mjs';
 import { loadConfig } from './state.mjs';
 import { finalReadinessApiRequest } from './setup-wizard/final-readiness-api.mjs';
@@ -82,6 +83,30 @@ export function startConfiguredCodingWorkers(workerManager, {
     try {
       if (configLoader(repository.path).setupComplete !== true) continue;
       started.push(workerManager.start(repository));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push({ repositoryId: repository?.id || null, error: message });
+      onError(error, repository);
+    }
+  }
+  return { started, errors };
+}
+
+export function startConfiguredReviewWorkers(reviewWorkerManager, {
+  rootDir,
+  repositoryLister = listRepositories,
+  configLoader = loadConfig,
+  reviewStoreLoader = loadPrReviewStore,
+  onError = () => {},
+} = {}) {
+  const started = [];
+  const errors = [];
+  if (!reviewWorkerManager?.start) return { started, errors };
+  for (const repository of repositoryLister({ rootDir })) {
+    try {
+      if (configLoader(repository.path).setupComplete !== true) continue;
+      if (reviewStoreLoader(repository.path).config?.reviewQueue?.paused !== false) continue;
+      started.push(reviewWorkerManager.start(repository));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       errors.push({ repositoryId: repository?.id || null, error: message });
@@ -240,10 +265,16 @@ export async function startManagerServer({
       console.warn(`Could not start coding worker for ${repository?.repository || repository?.name || repository?.id || 'repository'}: ${error.message}`);
     },
   });
+  const reviewWorkerStartup = startConfiguredReviewWorkers(reviewWorkers, {
+    rootDir,
+    onError: (error, repository) => {
+      console.warn(`Could not start PR-review worker for ${repository?.repository || repository?.name || repository?.id || 'repository'}: ${error.message}`);
+    },
+  });
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}`;
   console.log(`Paseo repository manager: ${url}`);
   server.on('close', () => { workers.close(); reviewWorkers.close(); });
   if (open) openBrowser(url);
-  return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers, paseoCredentialStore: credentials, codingWorkerStartup };
+  return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers, paseoCredentialStore: credentials, codingWorkerStartup, reviewWorkerStartup };
 }

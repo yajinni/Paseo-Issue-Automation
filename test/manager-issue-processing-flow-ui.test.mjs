@@ -9,10 +9,7 @@ import {
 test('Issues view collapses workflow and worker into one Issue processing card', () => {
   for (const text of [
     "title.textContent = 'Issue processing'",
-    'Start issue processing',
-    'Pause issue processing',
-    'issue-processing/start',
-    'issue-processing/pause',
+    'Processing order',
     'Maximum simultaneous issues',
   ]) assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT, /layout\.replaceChildren\(card, workload\)/);

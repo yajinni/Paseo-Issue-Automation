@@ -121,7 +121,7 @@ function lifecycleEvidenceDetail(event = {}) {
   const evidence = event.evidence && typeof event.evidence === 'object' ? event.evidence : {};
   const facts = Object.entries(evidence)
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
-    .map(([key, value]) => `${key}=${String(value)}`);
+     .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : String(value)}`);
   if (!facts.length) return message;
   return [message, facts.join(' · ')].filter(Boolean).join('\n');
 }
@@ -178,6 +178,17 @@ function timelineFromRun(run = {}) {
     .filter((entry) => entry.at || entry.detail)
     .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
     .slice(0, 50);
+}
+
+function latestActivityAt(run = {}) {
+  const timestamps = [
+    run.updatedAt, run.heartbeatAt, run.completedAt, run.startedAt,
+    ...(run.lifecycle || []).map(eventTimestamp),
+    ...(run.activity || []).map(eventTimestamp),
+    ...(run.events || []).map(eventTimestamp),
+    ...(run.history || []).flatMap((attempt) => [attempt.completedAt, attempt.startedAt]),
+  ].filter(Boolean).map((value) => String(value));
+  return timestamps.sort().at(-1) || null;
 }
 
 function latestReviewEvent(run = {}) {
@@ -392,6 +403,14 @@ function diagnosticsFromRun(run = {}) {
     mergedHeadSha: firstString(run.mergedHeadSha),
     mergedAt: firstString(run.mergedAt),
     issueClosureVerifiedAt: firstString(run.issueClosureVerifiedAt),
+    baseBranch: firstString(run.baseBranch),
+    baseSha: firstString(run.baseSha),
+    baseRef: firstString(run.baseRef),
+    baseVerifiedAt: firstString(run.baseVerifiedAt),
+    coderPrompt: firstString(run.coderPrompt),
+    coderPromptRecordedAt: firstString(run.coderPromptRecordedAt),
+    coderPromptKind: firstString(run.coderPromptKind),
+    coderPrompts: Array.isArray(run.coderPrompts) ? run.coderPrompts : [],
   };
 }
 
@@ -412,7 +431,7 @@ export function managerWorkQueueItem(run = {}, config = {}, prReviewStore = null
     attempt: firstNumber(run.attempt),
     workspaceId: firstString(run.workspaceId),
     startedAt: firstString(run.startedAt),
-    updatedAt: firstString(run.updatedAt, run.heartbeatAt, run.startedAt),
+     updatedAt: firstString(latestActivityAt(run), run.updatedAt, run.heartbeatAt, run.startedAt),
     completedAt: firstString(run.completedAt),
     reason: firstString(run.reason),
     nextAction: nextAction(stage, run),
@@ -437,7 +456,8 @@ export function managerWorkQueue(runs = [], config = {}, prReviewStore = null) {
     .filter(Boolean)
     .map((run) => managerWorkQueueItem(run, config, prReviewStore))
     .filter((item) => item.issueNumber)
-    .sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber));
+     .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+       || Number(a.issueNumber) - Number(b.issueNumber));
   return {
     items,
     counts: stageCounts(items),

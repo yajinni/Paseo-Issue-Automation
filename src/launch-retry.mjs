@@ -56,13 +56,13 @@ export function worktreeSlugForBranch(branch) {
   return readable.length <= PASEO_WORKTREE_SLUG_MAX_LENGTH ? readable : `pia-${digest}`;
 }
 
-export function workspaceCreateArgs({ root, title, branch, baseBranch }) {
+export function workspaceCreateArgs({ root, title, branch, baseBranch, baseSha = null }) {
   return [
     'workspace', 'create', '--json',
     '--isolation', 'worktree', '--path', String(root),
     '--worktree-slug', worktreeSlugForBranch(branch),
     '--title', String(title), '--mode', 'branch-off',
-    '--new-branch', String(branch), '--base', String(baseBranch),
+    '--new-branch', String(branch), '--base', String(baseSha || baseBranch),
   ];
 }
 
@@ -141,7 +141,49 @@ export function verifyWorkspaceIdentity(root, workspace, expected, { runner = ru
   if (actualBranch !== expected.branch) {
     throw new Error(`Paseo created branch ${actualBranch || '(detached)'} instead of ${expected.branch}.`);
   }
+  if (expected.baseSha) {
+    const headResult = runner('git', ['-C', workspace.worktreePath, 'rev-parse', 'HEAD'], {
+      cwd: root,
+      allowFailure: true,
+    });
+    if (!headResult?.ok) {
+      throw new Error(text(headResult?.stderr) || text(headResult?.stdout) || 'Could not verify the created worktree base commit.');
+    }
+    const actualHead = text(headResult.stdout).toLowerCase();
+    if (actualHead !== text(expected.baseSha).toLowerCase()) {
+      throw new Error(`Paseo created worktree HEAD ${actualHead || '(unknown)'} instead of verified base ${expected.baseSha}.`);
+    }
+  }
   return workspace;
+}
+
+export function refreshConfiguredBase(root, baseBranch, { runner = run, remote = 'origin', now = () => new Date().toISOString() } = {}) {
+  const branch = text(baseBranch);
+  if (!branch || branch.startsWith('-') || branch.includes('..') || branch.includes('@{')) {
+    throw new Error('The configured base branch is invalid or missing.');
+  }
+  const remoteRef = `refs/remotes/${remote}/${branch}`;
+  const fetch = runner('git', ['fetch', '--prune', remote, `+refs/heads/${branch}:${remoteRef}`], {
+    cwd: root,
+    allowFailure: true,
+  });
+  if (!fetch?.ok) {
+    throw new Error(`Could not fetch origin/${branch} before workspace creation: ${text(fetch?.stderr) || text(fetch?.stdout) || 'git fetch failed.'}`);
+  }
+  const resolved = runner('git', ['rev-parse', `${remoteRef}^{commit}`], { cwd: root, allowFailure: true });
+  if (!resolved?.ok || !/^[0-9a-f]{40}$/i.test(text(resolved.stdout))) {
+    throw new Error(`Could not resolve the freshly fetched origin/${branch} commit SHA.`);
+  }
+  const baseSha = text(resolved.stdout).toLowerCase();
+  const remoteHead = runner('git', ['ls-remote', remote, `refs/heads/${branch}`], { cwd: root, allowFailure: true });
+  if (!remoteHead?.ok) {
+    throw new Error(`Could not verify the current origin/${branch} commit SHA: ${text(remoteHead?.stderr) || text(remoteHead?.stdout) || 'git ls-remote failed.'}`);
+  }
+  const remoteSha = text(remoteHead.stdout).split(/\s+/)[0].toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(remoteSha) || remoteSha !== baseSha) {
+    throw new Error(`Fresh origin/${branch} verification failed: fetched ${baseSha || '(missing)'} but remote reports ${remoteSha || '(missing)'}.`);
+  }
+  return { baseBranch: branch, baseRef: remoteRef, baseSha, verifiedAt: now() };
 }
 
 export function cleanupWorkspaceIfEmpty(root, workspace, { runner = run } = {}) {

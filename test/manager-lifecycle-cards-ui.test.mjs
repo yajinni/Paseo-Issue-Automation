@@ -28,6 +28,7 @@ test('lifecycle cards show true claim facts and keep Coding separate', () => {
   assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /Coding started/);
   assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /Coding completed/);
   assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /Waiting for coding agent/);
+  assert.match(MANAGER_LIFECYCLE_CARDS_SCRIPT, /The coding attempt ended without a successful handoff/);
 });
 
 test('review cards are data-driven Light, Heavy PR, and ChatGPT stages', () => {

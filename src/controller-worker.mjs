@@ -59,6 +59,15 @@ function waitForCoder(root, state) {
 
 function sendCoder(root, state, prompt) {
   const agentId = state.coderAgentId || state.agentId;
+  const at = new Date().toISOString();
+  saveRun(root, state.issueNumber, {
+    ...state,
+    coderPrompt: prompt,
+    coderPromptRecordedAt: at,
+    coderPromptKind: 'controller-follow-up',
+    coderPrompts: [...(state.coderPrompts || []), { attempt: state.attempt || 1, kind: 'controller-follow-up', at, prompt }],
+    updatedAt: at,
+  });
   const sent = run('paseo', ['send', String(agentId), '--no-wait', prompt], { cwd: root, allowFailure: true });
   if (!sent.ok) throw new Error(sent.stderr || sent.stdout || 'Paseo could not send the repair task to the Coder.');
   waitForCoder(root, state);

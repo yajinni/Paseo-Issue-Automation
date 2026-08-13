@@ -11,6 +11,7 @@ import {
   repairExternalRepositoryFromManager,
 } from './manager-installation.mjs';
 import { managerIssueProcessingAction } from './manager-issue-processing.mjs';
+import { managerPrReviewProcessingAction } from './manager-pr-review-processing.mjs';
 import { managerIssuePlan } from './manager-issues.mjs';
 import { managerLifecycleDetailsApiRequest } from './manager-lifecycle-details.mjs';
 import {
@@ -214,6 +215,16 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
       actions: options.actions,
     });
     if (issueProcessingResult !== null) return refreshedResult(context, options, issueProcessingResult);
+
+    const prReviewProcessingResult = (options.prReviewProcessingHandler || managerPrReviewProcessingAction)({
+      root: context.root,
+      repository: context.repository,
+      pathname: context.pathname,
+      reviewWorkerManager: options.reviewWorkerManager,
+      actionHandler,
+      actions: options.actions,
+    });
+    if (prReviewProcessingResult !== null) return refreshedResult(context, options, prReviewProcessingResult);
 
     const reviewResult = reviewWorkerAction(options.reviewWorkerManager, context, context.pathname);
     if (reviewResult !== null) {

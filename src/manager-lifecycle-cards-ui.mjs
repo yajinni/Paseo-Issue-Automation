@@ -65,9 +65,11 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
   function codingCard(details) {
     const coding = details.coding || {};
     const status = coding.status || 'Waiting for coding agent';
-    const framed = cardFrame('coding' + (status === 'Waiting for coding agent' ? ' pending' : ''), 'Coding', '</>', { text: status, tone: resultTone(status) });
+    const failed = status === 'Failed' || status === 'Blocked';
+    const framed = cardFrame((failed ? 'failed' : 'coding') + (status === 'Waiting for coding agent' ? ' pending' : ''), 'Coding', '</>', { text: status, tone: resultTone(status) });
     const copy = document.createElement('p'); copy.className = 'lifecycle-card-copy'; copy.textContent = status === 'Waiting for coding agent'
       ? 'The issue is claimed and waiting to be passed to a coding agent.'
+      : failed ? (coding.failureReason || 'The coding attempt ended without a successful handoff.')
       : 'The coding agent has been assigned to implement the issue.';
     framed.facts.append(
       fact('Model', coding.model),
@@ -137,12 +139,13 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
 
   function miniTrail(details) {
     const completed = details.completed || {};
+    const unsuccessful = ['Failed', 'Blocked'].includes(details.coding?.status);
     const stops = [
       ['Claimed', details.claimed?.claimedAt],
       ['Coding', details.coding?.startedAt],
       ...(details.reviews || []).map(function(review) { return [review.label, review.completedAt || review.startedAt]; }),
       ['Merged', completed.mergedAt],
-      ['Closed', completed.issueClosedAt || completed.issueClosureVerifiedAt || completed.completedAt],
+       unsuccessful ? [details.coding.status, completed.completedAt] : ['Closed', completed.issueClosedAt || completed.issueClosureVerifiedAt || completed.completedAt],
     ];
     const trail = document.createElement('div'); trail.className = 'lifecycle-mini-trail';
     stops.forEach(function(stop) {
@@ -155,6 +158,11 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
 
   function completedCard(details) {
     const completed = details.completed || {};
+    if (!completed.complete && ['Failed', 'Blocked'].includes(details.coding?.status)) {
+      const framed = cardFrame('completed failed', details.coding.status, '!', { text: details.coding.status, tone: 'danger' });
+      const copy = document.createElement('p'); copy.className = 'lifecycle-card-copy'; copy.textContent = details.coding.failureReason || 'The attempt ended before successful completion.';
+      framed.card.append(copy, framed.facts, miniTrail(details)); return framed.card;
+    }
     const framed = cardFrame('completed' + (completed.complete ? '' : ' pending'), 'Completed', '✓', { text: completed.complete ? 'Completed' : 'In progress', tone: completed.complete ? 'success' : '' });
     const copy = document.createElement('p'); copy.className = 'lifecycle-card-copy'; copy.textContent = completed.complete
       ? 'The pull request was merged, issue closure was recorded, and Paseo completed the lifecycle.'

@@ -263,6 +263,33 @@ test('deep troubleshooting diagnostics expose recorded execution and exact-head 
   assert.equal(item.diagnostics.mergedHeadSha, 'head-merged');
 });
 
+test('deep troubleshooting preserves launch base and exact coder prompt evidence', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 23,
+    phase: 'launch-failed',
+    status: PASEO_LABELS.failed,
+    baseBranch: 'openspec',
+    baseSha: 'a'.repeat(40),
+    baseRef: 'refs/remotes/origin/openspec',
+    baseVerifiedAt: '2026-08-09T04:00:00.000Z',
+    coderPrompt: 'exact prompt for attempt 1',
+    coderPromptRecordedAt: '2026-08-09T04:00:01.000Z',
+    coderPromptKind: 'initial-attempt',
+  });
+  assert.equal(item.diagnostics.baseBranch, 'openspec');
+  assert.equal(item.diagnostics.baseSha, 'a'.repeat(40));
+  assert.equal(item.diagnostics.coderPrompt, 'exact prompt for attempt 1');
+});
+
+test('newest meaningful activity sorts the work queue first with issue-number tie breaking', () => {
+  const queue = managerWorkQueue([
+    { issueNumber: 12, updatedAt: '2026-08-10T10:00:00.000Z' },
+    { issueNumber: 2, activity: [{ type: 'launch-failed', at: '2026-08-11T10:00:00.000Z', details: 'failed' }] },
+    { issueNumber: 7, updatedAt: '2026-08-11T10:00:00.000Z' },
+  ]);
+  assert.deepEqual(queue.items.map((item) => item.issueNumber), [2, 7, 12]);
+});
+
 test('deep troubleshooting joins the matching PR automation store record and latest jobs', () => {
   const store = {
     managedPullRequests: [{
@@ -344,7 +371,7 @@ test('completed merged issue runs remain recorded but do not count as active wor
   assert.deepEqual(queue.items[0].pullRequest, { number: 383, url: null });
 });
 
-test('queue is issue-number ordered and reports stage/attention counts', () => {
+test('queue reports stage and attention counts', () => {
   const queue = managerWorkQueue([
     { issueNumber: 12, status: PASEO_LABELS.failed },
     { issueNumber: 2, status: PASEO_LABELS.coding },

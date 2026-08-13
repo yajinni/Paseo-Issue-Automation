@@ -34,6 +34,11 @@ export function sanitizeDurableText(value) {
     : `Paseo ${subcommand} failed.`;
 }
 
+export function sanitizeRecordedPrompt(value) {
+  return String(value ?? '')
+    .replace(/\b(password|secret|token|api[-_]?key|authorization)\s*[:=]\s*\S+/gi, '$1=[REDACTED]');
+}
+
 function sanitizeTextFields(value, fields) {
   if (!value || typeof value !== 'object') return value;
   const next = { ...value };
@@ -57,6 +62,7 @@ const RUN_FIELDS = Object.freeze([
   'restartPreviousReason',
   'failureReason',
   'lastError',
+  'coderPrompt',
 ]);
 const NESTED_FIELDS = Object.freeze([
   'details',
@@ -76,11 +82,18 @@ const LIFECYCLE_FREE_TEXT_FIELDS = Object.freeze([
 export function sanitizeRunStateForPersistence(state) {
   if (!state || typeof state !== 'object') return state;
   const next = sanitizeTextFields(state, RUN_FIELDS);
+  if (typeof state.coderPrompt === 'string') next.coderPrompt = sanitizeRecordedPrompt(state.coderPrompt);
   if (Array.isArray(state.activity)) {
     next.activity = state.activity.map((item) => sanitizeTextFields(item, NESTED_FIELDS));
   }
   if (Array.isArray(state.events)) {
     next.events = state.events.map((item) => sanitizeTextFields(item, NESTED_FIELDS));
+  }
+  if (Array.isArray(state.coderPrompts)) {
+    next.coderPrompts = state.coderPrompts.map((item) => ({
+      ...item,
+      prompt: typeof item?.prompt === 'string' ? sanitizeRecordedPrompt(item.prompt) : item?.prompt,
+    }));
   }
   return next;
 }

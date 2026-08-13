@@ -144,7 +144,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         lastCompletedReviewSha: null,
         reviewRound: Math.max(1, Number(input.reviewRound) || 1),
         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
-        reviewState: store.config.enabled && store.config.browserReview.enabled ? 'queued' : 'paused',
+         reviewState: store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
         queuePosition: null,
         priority: Number(input.priority) || 0,
         activeReviewRequestId: null,
@@ -174,7 +174,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
       });
     }
     let reviewJob = null;
-    if (store.config.enabled && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
+    if (store.config.reviewQueue.paused === false && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
     return { managed: clone(managed), reviewJob: reviewJob ? clone(reviewJob) : null };
   });
 }
@@ -188,7 +188,7 @@ export function enqueueManagedReview(root, managedId, options = {}) {
 }
 
 export function nextDueReview(store, now = Date.now()) {
-  if (!store.config.enabled || !store.config.browserReview.enabled || store.config.reviewQueue.paused || store.runtime.activeReviewJobId) return null;
+  if (store.config.reviewQueue.paused || !store.config.browserReview.enabled || store.runtime.activeReviewJobId) return null;
   return store.reviewJobs
     .filter((job) => {
       if (job.state !== 'queued' || Date.parse(job.dueAt) > now) return false;

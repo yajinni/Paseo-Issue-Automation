@@ -250,7 +250,7 @@ function automationBlockers(status, result) {
     }));
   }
 
-  if (status.capabilities?.prReviewWorkers && reviewWorker.running !== true) {
+  if (status.capabilities?.prReviewWorkers && status.prReviews?.queuePaused === false && reviewWorker.running !== true) {
     result.push(blocker({
       code: 'review-worker-stopped',
       severity: 'info',

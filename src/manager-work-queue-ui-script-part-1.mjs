@@ -8,7 +8,9 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
     ['review-queued', 'PR Review Queued'],
     ['reviewing', 'Reviewing'],
     ['merged', 'Merged'],
-    ['closure-verified', 'Issue Closure Verified'],
+     ['closure-verified', 'Issue Closure Verified'],
+     ['failed', 'Failed'],
+     ['needs-attention', 'Needs attention'],
     ['completed', 'Completed'],
   ];
   let queueData = { items: [], counts: {}, total: 0, active: 0, attention: 0, prHealth: { byIssue: {}, counts: {} } };
@@ -50,7 +52,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
     card.innerHTML = '<div class="work-queue-toolbar"><div class="work-queue-toolbar-fields">'
       + '<label>Search<input id="work-queue-search" type="search" placeholder="issue, title, branch, PR, or PR problem"></label>'
       + '<label>Status<select id="work-queue-filter"><option value="all">All recorded work</option><option value="active">Active work</option><option value="attention">Needs attention</option><option value="pr-problems">PR problems</option></select></label>'
-      + '<label>Stage<select id="work-queue-stage-filter"><option value="all">All stages</option><option value="ready">Available</option><option value="waiting">Waiting for dependencies</option><option value="queued">Claimed</option><option value="coding">Coding</option><option value="review-queued">PR Review Queued</option><option value="reviewing">Reviewing</option><option value="changes-requested">Changes requested</option><option value="fixing">Fixing</option><option value="review-failed">Review failed</option><option value="failed">Failed</option><option value="merged">Merged</option><option value="closure-verified">Issue Closure Verified</option><option value="completed">Completed</option></select></label>'
+       + '<label>Stage<select id="work-queue-stage-filter"><option value="all">All stages</option><option value="ready">Available</option><option value="waiting">Waiting for dependencies</option><option value="queued">Claimed</option><option value="coding">Coding</option><option value="review-queued">PR Review Queued</option><option value="reviewing">Reviewing</option><option value="changes-requested">Changes requested</option><option value="fixing">Fixing</option><option value="review-failed">Review failed</option><option value="failed">Failed</option><option value="needs-attention">Needs attention</option><option value="merged">Merged</option><option value="closure-verified">Issue Closure Verified</option><option value="completed">Completed</option></select></label>'
       + '</div><div class="work-queue-count" id="work-queue-count">Loading…</div></div>'
       + '<div class="lifecycle-table"><div class="lifecycle-columns"><span>Issue</span><span>Title</span><span>Current stage</span><span>Run details</span><span>PR</span><span>Started</span><span>Last updated</span><span>Elapsed</span><span></span></div><div id="work-queue-list"><div class="work-queue-empty">Loading recorded work…</div></div></div>'
       + '<div class="lifecycle-footer"><span id="work-queue-footer-summary">Loading recorded work…</span><div class="lifecycle-pagination" id="work-queue-pagination" aria-label="Issue lifecycle pages"></div></div>'

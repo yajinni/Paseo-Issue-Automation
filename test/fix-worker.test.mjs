@@ -12,7 +12,11 @@ function repo(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-fix-worker-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  savePrAutomationConfig(root, { enabled: true, browserReview: { enabled: true, reviewDebounceMs: 0 } });
+  savePrAutomationConfig(root, {
+    enabled: true,
+    browserReview: { enabled: true, reviewDebounceMs: 0 },
+    reviewQueue: { paused: false },
+  });
   return root;
 }
 

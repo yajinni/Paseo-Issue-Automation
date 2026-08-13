@@ -42,6 +42,7 @@ const LIFECYCLE_TEXT_LIMIT = 4_000;
 const TRACKED_RUN_FIELDS = Object.freeze([
   'attempt', 'status', 'phase', 'branch', 'workspaceId', 'worktreePath', 'coderAgentId', 'agentId',
   'controllerPid', 'prNumber', 'prUrl', 'reason', 'startedAt', 'completedAt', 'heartbeatAt',
+  'baseBranch', 'baseSha', 'coderPrompt',
 ]);
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
@@ -55,6 +56,7 @@ function lifecycleSafeText(value) {
 function lifecycleValue(value) {
   if (value === undefined) return null;
   if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'object') return lifecycleSafeText(JSON.stringify(value));
   return lifecycleSafeText(value);
 }
 
@@ -371,4 +373,12 @@ export function listRuns(root) {
     })
     .filter(Boolean)
     .sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber));
+}
+
+export function listLifecycleIssueNumbers(root) {
+  return readdirSync(statePaths(root).lifecycle, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^issue-\d+\.jsonl$/.test(entry.name))
+    .map((entry) => Number(entry.name.match(/^issue-(\d+)\.jsonl$/)[1]))
+    .filter((number) => Number.isInteger(number) && number > 0)
+    .sort((a, b) => a - b);
 }

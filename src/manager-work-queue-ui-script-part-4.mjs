@@ -7,9 +7,9 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_4 = String.raw`    const head = docu
     drawer.append(drawerSection('Repository controller context', [
       ['Claims enabled', statusData?.automation?.claimsEnabled === true ? 'Yes' : 'No'], ['Coding worker', statusData?.worker?.running ? 'Running' : 'Stopped'], ['Coding worker state', statusData?.worker?.state], ['PR-review worker', statusData?.reviewWorker?.running ? 'Running' : 'Stopped'], ['Review worker state', statusData?.reviewWorker?.state], ['Review store', statusData?.prReviews?.available === false ? 'Unavailable' : statusData?.prReviews?.enabled ? 'Enabled' : 'Disabled'], ['Active review job ID', statusData?.prReviews?.activeReviewJobId], ['Waiting review jobs', statusData?.prReviews?.waitingReviewCount], ['Last review reconciliation', statusData?.reviewWorker?.lastReconciliationAt ? formatDate(statusData.reviewWorker.lastReconciliationAt) : null], ['Review reconciliation error', statusData?.reviewWorker?.lastReconciliationError || statusData?.prReviews?.error], ['Last dispatch', statusData?.automation?.lastDispatchAt ? formatDate(statusData.automation.lastDispatchAt) : null], ['Latest dispatch result', statusData?.automation?.lastDispatchResult ? JSON.stringify(statusData.automation.lastDispatchResult) : null], ['Repository blockers', repositoryBlockers || null],
     ]));
-    drawer.append(drawerSection('Execution identity', [
-      ['Branch', item.branch], ['Workspace', item.workspaceId], ['Worktree path', diagnostic.worktreePath], ['Coder agent ID', diagnostic.coderAgentId], ['Controller PID', diagnostic.controllerPid], ['Coding harness', item.coding?.harness], ['Configured coder model', item.coding?.model], ['Configured coder thinking', item.coding?.thinking],
-    ]));
+     drawer.append(drawerSection('Execution identity', [
+       ['Branch', item.branch], ['Workspace', item.workspaceId], ['Worktree path', diagnostic.worktreePath], ['Coder agent ID', diagnostic.coderAgentId], ['Controller PID', diagnostic.controllerPid], ['Configured base branch', diagnostic.baseBranch || statusData?.setup?.baseBranch], ['Verified base SHA', diagnostic.baseSha], ['Base ref', diagnostic.baseRef], ['Base verified', diagnostic.baseVerifiedAt ? formatDate(diagnostic.baseVerifiedAt) : null], ['Coding harness', item.coding?.harness], ['Configured coder model', item.coding?.model], ['Configured coder thinking', item.coding?.thinking],
+     ]));
     const review = item.review || {};
     drawer.append(drawerSection('PR and review evidence', [
       ['PR', item.pullRequest?.number ? '#' + item.pullRequest.number : null, item.pullRequest?.url], ['Review type', review.label], ['Review stage', review.stage], ['Review round', review.round ? (review.limit ? review.round + ' / ' + review.limit : review.round) : null], ['Review source', review.source], ['Review result', review.result], ['Current head SHA', diagnostic.currentHeadSha || review.headSha], ['Validation approved', review.validationApproved ? 'Yes' : 'No'], ['Validation head SHA', review.validationHeadSha || diagnostic.validationHeadSha], ['Review approved', review.reviewApproved ? 'Yes' : 'No'], ['Approved head SHA', review.approvedHeadSha || diagnostic.approvedHeadSha], ['Approved commit', diagnostic.approvedCommit], ['Merged head SHA', diagnostic.mergedHeadSha], ['Merged at', diagnostic.mergedAt ? formatDate(diagnostic.mergedAt) : null], ['Issue closure verified', diagnostic.issueClosureVerifiedAt ? formatDate(diagnostic.issueClosureVerifiedAt) : null], ['Conversation', review.conversationUrl ? 'Open Web ChatGPT conversation' : null, review.conversationUrl],
@@ -34,8 +34,39 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_4 = String.raw`    const head = docu
     }
     const reason = document.createElement('section'); reason.className = 'work-detail-section'; const reasonHeading = document.createElement('h3'); reasonHeading.textContent = 'Current explanation'; const reasonCopy = document.createElement('div'); reasonCopy.className = 'work-detail-reason'; reasonCopy.textContent = item.reason || item.nextAction || 'No blocker or next action is recorded.'; reason.append(reasonHeading, reasonCopy);
     if (item.issueUrl || item.pullRequest?.url) { const links = document.createElement('div'); links.className = 'work-detail-links'; if (item.issueUrl) { const issue = document.createElement('a'); issue.className = 'work-detail-link'; issue.href = item.issueUrl; issue.target = '_blank'; issue.rel = 'noreferrer'; issue.textContent = 'Open issue #' + item.issueNumber; links.append(issue); } if (item.pullRequest?.url) { const pr = document.createElement('a'); pr.className = 'work-detail-link'; pr.href = item.pullRequest.url; pr.target = '_blank'; pr.rel = 'noreferrer'; pr.textContent = 'Open PR #' + item.pullRequest.number; links.append(pr); } reason.append(links); }
-    drawer.append(reason, rawTimelineSection(item)); drawer.hidden = false; scrim.hidden = false; drawer.scrollTop = scrollTop; if (!options.preserveInteraction) close.focus();
-  }
+     const diagnosticActions = document.createElement('div'); diagnosticActions.className = 'work-detail-actions';
+     const copyLog = document.createElement('button'); copyLog.type = 'button'; copyLog.className = 'secondary'; copyLog.textContent = 'Copy whole log'; copyLog.addEventListener('click', function() { copyDiagnosticLog(item).catch(showQueueError); });
+     diagnosticActions.append(copyLog);
+     if (diagnostic.coderPrompt) { const copyPrompt = document.createElement('button'); copyPrompt.type = 'button'; copyPrompt.className = 'secondary'; copyPrompt.textContent = 'Copy coder prompt'; copyPrompt.addEventListener('click', function() { navigator.clipboard?.writeText(diagnostic.coderPrompt).catch(showQueueError); }); diagnosticActions.append(copyPrompt); }
+     const prompt = diagnostic.coderPrompt ? document.createElement('pre') : null; if (prompt) { prompt.className = 'work-detail-prompt'; prompt.textContent = diagnostic.coderPrompt; }
+     drawer.append(diagnosticActions, prompt || document.createDocumentFragment(), reason, rawTimelineSection(item)); drawer.hidden = false; scrim.hidden = false; drawer.scrollTop = scrollTop; if (!options.preserveInteraction) close.focus();
+   }
+
+   function copyDiagnosticLog(item) {
+     const diagnostic = item.diagnostics || {};
+     const lines = [
+       'Repository: ' + (statusData?.repository?.repository || statusData?.repository?.name || 'Not recorded'),
+       'Issue: #' + item.issueNumber + ' ' + item.title,
+       'Status: ' + (diagnostic.rawStatus || item.stageLabel || 'Not recorded'),
+       'Phase: ' + (diagnostic.phase || item.phase || 'Not recorded'),
+       'Attempt: ' + (item.attempt || 'Not recorded'),
+       'Base branch: ' + (diagnostic.baseBranch || statusData?.setup?.baseBranch || 'Not recorded'),
+       'Base SHA: ' + (diagnostic.baseSha || 'Not recorded'),
+       'Branch: ' + (item.branch || 'Not recorded'),
+       'Workspace: ' + (item.workspaceId || 'Not recorded'),
+       'Agent: ' + (diagnostic.coderAgentId || 'Not recorded'),
+       'Controller: ' + (diagnostic.controllerPid || 'Not recorded'),
+       'PR: ' + (item.pullRequest?.number ? '#' + item.pullRequest.number : 'Not recorded'),
+       'Started: ' + (item.startedAt || 'Not recorded'),
+       'Updated: ' + (item.updatedAt || 'Not recorded'),
+       'Reason: ' + (item.reason || item.nextAction || 'Not recorded'),
+       '', 'Lifecycle events:',
+       ...(item.lifecycle || item.timeline || []).map(function(event) { return '[' + (event.at || 'unknown') + '] Attempt ' + (event.attempt || '?') + ' ' + event.type + ': ' + (event.message || event.detail || '') + (event.evidence ? '\n' + JSON.stringify(event.evidence, null, 2) : ''); }),
+       '', 'Coder prompt:', diagnostic.coderPrompt || 'Not recorded',
+       '', 'Recorded coder prompts:', JSON.stringify(diagnostic.coderPrompts || [], null, 2),
+     ];
+     return Promise.resolve(navigator.clipboard?.writeText(lines.join('\n')));
+   }
 
   function closeDrawer() {
     const closingIssue = selectedIssue; selectedIssue = null; const drawer = document.getElementById('work-detail-drawer'); const scrim = document.getElementById('work-detail-scrim'); if (drawer) drawer.hidden = true; if (scrim) scrim.hidden = true;

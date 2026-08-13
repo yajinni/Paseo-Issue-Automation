@@ -225,11 +225,13 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
     const oldAutomation = findCard(automationView, 'Automation');
     const oldControls = findCard(automationView, 'Automation controls');
     const oldReview = findCard(reviewsView, 'Review status');
+    oldControls?.querySelector('[data-action="resume"]')?.remove();
+    oldControls?.querySelector('[data-action="pause"]')?.remove();
 
     const automationGrid = document.createElement('div'); automationGrid.className = 'manager-ops-grid';
     const claims = card('Claims & scheduling', 'Repository-scoped scheduling controls for eligible issue work.', 'manager-claims-facts');
     const claimsActions = actionArea(claims);
-    for (const action of ['resume', 'pause', 'run-now', 'reconcile']) moveAction(oldControls, claimsActions, action);
+    for (const action of ['run-now', 'reconcile']) moveAction(oldControls, claimsActions, action);
     const coding = card('Coding worker', 'Automatically available for new issue coding and review fixes. It is Active while coding work is running and Idle otherwise.', 'manager-coding-worker-facts');
     automationGrid.append(claims, coding);
     automationView.prepend(automationGrid);
@@ -240,9 +242,6 @@ export const MANAGER_AUTOMATION_REVIEWS_SCRIPT = String.raw`
     const stageList = document.createElement('div'); stageList.id = 'manager-review-stage-counts'; stageList.className = 'manager-review-stage-list'; stages.append(stageList);
     const reviewWorker = card('PR-review worker', 'Repository-scoped review queue, scheduler, and reconciliation state.', 'manager-review-worker-facts');
     const reviewActions = actionArea(reviewWorker);
-    addAction(reviewActions, 'pr-review/resume', 'Resume PR reviews');
-    addAction(reviewActions, 'pr-review/pause', 'Pause PR reviews', 'danger');
-    for (const action of ['review-worker/start', 'review-worker/stop', 'review-worker/restart']) moveAction(oldControls, reviewActions, action);
     const profile = card('ChatGPT Profile', 'Web ChatGPT review uses the setup-managed browser profile and repository-specific review chat.');
     profile.classList.add('wide');
     const profileState = document.createElement('div'); profileState.className = 'manager-profile-state';
