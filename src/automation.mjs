@@ -24,7 +24,8 @@ export function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'task';
+    .slice(0, 48)
+    .replace(/^-+|-+$/g, '') || 'task';
 }
 
 function editLabels(root, issueNumber, { add = [], remove = [] }) {
