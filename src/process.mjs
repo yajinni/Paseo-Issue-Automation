@@ -115,6 +115,155 @@ export function buildWindowsCmdInvocation(executable, args = [], env = process.e
   };
 }
 
+function noopPreparedPromptArgs(args) {
+  return {
+    args: [...args],
+    promptPath: null,
+    cleanup() {},
+  };
+}
+
+function sendPromptIndex(args = []) {
+  if (args[0] !== 'send' || args.length < 3) return -1;
+  if (args.includes('--prompt-file')) return -1;
+
+  const promptOption = args.indexOf('--prompt');
+  if (promptOption >= 0) return promptOption + 1 < args.length ? promptOption + 1 : -1;
+
+  for (let index = 2; index < args.length;) {
+    const value = String(args[index]);
+    if (value === '--no-wait') {
+      index += 1;
+      continue;
+    }
+    if (value === '--image') {
+      index += 2;
+      continue;
+    }
+    if (value.startsWith('--')) return -1;
+    return index;
+  }
+  return -1;
+}
+
+function securePromptFile(prompt, options = {}) {
+  const tempRoot = options.tempRoot || os.tmpdir();
+  let directory = null;
+  try {
+    directory = mkdtempSync(path.join(tempRoot, 'paseo-prompt-'));
+    const promptPath = path.join(directory, 'prompt.txt');
+    writeFileSync(promptPath, String(prompt), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    let cleaned = false;
+    return {
+      promptPath,
+      cleanup() {
+        if (cleaned) return;
+        cleaned = true;
+        rmSync(directory, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    if (directory) rmSync(directory, { recursive: true, force: true });
+    throw new Error(`Could not create a secure temporary Paseo prompt file: ${error.message}`);
+  }
+}
+
+export function materializePaseoPromptArgs(args = [], options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== 'win32') return noopPreparedPromptArgs(args);
+  const promptIndex = sendPromptIndex(args);
+  if (promptIndex < 0) {
+    if (args[0] === 'send' && !args.includes('--prompt-file')
+      && args.some((value) => /[\r\n]/.test(String(value)))) {
+      throw new Error('Paseo multiline send prompt could not be identified for safe prompt-file transport.');
+    }
+    return noopPreparedPromptArgs(args);
+  }
+  if (!/[\r\n]/.test(String(args[promptIndex]))) return noopPreparedPromptArgs(args);
+
+  const preparedFile = securePromptFile(args[promptIndex], options);
+  const next = [...args];
+  const promptOption = args.indexOf('--prompt');
+  if (promptOption >= 0) {
+    next.splice(promptOption, 2, '--prompt-file', preparedFile.promptPath);
+  } else {
+    next.splice(promptIndex, 1, '--prompt-file', preparedFile.promptPath);
+  }
+  return {
+    args: next,
+    promptPath: preparedFile.promptPath,
+    cleanup: preparedFile.cleanup,
+  };
+}
+
+function runPromptIsMultiline(args = []) {
+  return args[0] === 'run' && /[\r\n]/.test(String(args.at(-1) || ''));
+}
+
+function desktopPaseoDirectInvocation(executable, args, env, fileExists = existsSync) {
+  const resourcesDirectory = path.resolve(path.dirname(executable), '..');
+  const appExecutable = path.resolve(resourcesDirectory, '..', 'Paseo.exe');
+  const runner = path.join(resourcesDirectory, 'app.asar.unpacked', 'dist', 'daemon', 'node-entrypoint-runner.js');
+  const cliEntry = path.join(resourcesDirectory, 'app.asar', 'node_modules', '@getpaseo', 'cli', 'dist', 'index.js');
+  const asarArchive = path.join(resourcesDirectory, 'app.asar');
+  if (!fileExists(appExecutable) || !fileExists(runner) || !fileExists(asarArchive)) return null;
+
+  // The bundled .cmd launcher is only a shell shim. Invoke its Electron/Node
+  // entrypoint directly so multiline run prompts never cross cmd.exe.
+  return {
+    executable: appExecutable,
+    args: ['--disable-warning=DEP0040', runner, 'node-script', cliEntry, ...args],
+    env: {
+      ...env,
+      ELECTRON_RUN_AS_NODE: '1',
+      PASEO_NODE_ENV: 'production',
+      PASEO_DESKTOP_MANAGED: '1',
+      PASEO_CLI: executable,
+    },
+    windowsVerbatimArguments: false,
+  };
+}
+
+export function buildWindowsPaseoDirectInvocation(executable, args = [], options = {}) {
+  const env = options.env || process.env;
+  const fileExists = options.existsSync || existsSync;
+  if (!executable || !runPromptIsMultiline(args)) return null;
+  const knownCandidates = windowsPaseoCandidates(env);
+  const normalizedExecutable = path.resolve(executable).toLowerCase();
+  const candidates = knownCandidates.some((candidate) => path.resolve(candidate).toLowerCase() === normalizedExecutable)
+    ? [executable, ...knownCandidates]
+    : [executable];
+  for (const candidate of [...new Set(candidates)]) {
+    const direct = desktopPaseoDirectInvocation(candidate, args, env, fileExists);
+    if (direct) return direct;
+  }
+  return null;
+}
+
+function preparePaseoArgs(args, options = {}) {
+  let schemaPrepared = noopPreparedArgs(args);
+  let promptPrepared = noopPreparedPromptArgs(args);
+  try {
+    schemaPrepared = materializePaseoOutputSchemaArgs(args, options);
+    promptPrepared = materializePaseoPromptArgs(schemaPrepared.args, options);
+    return {
+      args: promptPrepared.args,
+      cleanup() {
+        promptPrepared.cleanup();
+        schemaPrepared.cleanup();
+      },
+    };
+  } catch (error) {
+    promptPrepared.cleanup();
+    schemaPrepared.cleanup();
+    throw error;
+  }
+}
+
 function findGitMarker(cwd) {
   let current = path.resolve(cwd || process.cwd());
   for (;;) {
@@ -220,12 +369,20 @@ export function materializePaseoOutputSchemaArgs(args = [], options = {}) {
 
 function resolvedSpawn(command, args, options) {
   const env = options.env || process.env;
-  const resolution = process.platform === 'win32' && String(command).toLowerCase() === 'paseo'
-    ? resolveCommand(command, { env })
+  const platform = options.platform || process.platform;
+  const resolution = platform === 'win32' && String(command).toLowerCase() === 'paseo'
+    ? resolveCommand(command, { env, platform })
     : { available: true, command, path: command, source: 'direct' };
   const executable = resolution.path || command;
 
-  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable)) {
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(executable)) {
+    if (String(command).toLowerCase() === 'paseo' && runPromptIsMultiline(args)) {
+      const direct = buildWindowsPaseoDirectInvocation(executable, args, { ...options, env, platform });
+      if (!direct) {
+        throw new Error('Paseo multiline run prompt requires a supported direct Windows transport; refusing unsafe cmd.exe fallback.');
+      }
+      return { ...direct, resolution };
+    }
     return {
       ...buildWindowsCmdInvocation(executable, args, env),
       resolution,
@@ -244,18 +401,18 @@ export function run(command, args = [], options = {}) {
   const timeoutMs = commandTimeout(options);
   const env = options.env || process.env;
   const paseoCommand = String(command).toLowerCase() === 'paseo';
-  const prepared = paseoCommand && process.platform === 'win32'
-    ? materializePaseoOutputSchemaArgs(args)
+  const prepared = paseoCommand && (options.platform || process.platform) === 'win32'
+    ? preparePaseoArgs(args, options)
     : noopPreparedArgs(args);
-  const effectiveArgs = paseoCommand
-    ? paseoRunArgsWithThinking(prepared.args, { cwd: options.cwd })
-    : prepared.args;
 
   try {
+    const effectiveArgs = paseoCommand
+      ? paseoRunArgsWithThinking(prepared.args, { cwd: options.cwd })
+      : prepared.args;
     const resolved = resolvedSpawn(command, effectiveArgs, { ...options, env });
     const result = spawnSync(resolved.executable, resolved.args, {
       cwd: options.cwd,
-      env,
+      env: resolved.env || env,
       encoding: 'utf8',
       windowsHide: true,
       windowsVerbatimArguments: resolved.windowsVerbatimArguments === true,

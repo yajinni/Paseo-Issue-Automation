@@ -19,6 +19,17 @@ test('attempt branches are deterministic and numbered', () => {
   assert.equal(branchForAttempt(12, 'Fix login redirect', 3), 'ai/issue-12-fix-login-redirect-attempt-3');
 });
 
+test('long issue titles produce valid first and retry attempt branches', () => {
+  const title = 'Make Overview Start/Stop controls authoritative for Issue Claiming and PR Reviews';
+  const first = branchForAttempt(295, title, 1);
+  const retry = branchForAttempt(295, title, 2);
+  assert.equal(first, 'ai/issue-295-make-overview-start-stop-controls-authoritative');
+  assert.equal(retry, 'ai/issue-295-make-overview-start-stop-controls-authoritative-attempt-2');
+  assert.doesNotMatch(first, /--/);
+  assert.doesNotMatch(retry, /--/);
+  assert.doesNotMatch(first, /-$/);
+});
+
 test('skipped issues persist and can be unskipped', (t) => {
   const root = temporaryRepository();
   t.after(() => rmSync(root, { recursive: true, force: true }));

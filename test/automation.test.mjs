@@ -39,6 +39,13 @@ test('branch slug is deterministic', () => {
   assert.equal(slugify('Fix login / redirect!'), 'fix-login-redirect');
 });
 
+test('branch slug trims separators introduced by the length limit', () => {
+  const title = 'Make Overview Start/Stop controls authoritative for Issue Claiming and PR Reviews';
+  assert.equal(slugify(title), 'make-overview-start-stop-controls-authoritative');
+  assert.equal(slugify(title).length, 47);
+  assert.doesNotMatch(slugify(title), /^-|-$|--/);
+});
+
 function temporaryRepository() {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-issue-automation-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });

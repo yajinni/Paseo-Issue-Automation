@@ -3,13 +3,24 @@ import path from 'node:path';
 import { recordEvent } from './automation.mjs';
 import { appendControllerLog } from './controller-log.mjs';
 import { enterManualReview } from './manual-review-lifecycle.mjs';
-import { appendHistory, findFixJob, findManaged, loadPrReviewStore, mutatePrReviewStore, nowIso, transitionManaged } from './pr-review-store.mjs';
+import {
+  appendHistory,
+  findFixJob,
+  findManaged,
+  findReviewJob,
+  loadPrReviewStore,
+  mutatePrReviewStore,
+  nowIso,
+  transitionManaged,
+} from './pr-review-store.mjs';
 import { enqueueReviewInStore } from './pr-review-queue.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
+import { evaluateApprovedReviewGate, recordApprovedBrowserReview } from './pr-review-finalize.mjs';
 import { agentCommandTimeoutMs, run } from './process.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
 
 const MANUAL_REVIEW_PREFIX = 'manual-review:';
+const VALIDATION_ONLY_REPAIR = /^No passing validation-summary event exists for the reviewed commit ([0-9a-f]{7,64})\.$/i;
 
 function safeFixLog(root, input) {
   try { return appendControllerLog(root, { category: 'pr-reviews', source: 'automation', ...input }); }
@@ -25,6 +36,12 @@ function manualReviewFix(job) {
 
 function manualRequestId(managedId, headSha) {
   return `${MANUAL_REVIEW_PREFIX}${managedId}:${String(headSha || '').toLowerCase()}`;
+}
+
+function validationOnlyRepair(job) {
+  const match = String(job?.findings || '').trim().match(VALIDATION_ONLY_REPAIR);
+  if (!match) return false;
+  return String(match[1] || '').toLowerCase() === String(job?.reviewedHeadSha || '').toLowerCase();
 }
 
 function latestPassingValidation(state, commit) {
@@ -77,7 +94,9 @@ export function validateFixedHead(root, managed, job, pr, {
     throw new Error(`The fixed PR conflicts with ${config.baseBranch}.`);
   }
   const newHeadSha = String(pr.headRefOid || '').trim().toLowerCase();
-  if (!newHeadSha || newHeadSha === String(job.reviewedHeadSha || '').toLowerCase()) {
+  const reviewedHeadSha = String(job.reviewedHeadSha || '').trim().toLowerCase();
+  const validationOnlyRecovery = Boolean(newHeadSha && newHeadSha === reviewedHeadSha && validationOnlyRepair(job));
+  if (!newHeadSha || (newHeadSha === reviewedHeadSha && !validationOnlyRecovery)) {
     throw new Error('The fix Coder completed without pushing a new PR head SHA.');
   }
 
@@ -86,7 +105,6 @@ export function validateFixedHead(root, managed, job, pr, {
     throw new Error(`The fix worktree HEAD ${worktree.head} does not match the repaired PR head ${newHeadSha}.`);
   }
   requireCleanWorktree(worktree.cwd, runner);
-  const validation = ensureControllerValidation(root, managed, runState, newHeadSha, recordValidation);
 
   const fetched = runner('git', [
     'fetch', '--prune', 'origin',
@@ -103,7 +121,9 @@ export function validateFixedHead(root, managed, job, pr, {
     `refs/remotes/origin/${managed.branchName}`,
   ], { cwd: root, allowFailure: true });
   if (!fresh.ok) throw new Error(`The fixed branch does not contain the latest ${config.baseBranch}.`);
-  return { newHeadSha, validation };
+
+  const validation = ensureControllerValidation(root, managed, runState, newHeadSha, recordValidation);
+  return { newHeadSha, validation, validationOnlyRecovery };
 }
 
 function updateManualRunAfterFix(root, managed, newHeadSha) {
@@ -132,6 +152,8 @@ export function completeFixJob(root, fixJobId, {
   snapshot = null,
   labelWriter = setPrReviewLabels,
   validator = validateFixedHead,
+  gateEvaluator = evaluateApprovedReviewGate,
+  reviewRecorder = recordApprovedBrowserReview,
 } = {}) {
   const initial = loadPrReviewStore(root);
   const job = findFixJob(initial, fixJobId);
@@ -165,6 +187,26 @@ export function completeFixJob(root, fixJobId, {
   const pr = snapshot || managedPrSnapshot(root, managed.pullRequestNumber);
   const validated = validator(root, managed, job, pr);
   const newHeadSha = validated.newHeadSha;
+  const validationOnlyRecovery = validated.validationOnlyRecovery === true;
+  let sourceReviewJob = null;
+
+  if (validationOnlyRecovery) {
+    sourceReviewJob = findReviewJob(initial, job.reviewJobId);
+    if (!sourceReviewJob
+        || sourceReviewJob.state !== 'completed'
+        || sourceReviewJob.result !== 'approved'
+        || String(sourceReviewJob.headSha || '').toLowerCase() !== newHeadSha) {
+      throw new Error('Validation-only recovery requires the original completed exact-head approved review job.');
+    }
+    const gate = gateEvaluator(root, managed, sourceReviewJob, pr);
+    if (!gate?.ok) {
+      throw new Error(gate?.reason || 'The deterministic approval gate did not pass after controller validation recovery.');
+    }
+    reviewRecorder(root, managed, sourceReviewJob, {
+      findings: 'Recovered the missing controller-owned validation handoff without changing the already reviewed exact PR head.',
+    });
+  }
+
   const result = mutatePrReviewStore(root, (store) => {
     const nextJob = findFixJob(store, fixJobId);
     const record = findManaged(store, nextJob.managedPullRequestId);
@@ -176,30 +218,65 @@ export function completeFixJob(root, fixJobId, {
     nextJob.newHeadSha = newHeadSha;
     nextJob.lastError = null;
     record.currentHeadSha = newHeadSha;
-    record.reviewRound += 1;
-    if (returnsToManualReview) {
+
+    if (validationOnlyRecovery) {
+      record.lastCompletedReviewSha = sourceReviewJob.headSha;
+      record.lastReviewCommentId = sourceReviewJob.resultSourceId ?? record.lastReviewCommentId;
+      record.lastProcessedReviewRequestId = sourceReviewJob.reviewRequestId;
+      record.activeReviewRequestId = null;
       record.queuePosition = null;
-      record.activeReviewRequestId = manualRequestId(record.id, newHeadSha);
-      transitionManaged(store, record, 'paused', {
-        reason: `Manual-review repair produced validated exact head ${newHeadSha}; return to manual review.`,
+      record.lastError = null;
+      transitionManaged(store, record, 'ready_to_merge', {
+        reason: `Controller validation was safely recovered for unchanged approved exact head ${newHeadSha}; deterministic finalization may resume.`,
         actor: 'fix-worker',
         sha: newHeadSha,
         at,
       });
     } else {
-      enqueueReviewInStore(store, record, { headSha: newHeadSha, now: Date.now() });
+      record.reviewRound += 1;
+      if (returnsToManualReview) {
+        record.queuePosition = null;
+        record.activeReviewRequestId = manualRequestId(record.id, newHeadSha);
+        transitionManaged(store, record, 'paused', {
+          reason: `Manual-review repair produced validated exact head ${newHeadSha}; return to manual review.`,
+          actor: 'fix-worker',
+          sha: newHeadSha,
+          at,
+        });
+      } else {
+        enqueueReviewInStore(store, record, { headSha: newHeadSha, now: Date.now() });
+      }
     }
+
     appendHistory(store, {
       entityType: 'fix_job', entityId: nextJob.id, previousState: 'fixing', newState: 'completed',
-      reason: returnsToManualReview
+      reason: validationOnlyRecovery
+        ? `Recovered controller validation for unchanged exact head ${newHeadSha} without a no-op commit.`
+        : returnsToManualReview
         ? `Manual-review fixes pushed and validated new head ${newHeadSha}.`
         : `Fixes pushed and validated new head ${newHeadSha}.`,
       actor: 'fix-worker', sha: newHeadSha, timestamp: at,
     });
-    return { fixJobId: nextJob.id, newHeadSha, reviewRound: record.reviewRound, returnToManualReview: returnsToManualReview };
+    return {
+      fixJobId: nextJob.id,
+      newHeadSha,
+      reviewRound: record.reviewRound,
+      returnToManualReview: returnsToManualReview,
+      validationOnlyRecovery,
+    };
   });
 
-  if (returnsToManualReview) {
+  if (validationOnlyRecovery) {
+    labelWriter(root, managed.pullRequestNumber, {
+      remove: [
+        PR_REVIEW_LABELS.changesRequested,
+        PR_REVIEW_LABELS.fixing,
+        PR_REVIEW_LABELS.reviewing,
+        PR_REVIEW_LABELS.failed,
+        PR_REVIEW_LABELS.queued,
+      ],
+    });
+  } else if (returnsToManualReview) {
     enterManualReview(root, {
       pullRequestNumber: managed.pullRequestNumber,
       headSha: newHeadSha,
@@ -221,7 +298,9 @@ export function completeFixJob(root, fixJobId, {
   safeFixLog(root, {
     action: 'run-pr-fix',
     status: 'success',
-    message: returnsToManualReview
+    message: validationOnlyRecovery
+      ? `PR fix job ${job.id} recovered controller validation for PR #${managed.pullRequestNumber} without changing its approved head.`
+      : returnsToManualReview
       ? `PR fix job ${job.id} completed and returned PR #${managed.pullRequestNumber} to manual review.`
       : `PR fix job ${job.id} completed and queued a new review for PR #${managed.pullRequestNumber}.`,
     details: {
@@ -232,6 +311,7 @@ export function completeFixJob(root, fixJobId, {
       newHeadSha,
       reviewRound: result.reviewRound,
       returnToManualReview: returnsToManualReview,
+      validationOnlyRecovery,
     },
   });
   return result;

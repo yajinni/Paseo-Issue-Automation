@@ -1,3 +1,4 @@
+import { recordEvent } from './automation.mjs';
 import { finalizeApprovedPullRequest } from './approved-pr-finalization.mjs';
 import { managedPrSnapshot, managerPrHealthSnapshot } from './pr-review-github.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
@@ -36,10 +37,60 @@ function latestValidationForCommit(state, commit) {
     .find((event) => event.event === 'validation-summary' && event.result === 'PASS' && event.commit === commit) || null;
 }
 
+function recoverMissingControllerValidation(root, managed, pr, reviewedHead, {
+  runner = run,
+  recordValidation = recordEvent,
+} = {}) {
+  const worktreePath = String(managed?.worktreePath || '').trim();
+  if (!worktreePath) {
+    return { ok: false, reason: 'The managed worktree path is unavailable.' };
+  }
+  const prBranch = String(pr?.headRefName || '').trim();
+  if (prBranch && prBranch !== String(managed?.branchName || '').trim()) {
+    return { ok: false, reason: `PR head branch ${prBranch} does not match managed branch ${managed?.branchName || '(missing)'}.` };
+  }
+
+  const headResult = runner('git', ['rev-parse', 'HEAD'], { cwd: worktreePath, allowFailure: true });
+  if (!headResult?.ok) {
+    return { ok: false, reason: headResult?.stderr || headResult?.stdout || 'Could not read the managed worktree HEAD.' };
+  }
+  const localHead = String(headResult.stdout || '').trim().toLowerCase();
+  if (!localHead || localHead !== reviewedHead) {
+    return { ok: false, reason: `Managed worktree HEAD ${localHead || '(missing)'} does not match reviewed PR head ${reviewedHead}.` };
+  }
+
+  const status = runner('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: worktreePath, allowFailure: true });
+  if (!status?.ok) {
+    return { ok: false, reason: status?.stderr || status?.stdout || 'Could not inspect the managed worktree status.' };
+  }
+  const changes = String(status.stdout || '').trim();
+  if (changes) {
+    return { ok: false, reason: `The managed worktree is not clean:\n${changes}` };
+  }
+
+  let saved;
+  try {
+    saved = recordValidation(root, managed.issueNumber, {
+      event: 'validation-summary',
+      result: 'PASS',
+      commit: reviewedHead,
+      details: 'Deterministic approval gate recovered the controller-owned exact-head validation handoff after GitHub CI and current-base checks passed and the managed worktree was clean with local HEAD exactly matching the open reviewed PR head.',
+    });
+  } catch (error) {
+    return { ok: false, reason: `Could not record controller validation: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const validation = latestValidationForCommit(saved, reviewedHead);
+  if (!validation) {
+    return { ok: false, reason: `Controller validation was not persisted for exact head ${reviewedHead}.` };
+  }
+  return { ok: true, validation };
+}
+
 export function evaluateApprovedReviewGate(root, managed, reviewJob, pr, {
   runner = run,
   config = loadConfig(root),
   runState = loadRun(root, managed.issueNumber),
+  recordValidation = recordEvent,
 } = {}) {
   if (!pr || String(pr.state || '').toUpperCase() !== 'OPEN') {
     return { ok: false, repair: false, reason: 'The reviewed pull request is no longer open.' };
@@ -72,13 +123,6 @@ export function evaluateApprovedReviewGate(root, managed, reviewJob, pr, {
       checks,
     };
   }
-  if (!latestValidationForCommit(runState, reviewedHead)) {
-    return {
-      ok: false,
-      repair: true,
-      reason: `No passing validation-summary event exists for the reviewed commit ${reviewedHead}.`,
-    };
-  }
 
   const baseRef = `refs/remotes/origin/${config.baseBranch}`;
   const branchRef = `refs/remotes/origin/${managed.branchName}`;
@@ -102,7 +146,27 @@ export function evaluateApprovedReviewGate(root, managed, reviewJob, pr, {
   if (!fresh.ok) {
     return { ok: false, repair: true, reason: `The reviewed branch does not contain the latest ${config.baseBranch}.` };
   }
-  return { ok: true, commit: reviewedHead, checks };
+
+  let validation = latestValidationForCommit(runState, reviewedHead);
+  let validationRecovered = false;
+  if (!validation) {
+    const recovered = recoverMissingControllerValidation(root, managed, pr, reviewedHead, {
+      runner,
+      recordValidation,
+    });
+    if (!recovered.ok) {
+      return {
+        ok: false,
+        repair: true,
+        validationMissing: true,
+        reason: `No passing validation-summary event exists for the reviewed commit ${reviewedHead}. Controller recovery failed: ${recovered.reason}`,
+      };
+    }
+    validation = recovered.validation;
+    validationRecovered = true;
+  }
+
+  return { ok: true, commit: reviewedHead, checks, validation, validationRecovered };
 }
 
 export function recordApprovedBrowserReview(root, managed, reviewJob, {
