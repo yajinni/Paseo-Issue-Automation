@@ -267,7 +267,7 @@ function fakeManagerApi() {
         await json(route, { status: clone(current), result: { saved: true } });
         return;
       }
-      if (method === 'POST' && ['run-now', 'review-worker/start', 'review-worker/restart', 'restart-issue'].includes(action)) {
+      if (method === 'POST' && ['run-now', 'pr-review/resume', 'review-worker/restart', 'restart-issue'].includes(action)) {
         await json(route, { result: { ok: true } }, 202);
         return;
       }
@@ -418,7 +418,7 @@ test('manager browser smoke covers remaining request-order refresh history and l
 
     const statusPath = '/api/repositories/repo-b/status';
     for (const [action, payload] of [
-      ['review-worker/start', null],
+      ['pr-review/resume', null],
       ['restart-issue', { issueNumber: 201, branchAction: 'keep' }],
       ['review-worker/restart', null],
     ]) {

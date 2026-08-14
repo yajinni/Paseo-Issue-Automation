@@ -146,10 +146,9 @@ test('manager API keeps coding worker lifecycle internal while PR review worker 
     method: 'POST',
     pathname: `/api/repositories/${encodeURIComponent(repository.id)}/review-worker/start`,
   }, { rootDir, workerManager, reviewWorkerManager });
-  assert.equal(reviewStart.status, 202);
-  assert.equal(reviewStart.body.result.running, true);
-  assert.equal(reviewStart.body.status, undefined);
-  assert.deepEqual(reviewCalls[0], ['start', repository.id, repositoryRoot]);
+  assert.equal(reviewStart.status, 410);
+  assert.match(reviewStart.body.error, /\/api\/pr-review\/resume/);
+  assert.deepEqual(reviewCalls, []);
 
   const calls = [];
   const mutation = managerApiRequest({

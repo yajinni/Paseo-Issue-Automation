@@ -256,8 +256,8 @@ function automationBlockers(status, result) {
       severity: 'info',
       scope: 'review-worker',
       title: 'PR-review worker is stopped',
-      message: `${name} will not automatically schedule or reconcile PR reviews until its PR-review worker starts.`,
-      action: postAction('Start PR-review worker', 'review-worker/start'),
+      message: `${name} will not automatically schedule or reconcile PR reviews until PR-review processing resumes.`,
+      action: postAction('Resume PR-review processing', 'pr-review/resume'),
     }));
   }
 
