@@ -1,7 +1,5 @@
 export const PR_REVIEW_SETTINGS_TOGGLE_SCRIPT = String.raw`
 (function installPrReviewSettingsToggle() {
-  let latestPrReviewData = null;
-
   function installToggleStyles() {
     if (document.getElementById('pr-review-toggle-style')) return;
     const style = document.createElement('style');
@@ -54,10 +52,10 @@ export const PR_REVIEW_SETTINGS_TOGGLE_SCRIPT = String.raw`
     if (!document.getElementById('automatic-pr-review-card')) {
       container.insertAdjacentHTML('afterbegin', [
         '<article class="card" id="automatic-pr-review-card">',
-        '<label class="automatic-pr-review-toggle" title="Enable or disable automatic ChatGPT review for pull requests created by this project.">',
-        '<input id="automatic-pr-review-enabled" type="checkbox" role="switch" aria-controls="pr-review-settings-grid">',
+        '<label class="automatic-pr-review-toggle" title="PR review lifecycle is controlled from the Overview controls.">',
+        '<input id="automatic-pr-review-enabled" type="checkbox" aria-readonly="true" disabled aria-controls="pr-review-settings-grid">',
         '<span class="automatic-pr-review-switch" aria-hidden="true"></span>',
-        '<span class="automatic-pr-review-copy"><strong>Automatic PR Review With ChatGPT</strong><small>When enabled, Paseo queues pull requests from this project for review using its dedicated ChatGPT browser.</small></span>',
+        '<span class="automatic-pr-review-copy"><strong>Automatic PR Review With ChatGPT</strong><small>Configure review behavior here. Start or stop the PR-review lifecycle from Overview.</small></span>',
         '</label>',
         '<p id="automatic-pr-review-status" aria-live="polite">Loading PR review status…</p>',
         '</article>'
@@ -80,63 +78,29 @@ export const PR_REVIEW_SETTINGS_TOGGLE_SCRIPT = String.raw`
     hideLegacyEnableControls();
 
     const toggle = document.getElementById('automatic-pr-review-enabled');
-    if (toggle && !toggle.dataset.bound) {
-      toggle.dataset.bound = 'true';
-      toggle.addEventListener('change', function() {
-        setAutomaticPrReview(toggle.checked);
-      });
-    }
+    if (toggle) toggle.disabled = true;
     return { container, grid, toggle };
   }
 
-  function automaticReviewEnabled(data) {
-    return data?.config?.enabled === true && data?.config?.browserReview?.enabled === true;
+  function automaticReviewConfigured(data) {
+    return data?.config?.browserReview?.enabled === true;
   }
 
   function renderAutomaticPrReview(data) {
-    latestPrReviewData = data;
     const layout = ensureSettingsLayout();
     if (!layout) return;
-    const enabled = automaticReviewEnabled(data);
+    const enabled = automaticReviewConfigured(data);
     layout.toggle.checked = enabled;
-    layout.grid.hidden = !enabled;
+    layout.toggle.disabled = true;
+    layout.grid.hidden = false;
     const status = document.getElementById('automatic-pr-review-status');
     if (status) {
       status.textContent = enabled
-        ? 'Enabled. The settings below apply only to this project.'
-        : 'Disabled. Turn this on to display and configure automatic PR review settings.';
+        ? 'Configured. Start or stop PR Reviews from the Overview controls.'
+        : 'Configure review settings below. Start or stop PR Reviews from the Overview controls.';
     }
     const nav = document.getElementById('pr-reviews-nav');
-    if (nav) nav.classList.toggle('hidden', !enabled);
-    const panel = document.getElementById('view-pr-reviews');
-    if (!enabled && panel?.classList.contains('active')) window.showView('settings');
-  }
-
-  async function setAutomaticPrReview(enabled) {
-    const layout = ensureSettingsLayout();
-    const master = document.getElementById('pr-enabled');
-    const browser = document.getElementById('pr-browser-enabled');
-    if (!layout?.toggle || !master || !browser || !latestPrReviewData) return;
-
-    const previous = automaticReviewEnabled(latestPrReviewData);
-    layout.toggle.disabled = true;
-    master.value = String(enabled);
-    browser.value = String(enabled);
-    layout.grid.hidden = !enabled;
-
-    try {
-      const result = await window.savePrReviewSettings();
-      if (!result) throw new Error('Automatic PR review could not be saved.');
-      await window.refreshPrReviews(true);
-    } catch (error) {
-      master.value = String(previous);
-      browser.value = String(previous);
-      layout.toggle.checked = previous;
-      layout.grid.hidden = !previous;
-      if (window.toast) window.toast(error.message || String(error), true);
-    } finally {
-      layout.toggle.disabled = false;
-    }
+    if (nav) nav.classList.remove('hidden');
   }
 
   const previousRefreshPrReviews = window.refreshPrReviews;

@@ -19,6 +19,7 @@ import { enhanceManagerWithUiFoundation, enhanceSetupWithSharedUiTheme } from '.
 import { enhanceManagerWithWorkQueue } from './manager-work-queue-ui.mjs';
 import { createManagerReviewWorkerPool } from './manager-review-workers.mjs';
 import { createManagerWorkerPool } from './manager-workers.mjs';
+import { createManagerStatusCache } from './manager-status-cache.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
 import { listRepositories } from './repository-registry.mjs';
 import { loadConfig } from './state.mjs';
@@ -105,7 +106,11 @@ export function startConfiguredReviewWorkers(reviewWorkerManager, {
   for (const repository of repositoryLister({ rootDir })) {
     try {
       if (configLoader(repository.path).setupComplete !== true) continue;
-      if (reviewStoreLoader(repository.path).config?.reviewQueue?.paused !== false) continue;
+      const storeConfig = reviewStoreLoader(repository.path)?.config || {};
+      const running = Object.hasOwn(storeConfig, 'reviewQueue')
+        ? storeConfig.reviewQueue?.paused === false
+        : storeConfig.enabled === true;
+      if (!running) continue;
       started.push(reviewWorkerManager.start(repository));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -176,6 +181,7 @@ export async function startManagerServer({
 } = {}) {
   const workers = workerManager || createManagerWorkerPool({ managerConfigOptions: { rootDir } });
   const reviewWorkers = reviewWorkerManager || createManagerReviewWorkerPool();
+  const statusCache = createManagerStatusCache({ rootDir, workerManager: workers, reviewWorkerManager: reviewWorkers });
   const credentials = paseoCredentialStore || createPaseoCredentialStore();
   const server = http.createServer(async (request, response) => {
     try {
@@ -247,7 +253,12 @@ export async function startManagerServer({
       });
       if (readinessSetup.handled) { json(response, readinessSetup.status, readinessSetup.body); return; }
 
-      const result = managerApiRequest({ method: request.method, pathname: url.pathname, body }, { rootDir, workerManager: workers, reviewWorkerManager: reviewWorkers });
+      const result = managerApiRequest({ method: request.method, pathname: url.pathname, body }, {
+        rootDir,
+        workerManager: workers,
+        reviewWorkerManager: reviewWorkers,
+        statusReader: (repository) => statusCache.read(repository),
+      });
       if (!result.handled) { json(response, 404, { error: 'Not found' }); return; }
       json(response, result.status, result.body);
     } catch (error) {
@@ -271,10 +282,11 @@ export async function startManagerServer({
       console.warn(`Could not start PR-review worker for ${repository?.repository || repository?.name || repository?.id || 'repository'}: ${error.message}`);
     },
   });
+  statusCache.refreshAll(listRepositories({ rootDir }));
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}`;
   console.log(`Paseo repository manager: ${url}`);
-  server.on('close', () => { workers.close(); reviewWorkers.close(); });
+  server.on('close', () => { statusCache.close(); workers.close(); reviewWorkers.close(); });
   if (open) openBrowser(url);
-  return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers, paseoCredentialStore: credentials, codingWorkerStartup, reviewWorkerStartup };
+  return { server, url, workerManager: workers, reviewWorkerManager: reviewWorkers, statusCache, paseoCredentialStore: credentials, codingWorkerStartup, reviewWorkerStartup };
 }

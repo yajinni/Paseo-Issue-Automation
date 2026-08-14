@@ -302,6 +302,32 @@ async function execute(root, issueNumber) {
           },
         });
       },
+      onPermissionWait: ({ detail }) => {
+        const phase = reviewRound.stage === 'quick' ? 'reviewing-light-permission' : 'reviewing-heavy-permission';
+        updateState(root, issueNumber, {
+          phase,
+          controllerPid: null,
+          reason: detail,
+          reviewPermissionWaitAt: new Date().toISOString(),
+        }, {
+          type: 'review-permission-wait',
+          details: `Structured review is waiting for a legitimate permission decision; the controller will not terminalize the exact-head request. ${detail}`,
+        });
+        appendIssueLifecycle(root, issueNumber, {
+          attempt: snapshot.state.attempt,
+          type: 'review-permission-wait',
+          status: 'waiting',
+          source: 'controller',
+          message: detail,
+          evidence: {
+            reviewRequestId,
+            pullRequestNumber: snapshot.pr.number,
+            headSha: snapshot.head,
+            stage: reviewRound.stage,
+            round: reviewRound.round,
+          },
+        });
+      },
       onStale: ({ currentHeadSha }) => {
         updateState(root, issueNumber, {
           reviewRequestId,
@@ -349,6 +375,7 @@ async function execute(root, issueNumber) {
         });
       },
     });
+    if (reviewAttempt.pending) return;
     if (reviewAttempt.stale) continue;
     const review = reviewAttempt.review;
     if (review.decision.action === 'stale') continue;

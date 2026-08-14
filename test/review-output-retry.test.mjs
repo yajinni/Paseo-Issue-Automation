@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   reviewRequestIdentity,
   runStructuredReviewWithRetry,
+  structuredReviewPermissionWaitDetail,
   structuredReviewSchemaFailureDetail,
 } from '../src/review-output-retry.mjs';
 
@@ -17,6 +18,13 @@ function metadataError() {
   const error = new Error('Reviewer verdict stage does not match the requested review.');
   error.command = 'paseo';
   error.code = 'REVIEW_METADATA_MISMATCH';
+  return error;
+}
+
+function permissionWaitError() {
+  const error = new Error('paseo run failed: OUTPUT_SCHEMA_FAILED Agent is waiting for permission before producing structured output');
+  error.command = 'paseo';
+  error.stderr = '{"error":{"code":"OUTPUT_SCHEMA_FAILED","message":"Agent is waiting for permission before producing structured output"}}';
   return error;
 }
 
@@ -51,6 +59,26 @@ test('structured review retries one malformed schema result with the same reques
   assert.equal(retries.length, 1);
   assert.equal(retries[0].attempt, 2);
   assert.match(retries[0].detail, /INVALID_OUTPUT_SCHEMA/);
+});
+
+test('permission wait remains pending instead of being retried or terminalized as schema failure', () => {
+  let attempts = 0;
+  let pending = null;
+  const result = runStructuredReviewWithRetry({
+    expectedHeadSha: '1a3097b84539f48eb0b793cb1183916ea6613b94',
+    requestId: 'issue-239:pr-246:1a3097b:quick:round-1',
+    currentHead: () => '1a3097b84539f48eb0b793cb1183916ea6613b94',
+    runReview() {
+      attempts += 1;
+      throw permissionWaitError();
+    },
+    onPermissionWait: (context) => { pending = context; },
+  });
+  assert.equal(result.pending, true);
+  assert.equal(result.permissionWait, true);
+  assert.equal(attempts, 1);
+  assert.match(pending.detail, /waiting for permission/);
+  assert.match(structuredReviewPermissionWaitDetail(permissionWaitError()), /waiting for permission/);
 });
 
 test('structured review does not retry stale exact-head work', () => {

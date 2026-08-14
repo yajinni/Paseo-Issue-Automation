@@ -196,6 +196,24 @@ test('terminal launch failure is Failed and cannot become successful Completed f
   assert.equal(details.completed.complete, false);
 });
 
+test('lifecycle diagnostics expose prompts from prior attempts', () => {
+  const details = managerLifecycleDetails('/repo', 274, {
+    jsonRunner: issueRunner,
+    runLoader: () => ({
+      ...run,
+      history: [{ attempt: 1, coderPrompts: [{ attempt: 1, kind: 'initial-attempt', prompt: 'prior attempt prompt' }] }],
+      coderPrompts: [{ attempt: 2, kind: 'initial-attempt', prompt: 'current attempt prompt' }],
+    }),
+    lifecycleLoader: () => lifecycle,
+    configLoader: () => config,
+    reviewStoreLoader: () => ({ managedPullRequests: [], reviewJobs: [] }),
+  });
+  assert.deepEqual(details.diagnostics.coderPrompts.map((prompt) => prompt.prompt), [
+    'prior attempt prompt',
+    'current attempt prompt',
+  ]);
+});
+
 test('manager API composes the lifecycle-details route before generic repository GET handling', () => {
   const source = readFileSync(new URL('../src/manager-api.mjs', import.meta.url), 'utf8');
   assert.match(source, /managerLifecycleDetailsApiRequest/);

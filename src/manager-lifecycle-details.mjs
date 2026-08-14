@@ -266,12 +266,15 @@ function codingDetails(run, lifecycle, config) {
   const completedAt = firstLifecycleAt(lifecycle, ['pr-review-queued'])
     || firstLifecycleMatching(lifecycle, /coding completed|pr-review-queued|draft pr|pull request.*opened/i);
   const phase = String(run.phase || '');
+  const abandoned = String(run.status || '') === 'abandoned' || phase === 'abandoned';
   const failed = ['agent-failed', 'paseo:failed', 'failed', 'launch-failed', 'automation-failed'].includes(String(run.status || ''))
     || ['failed', 'launch-failed'].includes(phase);
   const blocked = ['agent-blocked', 'automation-blocked'].includes(String(run.status || ''))
     || ['blocked', 'needs-attention', 'invalid-issue'].includes(phase);
-  const status = failed
-    ? 'Failed'
+  const status = abandoned
+    ? 'Abandoned'
+    : failed
+      ? 'Failed'
     : blocked
       ? 'Blocked'
       : completedAt
@@ -290,8 +293,15 @@ function codingDetails(run, lifecycle, config) {
     status,
     branch: firstString(run.branch),
     workspaceId: firstString(run.workspaceId),
-    failureReason: failed || blocked ? firstString(run.reason, run.failureReason) : null,
+    failureReason: abandoned || failed || blocked ? firstString(run.reason, run.failureReason) : null,
   };
+}
+
+function recordedCoderPrompts(run = {}) {
+  const previous = (run.history || []).flatMap((attempt) => (Array.isArray(attempt?.coderPrompts) ? attempt.coderPrompts : [])
+    .map((prompt) => ({ ...prompt, attempt: prompt.attempt || attempt.attempt || null })));
+  const current = Array.isArray(run.coderPrompts) ? run.coderPrompts : [];
+  return [...previous, ...current];
 }
 
 function completionDetails(run, issue, config) {
@@ -307,8 +317,8 @@ function completionDetails(run, issue, config) {
     completedAt: firstString(run.completedAt),
     finalStatus: firstString(run.status),
     complete: Boolean(run.completedAt && (run.issueClosureVerifiedAt || issue.closedAt)
-      && !['agent-failed', 'paseo:failed', 'agent-blocked', 'automation-failed', 'automation-blocked', 'failed'].includes(String(run.status || ''))
-      && !['failed', 'launch-failed', 'blocked', 'needs-attention', 'invalid-issue'].includes(String(run.phase || ''))),
+      && !['abandoned', 'agent-failed', 'paseo:failed', 'agent-blocked', 'automation-failed', 'automation-blocked', 'failed'].includes(String(run.status || ''))
+      && !['abandoned', 'failed', 'launch-failed', 'blocked', 'needs-attention', 'invalid-issue'].includes(String(run.phase || ''))),
   };
 }
 
@@ -346,7 +356,7 @@ export function managerLifecycleDetails(root, issueNumber, {
       coderPrompt: firstString(run.coderPrompt),
       coderPromptRecordedAt: firstString(run.coderPromptRecordedAt),
       coderPromptKind: firstString(run.coderPromptKind),
-      coderPrompts: Array.isArray(run.coderPrompts) ? run.coderPrompts : [],
+      coderPrompts: recordedCoderPrompts(run),
       lifecycle,
     },
     completed: completionDetails(run, issue, config),

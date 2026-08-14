@@ -29,11 +29,37 @@ test('workspace creation and agent start are separate commands', () => {
   assert.equal(create[0], 'workspace');
   assert.ok(create.includes('--new-branch'));
   assert.ok(create.includes('--worktree-slug'));
+  assert.equal(create[create.indexOf('--base') + 1], 'main');
   assert.ok(!create.includes('run'));
   assert.equal(start[0], 'run');
   assert.deepEqual(start.slice(start.indexOf('--workspace'), start.indexOf('--workspace') + 2), ['--workspace', 'wks_one']);
   assert.ok(!start.includes('--new-workspace'));
   assert.ok(!start.includes('--new-branch'));
+});
+
+test('workspace creation passes an exact verified base SHA unchanged', () => {
+  const baseSha = 'a'.repeat(40);
+  const create = workspaceCreateArgs({
+    root: '/repo',
+    title: 'ai/issue-274-test-attempt-2',
+    branch: 'ai/issue-274-test-attempt-2',
+    baseBranch: 'main',
+    baseSha,
+  });
+
+  assert.equal(create[create.indexOf('--base') + 1], baseSha);
+});
+
+test('workspace creation preserves an explicitly qualified base ref', () => {
+  const baseRef = 'refs/remotes/origin/openspec';
+  const create = workspaceCreateArgs({
+    root: '/repo',
+    title: 'ai/issue-274-test-attempt-2',
+    branch: 'ai/issue-274-test-attempt-2',
+    baseBranch: baseRef,
+  });
+
+  assert.equal(create[create.indexOf('--base') + 1], baseRef);
 });
 
 test('long retry branches receive distinct short Paseo worktree slugs', () => {

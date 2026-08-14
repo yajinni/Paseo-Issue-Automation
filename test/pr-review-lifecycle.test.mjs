@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -10,7 +10,7 @@ import {
   pauseManagedPr,
   registerManagedPullRequest,
 } from '../src/pr-review-queue.mjs';
-import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
+import { loadPrReviewStore, mutatePrReviewStore, prReviewPaths, savePrAutomationConfig } from '../src/pr-review-store.mjs';
 import { reconcileManagedPullRequest, reconcileManagedPullRequests } from '../src/pr-review-reconcile.mjs';
 
 const noEffects = () => [];
@@ -91,4 +91,21 @@ test('operator-paused records are not reverted by reconciliation', (t) => {
   const result = reconcileManagedPullRequests(root, { now: 5000, effectRunner: noEffects });
   assert.equal(result.checked, 0);
   assert.equal(loadPrReviewStore(root).managedPullRequests[0].reviewState, 'paused');
+});
+
+test('legacy enabled PR-review config migrates to a running durable queue state', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-review-legacy-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  writeFileSync(prReviewPaths(root).store, JSON.stringify({
+    version: 1,
+    config: { enabled: true, browserReview: { enabled: true } },
+    managedPullRequests: [],
+    reviewJobs: [],
+    fixJobs: [],
+    history: [],
+  }));
+
+  const store = loadPrReviewStore(root);
+  assert.equal(store.config.reviewQueue.paused, false);
 });

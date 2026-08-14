@@ -24,7 +24,7 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
     const text = String(value || '').toLowerCase();
     if (/pass|approved|complete|merged|closed/.test(text)) return 'success';
     if (/change|pending|waiting|stale|queued/.test(text)) return 'warning';
-    if (/fail|error|block/.test(text)) return 'danger';
+    if (/fail|error|block|abandon/.test(text)) return 'danger';
     return '';
   }
 
@@ -65,7 +65,7 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
   function codingCard(details) {
     const coding = details.coding || {};
     const status = coding.status || 'Waiting for coding agent';
-    const failed = status === 'Failed' || status === 'Blocked';
+    const failed = ['Failed', 'Blocked', 'Abandoned'].includes(status);
     const framed = cardFrame((failed ? 'failed' : 'coding') + (status === 'Waiting for coding agent' ? ' pending' : ''), 'Coding', '</>', { text: status, tone: resultTone(status) });
     const copy = document.createElement('p'); copy.className = 'lifecycle-card-copy'; copy.textContent = status === 'Waiting for coding agent'
       ? 'The issue is claimed and waiting to be passed to a coding agent.'
@@ -139,7 +139,7 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
 
   function miniTrail(details) {
     const completed = details.completed || {};
-    const unsuccessful = ['Failed', 'Blocked'].includes(details.coding?.status);
+    const unsuccessful = ['Failed', 'Blocked', 'Abandoned'].includes(details.coding?.status);
     const stops = [
       ['Claimed', details.claimed?.claimedAt],
       ['Coding', details.coding?.startedAt],
@@ -158,7 +158,7 @@ export const MANAGER_LIFECYCLE_CARDS_SCRIPT = String.raw`
 
   function completedCard(details) {
     const completed = details.completed || {};
-    if (!completed.complete && ['Failed', 'Blocked'].includes(details.coding?.status)) {
+    if (!completed.complete && ['Failed', 'Blocked', 'Abandoned'].includes(details.coding?.status)) {
       const framed = cardFrame('completed failed', details.coding.status, '!', { text: details.coding.status, tone: 'danger' });
       const copy = document.createElement('p'); copy.className = 'lifecycle-card-copy'; copy.textContent = details.coding.failureReason || 'The attempt ended before successful completion.';
       framed.card.append(copy, framed.facts, miniTrail(details)); return framed.card;

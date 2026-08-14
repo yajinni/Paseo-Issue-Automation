@@ -61,7 +61,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_4 = String.raw`    const head = docu
        'Updated: ' + (item.updatedAt || 'Not recorded'),
        'Reason: ' + (item.reason || item.nextAction || 'Not recorded'),
        '', 'Lifecycle events:',
-       ...(item.lifecycle || item.timeline || []).map(function(event) { return '[' + (event.at || 'unknown') + '] Attempt ' + (event.attempt || '?') + ' ' + event.type + ': ' + (event.message || event.detail || '') + (event.evidence ? '\n' + JSON.stringify(event.evidence, null, 2) : ''); }),
+       ...((item.timeline && item.timeline.length ? item.timeline : item.lifecycle || []).concat(item.legacyTimeline || []).map(function(event) { return '[' + (event.at || 'unknown') + '] Attempt ' + (event.attempt || '?') + ' ' + event.type + ': ' + (event.message || event.detail || '') + (event.evidence ? '\n' + JSON.stringify(event.evidence, null, 2) : ''); })),
        '', 'Coder prompt:', diagnostic.coderPrompt || 'Not recorded',
        '', 'Recorded coder prompts:', JSON.stringify(diagnostic.coderPrompts || [], null, 2),
      ];

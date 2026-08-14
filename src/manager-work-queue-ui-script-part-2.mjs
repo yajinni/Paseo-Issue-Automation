@@ -140,7 +140,8 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_2 = String.raw`    const patterns = 
     if (search.includes('reviewing') || search.includes('review started')) return (item.review?.label || 'Review') + ' started.';
     if (search.includes('pr-merged')) return 'PR' + (item.pullRequest?.number ? ' #' + item.pullRequest.number : '') + ' merged.';
     if (search.includes('closure verified') || search.includes('issueclosureverified')) return 'Issue closure verified.';
-     if (search.includes('failed') || search.includes('launch-failed')) return 'Attempt ' + (event.attempt || '?') + ' failed: ' + (firstLine(event.detail) || 'The recorded lifecycle attempt failed.');
+    if (search.includes('abandoned')) return 'Attempt ' + (event.attempt || '?') + ' abandoned: ' + (firstLine(event.detail) || 'The recorded lifecycle attempt was abandoned.');
+    if (search.includes('failed') || search.includes('launch-failed')) return 'Attempt ' + (event.attempt || '?') + ' failed: ' + (firstLine(event.detail) || 'The recorded lifecycle attempt failed.');
      if (search.includes('completed') && type === 'run-state-changed' && !/failed|blocked|launch-failed/i.test(search)) return 'Issue lifecycle completed.';
     return firstLine(event.detail) || type.replaceAll('-', ' ').replace(/\b\w/g, function(letter) { return letter.toUpperCase(); });
   }

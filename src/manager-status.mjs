@@ -117,9 +117,13 @@ export function managerRepositoryStatus(repository, {
     prHealth,
     reviewEvidence,
   };
-  const activeRuns = runs.filter((item) =>
-    !['human-review', 'automation-failed', 'automation-blocked', 'paseo:failed', 'paseo:needs-attention', 'paseo:review-failed', 'completed', 'merged', 'closed'].includes(String(item?.status || '')),
-  );
+  const activeRuns = runs.filter((item) => {
+    const status = String(item?.status || '');
+    const phase = String(item?.phase || '');
+    return !['abandoned', 'agent-blocked', 'agent-failed', 'automation-failed', 'automation-blocked',
+      'human-review', 'paseo:failed', 'paseo:needs-attention', 'paseo:review-failed', 'completed', 'merged', 'closed', 'failed'].includes(status)
+      && !['abandoned', 'blocked', 'failed', 'launch-failed', 'needs-attention'].includes(phase);
+  });
   const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const prReviews = prReviewStore

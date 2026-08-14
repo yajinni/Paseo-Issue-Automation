@@ -34,6 +34,7 @@ test('work queue prefers durable lifecycle records and exposes structured eviden
   assert.equal(item.timeline[0].evidence.baseIsAncestor, true);
   assert.match(item.timeline[0].detail, /baseSha=5074d15/);
   assert.match(item.timeline[0].detail, /behind=0/);
+  assert.equal(item.legacyTimeline[0].type, 'legacy-activity');
   assert.deepEqual(item.lifecycle, item.lifecycle);
 });
 

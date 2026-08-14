@@ -10,7 +10,8 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
     ['merged', 'Merged'],
      ['closure-verified', 'Issue Closure Verified'],
      ['failed', 'Failed'],
-     ['needs-attention', 'Needs attention'],
+    ['needs-attention', 'Needs attention'],
+    ['abandoned', 'Abandoned'],
     ['completed', 'Completed'],
   ];
   let queueData = { items: [], counts: {}, total: 0, active: 0, attention: 0, prHealth: { byIssue: {}, counts: {} } };
@@ -27,8 +28,8 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
   let headingObserver = null;
 
   function onWorkQueue() { return document.querySelector('[data-manager-view="work-queue"]'); }
-  function isAttention(item) { return ['failed', 'review-failed', 'needs-attention'].includes(item.stage); }
-  function isActive(item) { return !['completed', 'failed', 'review-failed', 'needs-attention', 'ready', 'waiting'].includes(item.stage); }
+  function isAttention(item) { return ['failed', 'abandoned', 'review-failed', 'needs-attention'].includes(item.stage); }
+  function isActive(item) { return !['completed', 'failed', 'abandoned', 'review-failed', 'needs-attention', 'ready', 'waiting'].includes(item.stage); }
   function isReviewStage(item) { return ['review-queued', 'reviewing', 'changes-requested', 'fixing', 'review-failed'].includes(item.stage) || Boolean(item.review); }
   function prHealthFor(item) { return queueData?.prHealth?.byIssue?.[String(item.issueNumber)] || null; }
   function hasPrProblems(item) { const health = prHealthFor(item); return Boolean(health && ['blocking', 'attention', 'unavailable'].includes(health.status)); }
@@ -52,7 +53,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
     card.innerHTML = '<div class="work-queue-toolbar"><div class="work-queue-toolbar-fields">'
       + '<label>Search<input id="work-queue-search" type="search" placeholder="issue, title, branch, PR, or PR problem"></label>'
       + '<label>Status<select id="work-queue-filter"><option value="all">All recorded work</option><option value="active">Active work</option><option value="attention">Needs attention</option><option value="pr-problems">PR problems</option></select></label>'
-       + '<label>Stage<select id="work-queue-stage-filter"><option value="all">All stages</option><option value="ready">Available</option><option value="waiting">Waiting for dependencies</option><option value="queued">Claimed</option><option value="coding">Coding</option><option value="review-queued">PR Review Queued</option><option value="reviewing">Reviewing</option><option value="changes-requested">Changes requested</option><option value="fixing">Fixing</option><option value="review-failed">Review failed</option><option value="failed">Failed</option><option value="needs-attention">Needs attention</option><option value="merged">Merged</option><option value="closure-verified">Issue Closure Verified</option><option value="completed">Completed</option></select></label>'
+       + '<label>Stage<select id="work-queue-stage-filter"><option value="all">All stages</option><option value="ready">Available</option><option value="waiting">Waiting for dependencies</option><option value="queued">Claimed</option><option value="coding">Coding</option><option value="review-queued">PR Review Queued</option><option value="reviewing">Reviewing</option><option value="changes-requested">Changes requested</option><option value="fixing">Fixing</option><option value="review-failed">Review failed</option><option value="failed">Failed</option><option value="abandoned">Abandoned</option><option value="needs-attention">Needs attention</option><option value="merged">Merged</option><option value="closure-verified">Issue Closure Verified</option><option value="completed">Completed</option></select></label>'
       + '</div><div class="work-queue-count" id="work-queue-count">Loading…</div></div>'
       + '<div class="lifecycle-table"><div class="lifecycle-columns"><span>Issue</span><span>Title</span><span>Current stage</span><span>Run details</span><span>PR</span><span>Started</span><span>Last updated</span><span>Elapsed</span><span></span></div><div id="work-queue-list"><div class="work-queue-empty">Loading recorded work…</div></div></div>'
       + '<div class="lifecycle-footer"><span id="work-queue-footer-summary">Loading recorded work…</span><div class="lifecycle-pagination" id="work-queue-pagination" aria-label="Issue lifecycle pages"></div></div>'
@@ -165,10 +166,11 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
     if (item.stage === 'coding') return 2;
     if (item.stage === 'queued') return 1;
     if (item.stage === 'ready') return 0;
-    if (item.stage === 'failed' || item.stage === 'needs-attention') {
+    if (item.stage === 'failed' || item.stage === 'abandoned' || item.stage === 'needs-attention') {
       const phase = String(item.phase || '');
       if (/review/.test(phase) || item.pullRequest?.number) return 5;
       if (/coding|agent|launch|completion|base/.test(phase)) return 2;
+      if (item.stage === 'abandoned') return 2;
     }
     return Math.max(0, item.pullRequest?.number ? 3 : 0);
   }

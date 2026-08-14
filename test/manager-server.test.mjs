@@ -68,6 +68,20 @@ test('configured review workers restore only the persisted running lifecycle sta
   assert.deepEqual(result.errors, []);
 });
 
+test('configured review workers restore legacy enabled state when no queue state was persisted', () => {
+  const calls = [];
+  const result = startConfiguredReviewWorkers({
+    start(repository) { calls.push(repository.id); return { repositoryId: repository.id, running: true }; },
+  }, {
+    rootDir: '/manager',
+    repositoryLister: () => [{ id: 'legacy', path: '/legacy' }],
+    configLoader: () => ({ setupComplete: true }),
+    reviewStoreLoader: () => ({ config: { enabled: true, browserReview: { enabled: true } } }),
+  });
+  assert.deepEqual(calls, ['legacy']);
+  assert.equal(result.started.length, 1);
+});
+
 test('manager API keeps coding worker lifecycle internal while PR review worker controls remain repository scoped', () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), 'paseo-manager-api-'));
   const repositoryRoot = createRepository(rootDir, 'Example');
