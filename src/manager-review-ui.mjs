@@ -12,7 +12,7 @@ const REVIEW_FACTS = `    ['Coding worker', data.worker && data.worker.state ===
 
 const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
 (function managerLightweightActionStatusSync() {
-   const lightweightActions = new Set(['restart-issue']);
+   const lightweightActions = new Set(['restart-issue', 'review-worker/restart']);
   const configForm = document.getElementById('config-form');
   const repositorySelect = document.getElementById('repository-select');
   let configDraftRepositoryId = null;
