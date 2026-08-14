@@ -100,7 +100,7 @@ export const COMPONENT_CHANGES_UI_SCRIPT = `
   }
 
   function applyPrData(data) {
-    const enabled = data?.config?.enabled === true;
+    const enabled = data?.config?.browserReview?.enabled === true;
     const nav = document.getElementById('pr-reviews-nav');
     if (nav) nav.classList.toggle('hidden', !enabled);
     const panel = document.getElementById('view-pr-reviews');

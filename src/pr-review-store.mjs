@@ -284,15 +284,20 @@ export function normalizeFixJob(job) {
 function normalizeStore(value) {
   const fallback = defaultStore();
   const store = value && typeof value === 'object' ? value : fallback;
+  const storedConfig = store.config && typeof store.config === 'object' ? store.config : {};
+  const hasPersistedQueueState = Object.hasOwn(storedConfig, 'reviewQueue');
+  const reviewQueue = hasPersistedQueueState
+    ? { ...fallback.config.reviewQueue, ...(storedConfig.reviewQueue || {}) }
+    : { ...fallback.config.reviewQueue, paused: storedConfig.enabled !== true };
   return {
     version: STORE_VERSION,
     config: validatePrAutomationConfig({
       ...fallback.config,
-      ...(store.config || {}),
-      browserReview: { ...fallback.config.browserReview, ...(store.config?.browserReview || {}) },
-      reviewQueue: { ...fallback.config.reviewQueue, ...(store.config?.reviewQueue || {}) },
-      reconciliation: { ...fallback.config.reconciliation, ...(store.config?.reconciliation || {}) },
-      githubActions: { ...fallback.config.githubActions, ...(store.config?.githubActions || {}) },
+      ...storedConfig,
+      browserReview: { ...fallback.config.browserReview, ...(storedConfig.browserReview || {}) },
+      reviewQueue,
+      reconciliation: { ...fallback.config.reconciliation, ...(storedConfig.reconciliation || {}) },
+      githubActions: { ...fallback.config.githubActions, ...(storedConfig.githubActions || {}) },
     }),
     managedPullRequests: (store.managedPullRequests || []).map(normalizeManagedPullRequest),
     reviewJobs: (store.reviewJobs || []).map(normalizeReviewJob),

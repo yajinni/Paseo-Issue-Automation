@@ -7,7 +7,10 @@ import { run } from './process.mjs';
 
 export function prReviewAutomationEnabled(root) {
   const config = loadPrReviewStore(root).config;
-  return config.enabled && config.browserReview.enabled;
+  const lifecycleRunning = Object.hasOwn(config, 'reviewQueue')
+    ? config.reviewQueue?.paused === false
+    : config.enabled === true;
+  return lifecycleRunning && config.browserReview.enabled;
 }
 
 export function handoffValidatedPullRequest(root, {

@@ -78,6 +78,8 @@ function setOverviewMetric(id, value, state = 'neutral') {
 }
 
 function renderManagerOverview(data) {
+  const refresh = data.statusRefresh || {};
+  const lastSuccessful = refresh.lastSuccessfulAt ? new Date(refresh.lastSuccessfulAt).toLocaleString() : null;
   const operational = data.operational || {};
   const blockers = Array.isArray(data.blockers) ? data.blockers : [];
   const primary = operational.primaryBlocker || blockers[0] || null;
@@ -90,10 +92,29 @@ function renderManagerOverview(data) {
 
   const title = document.getElementById('overview-status-title');
   const message = document.getElementById('overview-status-message');
-  title.textContent = issueReady
-    ? attentionCount ? 'Automation is ready with items to review' : 'Automation is ready'
-    : 'Automation needs attention';
-  message.textContent = primary?.message || 'No repository-specific blockers are currently reported.';
+  if (refresh.state === 'refreshing' && !refresh.lastSuccessfulAt) {
+    title.textContent = 'Refreshing repository status';
+    message.textContent = 'Deep Git and GitHub probes are running in the background.';
+    setOverviewMetric('overview-issue-processing', 'Refreshing', 'neutral');
+    setOverviewMetric('overview-claims', 'Refreshing', 'neutral');
+    setOverviewMetric('overview-coding-worker', 'Refreshing', 'neutral');
+    setOverviewMetric('overview-review-worker', 'Refreshing', 'neutral');
+    setOverviewMetric('overview-active-work', '--', 'neutral');
+    setOverviewMetric('overview-attention', '--', 'neutral');
+    return;
+  }
+  if (refresh.state === 'unavailable' && !refresh.lastSuccessfulAt) {
+    title.textContent = 'Repository status unavailable';
+    message.textContent = refresh.error || 'The background status probe failed before a successful result was recorded.';
+  } else if (refresh.state === 'delayed') {
+    title.textContent = 'Repository status refresh delayed';
+    message.textContent = (refresh.error || 'The latest status probe failed.') + (lastSuccessful ? ' Showing the last successful status from ' + lastSuccessful + '.' : '');
+  } else {
+    title.textContent = issueReady
+      ? attentionCount ? 'Automation is ready with items to review' : 'Automation is ready'
+      : 'Automation needs attention';
+    message.textContent = primary?.message || 'No repository-specific blockers are currently reported.';
+  }
 
   setOverviewMetric('overview-issue-processing', issueReady ? 'Ready' : 'Blocked', issueReady ? 'ready' : 'blocked');
   setOverviewMetric('overview-claims', claimsEnabled ? 'Enabled' : 'Paused', claimsEnabled ? 'ready' : 'attention');
@@ -109,6 +130,25 @@ function renderManagerOverview(data) {
 }
 
 function renderRepositoryHealth(data) {
+  const refresh = data.statusRefresh || {};
+  if (refresh.state === 'refreshing' && !refresh.lastSuccessfulAt) {
+    facts('operational-facts', [
+      ['Status', 'Refreshing'],
+      ['Last successful status', refresh.lastSuccessfulAt],
+    ]);
+    const target = document.getElementById('repository-blockers');
+    target.textContent = 'Deep repository probes are running in the background.';
+    return;
+  }
+  if (refresh.state === 'unavailable' && !refresh.lastSuccessfulAt) {
+    facts('operational-facts', [
+      ['Status', 'Unavailable'],
+      ['Error', refresh.error],
+    ]);
+    const target = document.getElementById('repository-blockers');
+    target.textContent = refresh.error || 'The repository status probe failed.';
+    return;
+  }
   const operational = data.operational || {};
   facts('operational-facts', [
     ['Issue processing', operational.issueProcessing || 'Unknown'],

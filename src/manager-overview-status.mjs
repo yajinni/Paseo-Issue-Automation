@@ -1,5 +1,5 @@
-const INACTIVE_ISSUE_STAGES = new Set(['ready', 'waiting', 'completed', 'failed', 'review-failed', 'needs-attention']);
-const TERMINAL_PR_STAGES = new Set(['completed', 'failed']);
+const INACTIVE_ISSUE_STAGES = new Set(['ready', 'waiting', 'completed', 'failed', 'abandoned', 'review-failed', 'needs-attention']);
+const TERMINAL_PR_STAGES = new Set(['completed', 'failed', 'abandoned']);
 const INTENTIONAL_STOP_CODES = new Set(['claims-paused', 'review-worker-stopped']);
 
 function firstString(...values) {

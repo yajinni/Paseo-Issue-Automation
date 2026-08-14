@@ -10,7 +10,7 @@ test('Automation view separates claims scheduling from status-only coding worker
   for (const text of ['Claims & scheduling', 'Coding worker', 'Automatically available for new issue coding and review fixes', "['Status', worker.state === 'active' ? 'Active' : 'Idle']"]) {
     assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
-  for (const action of ['resume', 'pause', 'run-now', 'reconcile']) {
+  for (const action of ['run-now', 'reconcile']) {
     assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   for (const action of ['worker/start', 'worker/stop', 'worker/restart']) {
@@ -22,9 +22,7 @@ test('Reviews view exposes workflow worker review workload and ChatGPT Profile s
   for (const text of ['Review workflow', 'Review workload', 'PR-review worker', 'ChatGPT Profile']) {
     assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(text));
   }
-  for (const action of ['review-worker/start', 'review-worker/stop', 'review-worker/restart']) {
-    assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, new RegExp(action.replace('/', '\\/')));
-  }
+  assert.doesNotMatch(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /review-worker\/(start|stop|restart)/);
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /chatGptProfile/);
   assert.match(MANAGER_AUTOMATION_REVIEWS_SCRIPT, /setupPath \|\| '\/setup\/review'/);
 });

@@ -58,10 +58,26 @@ function waitForCoder(root, state) {
 }
 
 function sendCoder(root, state, prompt) {
-  const agentId = state.coderAgentId || state.agentId;
+  const issueNumber = Number(state?.issueNumber);
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+    throw new Error('A valid issue number is required to send a controller follow-up to the Coder.');
+  }
+  const current = loadRun(root, issueNumber);
+  if (!current) throw new Error(`No automation state exists for issue #${issueNumber}.`);
+  const agentId = current.coderAgentId || current.agentId;
+  if (!agentId) throw new Error('Coder agent ID is missing.');
+  const at = new Date().toISOString();
+  saveRun(root, issueNumber, {
+    ...current,
+    coderPrompt: prompt,
+    coderPromptRecordedAt: at,
+    coderPromptKind: 'controller-follow-up',
+    coderPrompts: [...(Array.isArray(current.coderPrompts) ? current.coderPrompts : []), { attempt: current.attempt || 1, kind: 'controller-follow-up', at, prompt }],
+    updatedAt: at,
+  });
   const sent = run('paseo', ['send', String(agentId), '--no-wait', prompt], { cwd: root, allowFailure: true });
   if (!sent.ok) throw new Error(sent.stderr || sent.stdout || 'Paseo could not send the repair task to the Coder.');
-  waitForCoder(root, state);
+  waitForCoder(root, current);
 }
 
 function latestValidation(state) {
@@ -293,6 +309,32 @@ async function execute(root, issueNumber) {
           },
         });
       },
+      onPermissionWait: ({ detail }) => {
+        const phase = reviewRound.stage === 'quick' ? 'reviewing-light-permission' : 'reviewing-heavy-permission';
+        updateState(root, issueNumber, {
+          phase,
+          controllerPid: null,
+          reason: detail,
+          reviewPermissionWaitAt: new Date().toISOString(),
+        }, {
+          type: 'review-permission-wait',
+          details: `Structured review is waiting for a legitimate permission decision; the controller will not terminalize the exact-head request. ${detail}`,
+        });
+        appendIssueLifecycle(root, issueNumber, {
+          attempt: snapshot.state.attempt,
+          type: 'review-permission-wait',
+          status: 'waiting',
+          source: 'controller',
+          message: detail,
+          evidence: {
+            reviewRequestId,
+            pullRequestNumber: snapshot.pr.number,
+            headSha: snapshot.head,
+            stage: reviewRound.stage,
+            round: reviewRound.round,
+          },
+        });
+      },
       onStale: ({ currentHeadSha }) => {
         updateState(root, issueNumber, {
           reviewRequestId,
@@ -340,6 +382,7 @@ async function execute(root, issueNumber) {
         });
       },
     });
+    if (reviewAttempt.pending) return;
     if (reviewAttempt.stale) continue;
     const review = reviewAttempt.review;
     if (review.decision.action === 'stale') continue;

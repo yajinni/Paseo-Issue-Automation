@@ -21,6 +21,8 @@ import {
   inspectWorkspaceAgents,
   launchErrorDetail,
   nextReconciliationAttempt,
+  normalizeAttemptPrompt,
+  refreshConfiguredBase,
   verifyWorkspaceIdentity,
   workspaceCreateArgs,
   workspaceFromPayload,
@@ -164,6 +166,9 @@ function previousAttemptHistory(previous) {
     startedAt: previous.startedAt || null,
     completedAt: previous.completedAt || null,
     workspaceId: previous.workspaceId || null,
+    baseBranch: previous.baseBranch || null,
+    baseSha: previous.baseSha || null,
+    coderPrompts: previous.coderPrompts || [],
     activity: previous.activity || [],
     events: previous.events || [],
   }] : [];
@@ -336,6 +341,16 @@ function startRecordedAgent(root, issue, repository) {
   }
   const title = current.agentTitle || `Issue #${issue.number} Coder (attempt ${current.attempt || 1})`;
   const attemptCount = Number(current.agentStartAttempts || 0) + 1;
+  const prompt = normalizeAttemptPrompt(buildAttemptPrompt(repository, issue, current.branch, config));
+  saveActivity(root, issue.number, {
+    coderPrompt: prompt,
+    coderPromptRecordedAt: now(),
+    coderPromptKind: 'initial-attempt',
+    coderPrompts: [
+      ...(current.coderPrompts || []),
+      { attempt: current.attempt || 1, kind: 'initial-attempt', at: now(), prompt },
+    ],
+  }, 'coder-prompt-recorded', `Recorded the exact coder prompt sent for attempt ${current.attempt || 1}.`);
   saveActivity(root, issue.number, {
     phase: 'starting-agent',
     reason: null,
@@ -350,7 +365,7 @@ function startRecordedAgent(root, issue, repository) {
       thinking: config.models.coderThinking,
       title,
       workspaceId: current.workspaceId,
-      prompt: buildAttemptPrompt(repository, issue, current.branch, config),
+      prompt,
     }), { cwd: root });
     return finalizeAgentLaunch(root, issue, payload);
   } catch (error) {
@@ -411,6 +426,8 @@ function launch(root, issue, branchAction) {
     issueTitle: issue.title,
     issueUrl: issue.url,
     branch: selection.branch,
+    baseBranch: config.baseBranch,
+    baseSha: null,
     attempt: selection.attempt,
     status: LABELS.running,
     phase: 'creating-workspace',
@@ -437,11 +454,20 @@ function launch(root, issue, branchAction) {
   unskipIssue(root, issue.number);
 
   try {
+    const base = refreshConfiguredBase(root, config.baseBranch);
+    saveActivity(root, issue.number, {
+      baseBranch: base.baseBranch,
+      baseSha: base.baseSha,
+      baseRef: base.baseRef,
+      baseVerifiedAt: base.verifiedAt,
+      phase: 'creating-workspace',
+    }, 'workspace-base-verified', `Verified origin/${base.baseBranch} at ${base.baseSha} before workspace creation.`);
     const payload = runJson('paseo', workspaceCreateArgs({
       root,
       title: workspaceTitle,
       branch: selection.branch,
-      baseBranch: config.baseBranch,
+      baseBranch: base.baseBranch,
+      baseSha: base.baseSha,
     }), { cwd: root });
     const workspace = workspaceFromPayload(payload);
     saveActivity(root, issue.number, {
@@ -453,6 +479,7 @@ function launch(root, issue, branchAction) {
     verifyWorkspaceIdentity(root, workspace, {
       title: workspaceTitle,
       branch: selection.branch,
+      baseSha: base.baseSha,
     });
     saveActivity(root, issue.number, { phase: 'starting-agent' }, 'workspace-verified',
       `Workspace ${workspace.workspaceId} matches ${selection.branch}.`);

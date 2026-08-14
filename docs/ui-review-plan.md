@@ -74,7 +74,7 @@ The browser suite covers:
 - a Repo A status response arriving after Repo B becomes active without repainting Repo B;
 - a Repo A Configuration save finishing after Repo B becomes active without repainting Repo B;
 - a Repo A action completing after the UI has switched to Repo B with repository-scoped feedback;
-- `review-worker/start`, `restart-issue`, and `review-worker/restart` lightweight 202 actions each causing the required follow-up status refresh;
+- `pr-review/resume`, `restart-issue`, and `review-worker/restart` repository-scoped actions each causing the required follow-up status refresh;
 - repeated Issues status updates remaining inside the 15-second issue-plan cache and producing one deferred refresh per cache cycle rather than immediate duplicates;
 - Work Queue drawer branch choice, focus, and visibility surviving a live status refresh;
 - Back/Forward normalization through legacy Integration and Maintenance history entries;

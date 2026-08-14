@@ -4,7 +4,7 @@ import { managerHtml } from '../src/manager-review-ui.mjs';
 
 test('lightweight PR-review and restart actions schedule a follow-up repository status sync', () => {
   const html = managerHtml();
-  for (const action of ['review-worker/start', 'review-worker/restart', 'restart-issue']) {
+  for (const action of ['restart-issue']) {
     assert.match(html, new RegExp(action.replace('/', '\\/')));
   }
   assert.match(html, /lightweightActions\.has\(action\) && !body\?\.status/);

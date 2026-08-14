@@ -266,11 +266,22 @@ function codingDetails(run, lifecycle, config) {
   const completedAt = firstLifecycleAt(lifecycle, ['pr-review-queued'])
     || firstLifecycleMatching(lifecycle, /coding completed|pr-review-queued|draft pr|pull request.*opened/i);
   const phase = String(run.phase || '');
-  const status = completedAt
-    ? 'Completed'
-    : startedAt || phase === 'coding'
-      ? 'In progress'
-      : 'Waiting for coding agent';
+  const abandoned = String(run.status || '') === 'abandoned' || phase === 'abandoned';
+  const failed = ['agent-failed', 'paseo:failed', 'failed', 'launch-failed', 'automation-failed'].includes(String(run.status || ''))
+    || ['failed', 'launch-failed'].includes(phase);
+  const blocked = ['agent-blocked', 'automation-blocked'].includes(String(run.status || ''))
+    || ['blocked', 'needs-attention', 'invalid-issue'].includes(phase);
+  const status = abandoned
+    ? 'Abandoned'
+    : failed
+      ? 'Failed'
+    : blocked
+      ? 'Blocked'
+      : completedAt
+        ? 'Completed'
+        : startedAt || phase === 'coding'
+          ? 'In progress'
+          : 'Waiting for coding agent';
   return {
     model: firstString(run.coderModel, run.coding?.model, config.models?.coder),
     thinking: firstString(run.coderThinking, run.coding?.thinking, config.models?.coderThinking),
@@ -282,7 +293,15 @@ function codingDetails(run, lifecycle, config) {
     status,
     branch: firstString(run.branch),
     workspaceId: firstString(run.workspaceId),
+    failureReason: abandoned || failed || blocked ? firstString(run.reason, run.failureReason) : null,
   };
+}
+
+function recordedCoderPrompts(run = {}) {
+  const previous = (run.history || []).flatMap((attempt) => (Array.isArray(attempt?.coderPrompts) ? attempt.coderPrompts : [])
+    .map((prompt) => ({ ...prompt, attempt: prompt.attempt || attempt.attempt || null })));
+  const current = Array.isArray(run.coderPrompts) ? run.coderPrompts : [];
+  return [...previous, ...current];
 }
 
 function completionDetails(run, issue, config) {
@@ -290,14 +309,16 @@ function completionDetails(run, issue, config) {
   return {
     prNumber,
     prUrl: firstString(run.prUrl, run.pullRequestUrl, run.pullRequest?.url),
-    baseBranch: firstString(config.baseBranch),
+    baseBranch: firstString(run.baseBranch, config.baseBranch),
     mergedAt: firstString(run.mergedAt),
     mergedHeadSha: firstString(run.mergedHeadSha, run.approvedHeadSha, run.approvedCommit),
     issueClosedAt: issue.closedAt,
     issueClosureVerifiedAt: firstString(run.issueClosureVerifiedAt),
     completedAt: firstString(run.completedAt),
     finalStatus: firstString(run.status),
-    complete: Boolean(run.completedAt && (run.issueClosureVerifiedAt || issue.closedAt)),
+    complete: Boolean(run.completedAt && (run.issueClosureVerifiedAt || issue.closedAt)
+      && !['abandoned', 'agent-failed', 'paseo:failed', 'agent-blocked', 'automation-failed', 'automation-blocked', 'failed'].includes(String(run.status || ''))
+      && !['abandoned', 'failed', 'launch-failed', 'blocked', 'needs-attention', 'invalid-issue'].includes(String(run.phase || ''))),
   };
 }
 
@@ -327,6 +348,17 @@ export function managerLifecycleDetails(root, issueNumber, {
     claimed: claimedDetails(run, lifecycle, issue),
     coding: codingDetails(run, lifecycle, config),
     reviews: reviewCards(run, store, config),
+    diagnostics: {
+      baseBranch: firstString(run.baseBranch, config.baseBranch),
+      baseSha: firstString(run.baseSha),
+      baseRef: firstString(run.baseRef),
+      baseVerifiedAt: firstString(run.baseVerifiedAt),
+      coderPrompt: firstString(run.coderPrompt),
+      coderPromptRecordedAt: firstString(run.coderPromptRecordedAt),
+      coderPromptKind: firstString(run.coderPromptKind),
+      coderPrompts: recordedCoderPrompts(run),
+      lifecycle,
+    },
     completed: completionDetails(run, issue, config),
   };
 }

@@ -228,6 +228,56 @@ test('append-only lifecycle timeline preserves operator evidence for the activit
   assert.equal(item.timeline[0].evidence.action, 'skip-issue');
 });
 
+test('activity timeline omits low-level run-state changes while retaining meaningful lifecycle evidence', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 15,
+    lifecycle: [
+      { at: '2026-08-07T12:00:00.000Z', type: 'run-state-changed', source: 'state', message: 'low-level state delta' },
+      { at: '2026-08-07T12:01:00.000Z', type: 'agent-started', source: 'activity', message: 'Coder started.' },
+    ],
+  });
+  assert.deepEqual(item.timeline.map((event) => event.type), ['agent-started']);
+});
+
+test('activity and review evidence remain visible when an append-only lifecycle exists', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 151,
+    lifecycle: [{
+      at: '2026-08-07T12:02:00.000Z',
+      type: 'operator-action',
+      source: 'operator',
+      message: 'Review paused by operator.',
+    }],
+    activity: [{ type: 'agent-started', at: '2026-08-07T12:00:00.000Z', details: 'Coder started.' }],
+    events: [{ event: 'harness-review', stage: 'quick', result: 'pass', headSha: 'head1', at: '2026-08-07T12:01:00.000Z' }],
+  });
+  assert.deepEqual(item.timeline.map((event) => event.type), ['operator-action']);
+  assert.deepEqual(item.legacyTimeline.map((event) => event.type), ['harness-review', 'agent-started']);
+});
+
+test('abandoned attempts remain visible as abandoned and are not active or completed', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 16,
+    status: 'abandoned',
+    phase: 'abandoned',
+    completedAt: '2026-08-07T12:00:00.000Z',
+  }]);
+  assert.equal(queue.items[0].stage, 'abandoned');
+  assert.equal(queue.items[0].stageLabel, 'Abandoned');
+  assert.match(queue.items[0].nextAction, /abandoned/i);
+  assert.equal(queue.active, 0);
+  assert.equal(queue.attention, 1);
+});
+
+test('prior-attempt coder prompts are included in deep diagnostics', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 17,
+    history: [{ attempt: 1, coderPrompts: [{ kind: 'initial-attempt', prompt: 'prior prompt' }] }],
+    coderPrompts: [{ attempt: 2, kind: 'initial-attempt', prompt: 'current prompt' }],
+  });
+  assert.deepEqual(item.diagnostics.coderPrompts.map((prompt) => prompt.prompt), ['prior prompt', 'current prompt']);
+});
+
 test('merged and issue-closure-verified phases remain visible before terminal completion', () => {
   const merged = managerWorkQueueItem({ issueNumber: 20, phase: 'merged', mergedAt: '2026-08-09T04:00:00.000Z' });
   const verified = managerWorkQueueItem({ issueNumber: 21, phase: 'issue-closure-verified', issueClosureVerifiedAt: '2026-08-09T04:01:00.000Z' });
@@ -261,6 +311,33 @@ test('deep troubleshooting diagnostics expose recorded execution and exact-head 
   assert.equal(item.diagnostics.validationHeadSha, 'head-validation');
   assert.equal(item.diagnostics.approvedHeadSha, 'head-approved');
   assert.equal(item.diagnostics.mergedHeadSha, 'head-merged');
+});
+
+test('deep troubleshooting preserves launch base and exact coder prompt evidence', () => {
+  const item = managerWorkQueueItem({
+    issueNumber: 23,
+    phase: 'launch-failed',
+    status: PASEO_LABELS.failed,
+    baseBranch: 'openspec',
+    baseSha: 'a'.repeat(40),
+    baseRef: 'refs/remotes/origin/openspec',
+    baseVerifiedAt: '2026-08-09T04:00:00.000Z',
+    coderPrompt: 'exact prompt for attempt 1',
+    coderPromptRecordedAt: '2026-08-09T04:00:01.000Z',
+    coderPromptKind: 'initial-attempt',
+  });
+  assert.equal(item.diagnostics.baseBranch, 'openspec');
+  assert.equal(item.diagnostics.baseSha, 'a'.repeat(40));
+  assert.equal(item.diagnostics.coderPrompt, 'exact prompt for attempt 1');
+});
+
+test('newest meaningful activity sorts the work queue first with issue-number tie breaking', () => {
+  const queue = managerWorkQueue([
+    { issueNumber: 12, updatedAt: '2026-08-10T10:00:00.000Z' },
+    { issueNumber: 2, activity: [{ type: 'launch-failed', at: '2026-08-11T10:00:00.000Z', details: 'failed' }] },
+    { issueNumber: 7, updatedAt: '2026-08-11T10:00:00.000Z' },
+  ]);
+  assert.deepEqual(queue.items.map((item) => item.issueNumber), [2, 7, 12]);
 });
 
 test('deep troubleshooting joins the matching PR automation store record and latest jobs', () => {
@@ -344,7 +421,7 @@ test('completed merged issue runs remain recorded but do not count as active wor
   assert.deepEqual(queue.items[0].pullRequest, { number: 383, url: null });
 });
 
-test('queue is issue-number ordered and reports stage/attention counts', () => {
+test('queue reports stage and attention counts', () => {
   const queue = managerWorkQueue([
     { issueNumber: 12, status: PASEO_LABELS.failed },
     { issueNumber: 2, status: PASEO_LABELS.coding },

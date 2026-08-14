@@ -137,10 +137,8 @@ export const MANAGER_ISSUE_PROCESSING_FLOW_SCRIPT = String.raw`
     const copy = document.createElement('p'); copy.className = 'muted'; copy.textContent = 'Controls the complete background issue-processing loop: selecting eligible issues, respecting dependencies and capacity, and starting coding work.';
     const facts = document.createElement('dl'); facts.className = 'facts'; facts.id = 'manager-unified-issue-processing-facts';
     const actions = document.createElement('div'); actions.className = 'manager-issue-processing-actions';
-    actions.append(
-      actionButton('manager-start-issue-processing', 'Start issue processing', 'issue-processing/start'),
-      actionButton('manager-pause-issue-processing', 'Pause issue processing', 'issue-processing/pause', 'secondary'),
-      actionButton('manager-process-now', 'Process now', 'run-now', 'secondary'),
+     actions.append(
+       actionButton('manager-process-now', 'Process now', 'run-now', 'secondary'),
       actionButton('manager-recheck-dependencies', 'Recheck dependencies', 'reconcile', 'secondary'),
     );
     card.append(title, copy, facts, actions);

@@ -11,6 +11,7 @@ import {
   repairExternalRepositoryFromManager,
 } from './manager-installation.mjs';
 import { managerIssueProcessingAction } from './manager-issue-processing.mjs';
+import { managerPrReviewProcessingAction } from './manager-pr-review-processing.mjs';
 import { managerIssuePlan } from './manager-issues.mjs';
 import { managerLifecycleDetailsApiRequest } from './manager-lifecycle-details.mjs';
 import {
@@ -20,21 +21,17 @@ import {
 } from './repository-api-context.mjs';
 import { findRepository } from './repository-registry.mjs';
 import { managerRepositoryStatus } from './manager-status.mjs';
+import { loadPrReviewStore } from './pr-review-store.mjs';
 import { setupWizardApiRequest } from './setup-wizard/api.mjs';
 import { loadConfig } from './state.mjs';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function reviewWorkerAction(reviewWorkerManager, context, pathname) {
-  const workerRoute = [
-    '/api/review-worker/start',
-    '/api/review-worker/stop',
-    '/api/review-worker/restart',
-  ].includes(pathname);
-  if (!workerRoute) return null;
+  if (pathname !== '/api/review-worker/restart') return null;
   if (!reviewWorkerManager) throw new Error('The standalone manager PR-review worker pool is unavailable.');
-  if (pathname === '/api/review-worker/start') return reviewWorkerManager.start(context.repository);
-  if (pathname === '/api/review-worker/stop') return reviewWorkerManager.stop(context.repository.id);
+  const store = loadPrReviewStore(context.root);
+  if (store.config.reviewQueue.paused) return reviewWorkerManager.stop(context.repository.id);
   return reviewWorkerManager.restart(context.repository);
 }
 
@@ -138,6 +135,19 @@ function installationResult(context, options, handler, dependencyKey) {
   return refreshedResult(context, options, result);
 }
 
+function retiredReviewWorkerLifecycleRoute(pathname) {
+  const authoritativePath = pathname === '/api/review-worker/start'
+    ? '/api/pr-review/resume'
+    : '/api/pr-review/pause';
+  return {
+    handled: true,
+    status: 410,
+    body: {
+      error: `The legacy PR-review worker lifecycle route is retired. Use ${authoritativePath} instead.`,
+    },
+  };
+}
+
 export function managerApiRequest({ method, pathname, body = {} }, options = {}) {
   const setup = setupWizardApiRequest({ method, pathname, body }, options);
   if (setup.handled) return setup;
@@ -215,9 +225,23 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     });
     if (issueProcessingResult !== null) return refreshedResult(context, options, issueProcessingResult);
 
+    const prReviewProcessingResult = (options.prReviewProcessingHandler || managerPrReviewProcessingAction)({
+      root: context.root,
+      repository: context.repository,
+      pathname: context.pathname,
+      reviewWorkerManager: options.reviewWorkerManager,
+      actionHandler,
+      actions: options.actions,
+    });
+    if (prReviewProcessingResult !== null) return refreshedResult(context, options, prReviewProcessingResult);
+
+    if (context.pathname === '/api/review-worker/start' || context.pathname === '/api/review-worker/stop') {
+      return retiredReviewWorkerLifecycleRoute(context.pathname);
+    }
+
     const reviewResult = reviewWorkerAction(options.reviewWorkerManager, context, context.pathname);
     if (reviewResult !== null) {
-      if (context.pathname === '/api/review-worker/start' || context.pathname === '/api/review-worker/restart') {
+      if (context.pathname === '/api/review-worker/restart') {
         return lightweightAcceptedResult(reviewResult);
       }
       return refreshedResult(context, options, reviewResult);

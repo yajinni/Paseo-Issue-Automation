@@ -15,6 +15,7 @@ const LIFECYCLE_META = Object.freeze({
   [PASEO_LABELS.reviewFailed]: ['review-failed', 'Review failed'],
   [PASEO_LABELS.failed]: ['failed', 'Failed'],
   [PASEO_LABELS.needsAttention]: ['needs-attention', 'Needs attention'],
+  abandoned: ['abandoned', 'Abandoned'],
 });
 
 const PHASE_META = Object.freeze({
@@ -28,12 +29,15 @@ const PHASE_META = Object.freeze({
   'launch-reconciliation-needed': ['needs-attention', 'Launch needs attention'],
   'review-queued': ['review-queued', 'PR Review Queued'],
   reviewing: ['reviewing', 'Reviewing'],
+  'reviewing-light-permission': ['reviewing', 'Reviewing (permission pending)'],
+  'reviewing-heavy-permission': ['reviewing', 'Reviewing (permission pending)'],
   review: ['reviewing', 'Reviewing'],
   'changes-requested': ['changes-requested', 'Changes requested'],
   fixing: ['fixing', 'Fixing'],
   'review-failed': ['review-failed', 'Review failed'],
   failed: ['failed', 'Failed'],
   'launch-failed': ['failed', 'Failed'],
+  abandoned: ['abandoned', 'Abandoned'],
   'invalid-issue': ['needs-attention', 'Needs attention'],
   merged: ['merged', 'Merged'],
   'issue-closure-verified': ['closure-verified', 'Issue Closure Verified'],
@@ -50,6 +54,9 @@ function lifecycleForRun(run = {}) {
 
 function stageForRun(run = {}) {
   const phase = String(run.phase || '').trim();
+  if (String(run.status || '') === 'abandoned' || phase === 'abandoned') {
+    return { id: 'abandoned', label: 'Abandoned', waiting: false };
+  }
   if (PHASE_META[phase]) {
     const [id, label] = PHASE_META[phase];
     return { id, label, waiting: id === 'waiting' };
@@ -121,29 +128,12 @@ function lifecycleEvidenceDetail(event = {}) {
   const evidence = event.evidence && typeof event.evidence === 'object' ? event.evidence : {};
   const facts = Object.entries(evidence)
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
-    .map(([key, value]) => `${key}=${String(value)}`);
+    .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : String(value)}`);
   if (!facts.length) return message;
   return [message, facts.join(' · ')].filter(Boolean).join('\n');
 }
 
-function timelineFromRun(run = {}) {
-  if (Array.isArray(run.lifecycle) && run.lifecycle.length) {
-    return run.lifecycle
-      .map((event) => ({
-        id: event.id || null,
-        type: firstString(event.type) || 'lifecycle',
-        at: eventTimestamp(event),
-        detail: lifecycleEvidenceDetail(event),
-        source: firstString(event.source) || 'lifecycle',
-        status: firstString(event.status),
-        attempt: firstNumber(event.attempt),
-        evidence: event.evidence && typeof event.evidence === 'object' ? event.evidence : {},
-      }))
-      .filter((entry) => entry.at || entry.detail)
-      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
-      .slice(0, 100);
-  }
-
+function legacyTimelineFromRun(run = {}) {
   const entries = [];
   for (const event of run.activity || []) {
     entries.push({
@@ -178,6 +168,51 @@ function timelineFromRun(run = {}) {
     .filter((entry) => entry.at || entry.detail)
     .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
     .slice(0, 50);
+}
+
+function timelineEntryKey(entry = {}) {
+  return [entry.type, entry.at, entry.detail, entry.source].map((value) => String(value || '')).join('\u0000');
+}
+
+function lifecycleTimelineFromRun(run = {}) {
+  return (run.lifecycle || [])
+    .filter((event) => !(String(event?.source || '') === 'state' && String(event?.type || '') === 'run-state-changed'))
+    .map((event) => ({
+      id: event.id || null,
+      type: firstString(event.type) || 'lifecycle',
+      at: eventTimestamp(event),
+      detail: lifecycleEvidenceDetail(event),
+      source: firstString(event.source) || 'lifecycle',
+      status: firstString(event.status),
+      attempt: firstNumber(event.attempt),
+      evidence: event.evidence && typeof event.evidence === 'object' ? event.evidence : {},
+    }))
+    .filter((entry) => entry.at || entry.detail)
+    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+    .slice(0, 100);
+}
+
+function timelineFromRun(run = {}) {
+  return Array.isArray(run.lifecycle) && run.lifecycle.length
+    ? lifecycleTimelineFromRun(run)
+    : legacyTimelineFromRun(run);
+}
+
+function legacyTimelineExtrasFromRun(run = {}) {
+  if (!Array.isArray(run.lifecycle) || !run.lifecycle.length) return [];
+  const known = new Set(lifecycleTimelineFromRun(run).map(timelineEntryKey));
+  return legacyTimelineFromRun(run).filter((entry) => !known.has(timelineEntryKey(entry)));
+}
+
+function latestActivityAt(run = {}) {
+  const timestamps = [
+    run.updatedAt, run.heartbeatAt, run.completedAt, run.startedAt,
+    ...(run.lifecycle || []).map(eventTimestamp),
+    ...(run.activity || []).map(eventTimestamp),
+    ...(run.events || []).map(eventTimestamp),
+    ...(run.history || []).flatMap((attempt) => [attempt.completedAt, attempt.startedAt]),
+  ].filter(Boolean).map((value) => String(value));
+  return timestamps.sort().at(-1) || null;
 }
 
 function latestReviewEvent(run = {}) {
@@ -356,6 +391,7 @@ function nextAction(stage, run = {}) {
     fixing: 'Requested review changes are being fixed.',
     'review-failed': 'Review needs operator attention before it can continue.',
     failed: 'Coding automation needs recovery.',
+    abandoned: 'This recorded attempt was abandoned by the operator.',
     'needs-attention': 'Operator attention is required.',
     completed: 'Automation is complete for this recorded run.',
     unknown: 'Open Details to inspect the recorded run state.',
@@ -372,6 +408,8 @@ function codingFromRun(run = {}, config = {}) {
 }
 
 function diagnosticsFromRun(run = {}) {
+  const priorPrompts = (run.history || []).flatMap((attempt) => (Array.isArray(attempt?.coderPrompts) ? attempt.coderPrompts : [])
+    .map((prompt) => ({ ...prompt, attempt: prompt.attempt || attempt.attempt || null })));
   return {
     rawStatus: firstString(run.status),
     phase: firstString(run.phase),
@@ -392,6 +430,14 @@ function diagnosticsFromRun(run = {}) {
     mergedHeadSha: firstString(run.mergedHeadSha),
     mergedAt: firstString(run.mergedAt),
     issueClosureVerifiedAt: firstString(run.issueClosureVerifiedAt),
+    baseBranch: firstString(run.baseBranch),
+    baseSha: firstString(run.baseSha),
+    baseRef: firstString(run.baseRef),
+    baseVerifiedAt: firstString(run.baseVerifiedAt),
+    coderPrompt: firstString(run.coderPrompt),
+    coderPromptRecordedAt: firstString(run.coderPromptRecordedAt),
+    coderPromptKind: firstString(run.coderPromptKind),
+    coderPrompts: [...priorPrompts, ...(Array.isArray(run.coderPrompts) ? run.coderPrompts : [])],
   };
 }
 
@@ -412,7 +458,7 @@ export function managerWorkQueueItem(run = {}, config = {}, prReviewStore = null
     attempt: firstNumber(run.attempt),
     workspaceId: firstString(run.workspaceId),
     startedAt: firstString(run.startedAt),
-    updatedAt: firstString(run.updatedAt, run.heartbeatAt, run.startedAt),
+     updatedAt: firstString(latestActivityAt(run), run.updatedAt, run.heartbeatAt, run.startedAt),
     completedAt: firstString(run.completedAt),
     reason: firstString(run.reason),
     nextAction: nextAction(stage, run),
@@ -421,6 +467,7 @@ export function managerWorkQueueItem(run = {}, config = {}, prReviewStore = null
     review: reviewFromRun(run, config),
     timeline: timelineFromRun(run),
     lifecycle: Array.isArray(run.lifecycle) ? run.lifecycle : [],
+    legacyTimeline: legacyTimelineExtrasFromRun(run),
     diagnostics: diagnosticsFromRun(run),
     reviewAutomation: prAutomationFromStore(run, prReviewStore),
   };
@@ -437,12 +484,13 @@ export function managerWorkQueue(runs = [], config = {}, prReviewStore = null) {
     .filter(Boolean)
     .map((run) => managerWorkQueueItem(run, config, prReviewStore))
     .filter((item) => item.issueNumber)
-    .sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber));
+     .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+       || Number(a.issueNumber) - Number(b.issueNumber));
   return {
     items,
     counts: stageCounts(items),
     total: items.length,
-    active: items.filter((item) => !['completed', 'failed', 'review-failed', 'needs-attention', 'ready', 'waiting'].includes(item.stage)).length,
-    attention: items.filter((item) => ['failed', 'review-failed', 'needs-attention'].includes(item.stage)).length,
+    active: items.filter((item) => !['completed', 'failed', 'abandoned', 'review-failed', 'needs-attention', 'ready', 'waiting'].includes(item.stage)).length,
+    attention: items.filter((item) => ['failed', 'abandoned', 'review-failed', 'needs-attention'].includes(item.stage)).length,
   };
 }

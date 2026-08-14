@@ -240,6 +240,15 @@ function fakeManagerApi() {
         await json(route, { status: { libraryInstalled: true, chromiumInstalled: true, conversationUrl: null } });
         return;
       }
+      if (method === 'GET' && action === 'configuration/branches') {
+        await json(route, {
+          repository: current.repository.repository,
+          recommendedBranch: 'main',
+          branches: ['main', 'draft-refresh', 'draft-newer', 'typed-after-refresh-started', 'saved-in-repo-a']
+            .map((name) => ({ name, recommended: name === 'main' })),
+        });
+        return;
+      }
       if (method === 'GET' && action === 'issues-plan') {
         const item = workItem(repositoryId);
         await json(route, {
@@ -267,7 +276,11 @@ function fakeManagerApi() {
         await json(route, { status: clone(current), result: { saved: true } });
         return;
       }
-      if (method === 'POST' && ['run-now', 'review-worker/start', 'review-worker/restart', 'restart-issue'].includes(action)) {
+      if (method === 'POST' && action === 'pr-review/resume') {
+        await json(route, { result: { ok: true }, status: clone(current) });
+        return;
+      }
+      if (method === 'POST' && ['run-now', 'review-worker/restart', 'restart-issue'].includes(action)) {
         await json(route, { result: { ok: true } }, 202);
         return;
       }
@@ -313,7 +326,7 @@ test('manager browser smoke covers refresh save repository-switch drawer and leg
     await page.locator('[data-manager-view-target="configuration"]').click();
     await page.locator('.manager-config-tab[data-config-tab="repository"]').click();
     const baseBranch = page.locator('#base-branch');
-    await baseBranch.fill('draft-refresh');
+    await baseBranch.selectOption('draft-refresh');
 
     const refreshDelay = api.armDelay('GET', '/api/repositories/repo-a/status');
     await page.locator('#refresh-button').click();
@@ -326,7 +339,7 @@ test('manager browser smoke covers refresh save repository-switch drawer and leg
     const saveDelay = api.armDelay('POST', '/api/repositories/repo-a/config');
     await page.locator('#manager-config-save').click();
     await saveDelay.seen;
-    await baseBranch.fill('draft-newer');
+    await baseBranch.selectOption('draft-newer');
     saveDelay.release();
     await saveDelay.done;
     await page.locator('.manager-toast.success').last().waitFor();
@@ -344,15 +357,20 @@ test('manager browser smoke covers refresh save repository-switch drawer and leg
     await page.waitForFunction(() => [...document.querySelectorAll('.manager-toast.success')].some((item) => /previously selected repository/i.test(item.textContent)));
 
     await page.locator('[data-manager-view-target="work-queue"]').click();
-    await page.locator('[data-work-details="true"]').first().click();
-    const branchChoice = page.locator('#work-detail-branch-action');
+    await page.locator('.lifecycle-chevron').first().click();
+    await page.locator('[data-actions-toggle="true"]').first().click();
+    const branchChoice = page.locator('#branch-action');
     await branchChoice.selectOption('delete');
     await branchChoice.focus();
+    await page.locator('[data-work-details="true"]').first().click();
     const updatedRepoB = clone(api.statuses.get('repo-b'));
     updatedRepoB.workQueue.items[0].reason = 'Updated while drawer remained open';
     await page.evaluate((status) => window.renderStatus(status), updatedRepoB);
-    assert.equal(await branchChoice.inputValue(), 'delete');
-    assert.equal(await page.evaluate(() => document.activeElement?.id), 'work-detail-branch-action');
+    const refreshedBranchChoice = page.locator('#branch-action');
+    await refreshedBranchChoice.selectOption('delete');
+    await refreshedBranchChoice.focus();
+    assert.equal(await refreshedBranchChoice.inputValue(), 'delete');
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'branch-action');
     assert.equal(await page.locator('#work-detail-drawer').isVisible(), true);
 
     await page.goto(`${ORIGIN}/?view=integration`);
@@ -380,7 +398,7 @@ test('manager browser smoke covers remaining request-order refresh history and l
     const cleanRefreshDelay = api.armDelay('GET', '/api/repositories/repo-a/status');
     await page.evaluate(() => { window.__smokeRefresh = window.loadStatus(); });
     await cleanRefreshDelay.seen;
-    await baseBranch.fill('typed-after-refresh-started');
+    await baseBranch.selectOption('typed-after-refresh-started');
     cleanRefreshDelay.release();
     await cleanRefreshDelay.done;
     await page.evaluate(() => window.__smokeRefresh);
@@ -404,7 +422,7 @@ test('manager browser smoke covers remaining request-order refresh history and l
     await page.locator('[data-manager-view-target="configuration"]').click();
     await page.locator('.manager-config-tab[data-config-tab="repository"]').click();
     baseBranch = page.locator('#base-branch');
-    await baseBranch.fill('saved-in-repo-a');
+    await baseBranch.selectOption('saved-in-repo-a');
     const saveSwitchDelay = api.armDelay('POST', '/api/repositories/repo-a/config');
     await page.locator('#manager-config-save').click();
     await saveSwitchDelay.seen;
@@ -418,14 +436,20 @@ test('manager browser smoke covers remaining request-order refresh history and l
 
     const statusPath = '/api/repositories/repo-b/status';
     for (const [action, payload] of [
-      ['review-worker/start', null],
+      ['pr-review/resume', null],
       ['restart-issue', { issueNumber: 201, branchAction: 'keep' }],
       ['review-worker/restart', null],
     ]) {
       const before = api.countFor('GET', statusPath);
       const body = await page.evaluate(({ action: name, payload: bodyPayload }) => window.postRepositoryAction(name, bodyPayload), { action, payload });
       assert.equal(body.result.ok, true);
-      await waitForRequestCount(api, 'GET', statusPath, before + 1);
+      if (action === 'pr-review/resume') {
+        assert.equal(body.status.repository.id, 'repo-b');
+        await page.waitForTimeout(50);
+        assert.equal(api.countFor('GET', statusPath), before);
+      } else {
+        await waitForRequestCount(api, 'GET', statusPath, before + 1);
+      }
     }
 
     await page.locator('[data-manager-view-target="automation"]').click();

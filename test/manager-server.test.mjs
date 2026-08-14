@@ -7,7 +7,7 @@ import test from 'node:test';
 import { dispatchCli } from '../src/entrypoint.mjs';
 import { managerApiRequest } from '../src/manager-api.mjs';
 import { managerHtml } from '../src/manager-review-ui.mjs';
-import { startConfiguredCodingWorkers } from '../src/manager-server.mjs';
+import { startConfiguredCodingWorkers, startConfiguredReviewWorkers } from '../src/manager-server.mjs';
 import { addRepository } from '../src/repository-registry.mjs';
 import { loadConfig, saveConfig, saveRuntime } from '../src/state.mjs';
 
@@ -47,6 +47,39 @@ test('configured repositories automatically start coding workers while incomplet
   assert.equal(result.started.length, 1);
   assert.equal(result.started[0].state, 'idle');
   assert.deepEqual(result.errors, []);
+});
+
+test('configured review workers restore only the persisted running lifecycle state', () => {
+  const calls = [];
+  const repositories = [
+    { id: 'running', path: '/running', repository: 'yajinni/Running' },
+    { id: 'stopped', path: '/stopped', repository: 'yajinni/Stopped' },
+  ];
+  const result = startConfiguredReviewWorkers({
+    start(repository) { calls.push(repository.id); return { repositoryId: repository.id, running: true }; },
+  }, {
+    rootDir: '/manager',
+    repositoryLister: () => repositories,
+    configLoader: () => ({ setupComplete: true }),
+    reviewStoreLoader: (root) => ({ config: { reviewQueue: { paused: root === '/stopped' } } }),
+  });
+  assert.deepEqual(calls, ['running']);
+  assert.equal(result.started.length, 1);
+  assert.deepEqual(result.errors, []);
+});
+
+test('configured review workers restore legacy enabled state when no queue state was persisted', () => {
+  const calls = [];
+  const result = startConfiguredReviewWorkers({
+    start(repository) { calls.push(repository.id); return { repositoryId: repository.id, running: true }; },
+  }, {
+    rootDir: '/manager',
+    repositoryLister: () => [{ id: 'legacy', path: '/legacy' }],
+    configLoader: () => ({ setupComplete: true }),
+    reviewStoreLoader: () => ({ config: { enabled: true, browserReview: { enabled: true } } }),
+  });
+  assert.deepEqual(calls, ['legacy']);
+  assert.equal(result.started.length, 1);
 });
 
 test('manager API keeps coding worker lifecycle internal while PR review worker controls remain repository scoped', () => {
@@ -113,10 +146,9 @@ test('manager API keeps coding worker lifecycle internal while PR review worker 
     method: 'POST',
     pathname: `/api/repositories/${encodeURIComponent(repository.id)}/review-worker/start`,
   }, { rootDir, workerManager, reviewWorkerManager });
-  assert.equal(reviewStart.status, 202);
-  assert.equal(reviewStart.body.result.running, true);
-  assert.equal(reviewStart.body.status, undefined);
-  assert.deepEqual(reviewCalls[0], ['start', repository.id, repositoryRoot]);
+  assert.equal(reviewStart.status, 410);
+  assert.match(reviewStart.body.error, /\/api\/pr-review\/resume/);
+  assert.deepEqual(reviewCalls, []);
 
   const calls = [];
   const mutation = managerApiRequest({
@@ -155,8 +187,7 @@ test('manager UI exposes coding status without coding lifecycle controls and lea
   assert.doesNotMatch(html, /data-action="worker\/start"/);
   assert.doesNotMatch(html, /data-action="worker\/stop"/);
   assert.doesNotMatch(html, /data-action="worker\/restart"/);
-  assert.match(html, /data-action="review-worker\/start"/);
-  assert.match(html, /data-action="review-worker\/stop"/);
+  assert.doesNotMatch(html, /data-action="review-worker\/(start|stop|restart)"/);
   assert.match(html, /data-issue-action="start-issue"/);
   assert.match(html, /machine-global serial browser lease/);
   assert.match(html, /\/api\/repositories\//);

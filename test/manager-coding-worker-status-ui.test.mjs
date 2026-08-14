@@ -27,8 +27,8 @@ test('overview exposes Issue Claiming and PR Reviews as Enabled or Stopped icon 
   assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /label: 'PR Reviews'/);
   assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /enabled \? 'Enabled' : 'Stopped'/);
   assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /button\.textContent = enabled \? '■' : '▶'/);
-  assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /startAction: 'resume'/);
-  assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /stopAction: 'pause'/);
+  assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /startAction: 'issue-processing\/start'/);
+  assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /stopAction: 'issue-processing\/pause'/);
   assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /startAction: 'pr-review\/resume'/);
   assert.match(MANAGER_CODING_WORKER_STATUS_SCRIPT, /stopAction: 'pr-review\/pause'/);
   assert.match(MANAGER_CODING_WORKER_STATUS_STYLE, /overview-metric-action/);

@@ -1,8 +1,6 @@
 import { managerHtml as concurrencyManagerHtml } from './manager-concurrency-ui.mjs';
 
-const REVIEW_BUTTONS = `        <button class="repository-action" data-action="review-worker/start">Start PR-review worker</button>
-        <button class="repository-action danger" data-action="review-worker/stop">Stop PR-review worker</button>
-        <button class="repository-action secondary" data-action="review-worker/restart">Restart PR-review worker</button>`;
+const REVIEW_BUTTONS = '';
 
 const REVIEW_FACTS = `    ['Coding worker', data.worker && data.worker.state === 'active' ? 'Active' : 'Idle'],
     ['PR-review worker', data.reviewWorker && data.reviewWorker.running ? 'Running' : 'Stopped'],
@@ -14,7 +12,7 @@ const REVIEW_FACTS = `    ['Coding worker', data.worker && data.worker.state ===
 
 const LIGHTWEIGHT_ACTION_STATUS_SCRIPT = `<script>
 (function managerLightweightActionStatusSync() {
-  const lightweightActions = new Set(['review-worker/start', 'review-worker/restart', 'restart-issue']);
+   const lightweightActions = new Set(['restart-issue', 'review-worker/restart']);
   const configForm = document.getElementById('config-form');
   const repositorySelect = document.getElementById('repository-select');
   let configDraftRepositoryId = null;

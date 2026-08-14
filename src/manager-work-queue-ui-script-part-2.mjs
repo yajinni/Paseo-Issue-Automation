@@ -140,7 +140,9 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_2 = String.raw`    const patterns = 
     if (search.includes('reviewing') || search.includes('review started')) return (item.review?.label || 'Review') + ' started.';
     if (search.includes('pr-merged')) return 'PR' + (item.pullRequest?.number ? ' #' + item.pullRequest.number : '') + ' merged.';
     if (search.includes('closure verified') || search.includes('issueclosureverified')) return 'Issue closure verified.';
-    if (search.includes('completed') && type === 'run-state-changed') return 'Issue lifecycle completed.';
+    if (search.includes('abandoned')) return 'Attempt ' + (event.attempt || '?') + ' abandoned: ' + (firstLine(event.detail) || 'The recorded lifecycle attempt was abandoned.');
+    if (search.includes('failed') || search.includes('launch-failed')) return 'Attempt ' + (event.attempt || '?') + ' failed: ' + (firstLine(event.detail) || 'The recorded lifecycle attempt failed.');
+     if (search.includes('completed') && type === 'run-state-changed' && !/failed|blocked|launch-failed/i.test(search)) return 'Issue lifecycle completed.';
     return firstLine(event.detail) || type.replaceAll('-', ' ').replace(/\b\w/g, function(letter) { return letter.toUpperCase(); });
   }
 
@@ -162,7 +164,12 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_2 = String.raw`    const patterns = 
     const list = document.createElement('div'); list.className = 'activity-timeline';
     const events = timelineAscending(item).slice(-18);
     if (!events.length) { const empty = document.createElement('div'); empty.className = 'activity-empty'; empty.textContent = 'No activity has been recorded for this issue yet.'; list.append(empty); }
-    for (const event of events) {
+     let previousAttempt = null;
+     for (const event of events) {
+       if (event.attempt && event.attempt !== previousAttempt) {
+         const attempt = document.createElement('div'); attempt.className = 'activity-attempt-heading'; attempt.textContent = 'Attempt ' + event.attempt; list.append(attempt);
+         previousAttempt = event.attempt;
+       }
       const row = document.createElement('div');
       const failed = /failed|error/i.test(String(event.status || '') + ' ' + String(event.detail || ''));
       const operator = String(event.source || '').toLowerCase() === 'operator';

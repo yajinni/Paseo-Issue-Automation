@@ -102,7 +102,11 @@ export function retryIssuePullRequestReview(root, issueNumber, {
   const issue = positiveNumber(issueNumber, 'issueNumber');
   const pr = currentPullRequestNumber(root, issue, pullRequestNumber, runLoader);
   const store = loadStore(root);
-  if (store.config?.enabled !== true || store.config?.browserReview?.enabled !== true) {
+  const reviewQueueConfigured = Object.hasOwn(store.config || {}, 'reviewQueue');
+  const lifecycleRunning = reviewQueueConfigured
+    ? store.config?.reviewQueue?.paused === false
+    : store.config?.enabled === true;
+  if (!lifecycleRunning || store.config?.browserReview?.enabled !== true) {
     throw new Error('Web ChatGPT PR-review automation is not enabled for this repository.');
   }
   const managed = managedForIssue(store, issue, pr);

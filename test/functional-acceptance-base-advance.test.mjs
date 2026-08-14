@@ -175,6 +175,12 @@ const args = process.argv.slice(2);
 appendFileSync(path.join(fixture, 'commands.log'), JSON.stringify({ command: 'paseo', args, cwd: process.cwd() }) + '\\n');
 const output = (value) => process.stdout.write(JSON.stringify(value));
 const arg = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : null; };
+const workspaceBase = (value) => {
+  const base = String(value || '');
+  return /^[0-9a-f]{40}$/i.test(base) || base.startsWith('origin/') || base.startsWith('refs/')
+    ? base
+    : 'origin/' + base;
+};
 const workspaceFile = path.join(fixture, 'workspace.json');
 const prFile = path.join(fixture, 'pr.json');
 if (args[0] === 'workspace' && args[1] === 'create') {
@@ -183,7 +189,7 @@ if (args[0] === 'workspace' && args[1] === 'create') {
   const base = arg('--base');
   const title = arg('--title');
   const worktree = path.join(fixture, 'worktree');
-  execFileSync('git', ['worktree', 'add', '--quiet', '-b', branch, worktree, 'origin/' + base], { cwd: repositoryRoot, stdio: 'pipe' });
+  execFileSync('git', ['worktree', 'add', '--quiet', '-b', branch, worktree, workspaceBase(base)], { cwd: repositoryRoot, stdio: 'pipe' });
   const workspace = { workspaceId: 'workspace-1', cwd: worktree, title, branch };
   writeFileSync(workspaceFile, JSON.stringify(workspace, null, 2));
   output(workspace);

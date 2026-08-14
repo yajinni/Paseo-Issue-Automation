@@ -21,15 +21,17 @@ function baseConfig(models = {}) {
   };
 }
 
-test('settings expose an opt-in automatic ChatGPT PR review toggle', () => {
+test('settings show review configuration without adding a second lifecycle switch', () => {
   const html = dashboardHtml();
   assert.match(html, /Automatic PR Review With ChatGPT/);
   assert.match(html, /id=\"automatic-pr-review-enabled\"/);
   assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /grid\.hidden = true/);
   assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /projectSettingsCard/);
   assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /browserSettingsCard/);
-  assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /master\.value = String\(enabled\)/);
-  assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /browser\.value = String\(enabled\)/);
+  assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /aria-readonly="true" disabled/);
+  assert.match(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /Overview controls/);
+  assert.doesNotMatch(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /master\.value = String\(enabled\)/);
+  assert.doesNotMatch(PR_REVIEW_SETTINGS_TOGGLE_SCRIPT, /setAutomaticPrReview/);
 });
 
 test('dashboard cleanup renames Issues Map and removes redundant actions', () => {

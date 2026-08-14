@@ -42,6 +42,15 @@ export function structuredReviewSchemaFailureDetail(error) {
   return null;
 }
 
+export function structuredReviewPermissionWaitDetail(error) {
+  if (!error) return null;
+  const command = text(error.command).toLowerCase();
+  if (command && command !== 'paseo') return null;
+  const output = [error.stderr, error.stdout, error.message].map(text).filter(Boolean).join('\n');
+  if (!/OUTPUT_SCHEMA_FAILED/i.test(output) || !/waiting for permission/i.test(output)) return null;
+  return 'Reviewer is waiting for permission before producing structured output.';
+}
+
 export function reviewRequestIdentity({
   issueNumber,
   pullRequestNumber,
@@ -70,6 +79,7 @@ export function runStructuredReviewWithRetry({
   expectedHeadSha,
   requestId,
   onRetry = () => {},
+  onPermissionWait = () => {},
   onStale = () => {},
   onExhausted = () => {},
 } = {}) {
@@ -89,6 +99,23 @@ export function runStructuredReviewWithRetry({
         stale: false,
       };
     } catch (error) {
+      const permissionWait = structuredReviewPermissionWaitDetail(error);
+      if (permissionWait) {
+        onPermissionWait({
+          attempt,
+          requestId: identity,
+          expectedHeadSha: expected,
+          detail: permissionWait,
+        });
+        return {
+          review: null,
+          attempts: attempt,
+          requestId: identity,
+          pending: true,
+          permissionWait: true,
+          schemaError: permissionWait,
+        };
+      }
       const detail = structuredReviewSchemaFailureDetail(error);
       if (!detail) throw error;
 

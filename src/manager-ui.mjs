@@ -25,7 +25,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0a111b;border-radius
     <div><h1>Paseo Repository Manager</h1><div class="muted">One standalone controller, isolated state and controls for every registered repository.</div></div>
     <div class="toolbar">
       <label for="repository-select" class="muted">Repository</label>
-      <select id="repository-select" aria-label="Active repository"><option value="">No repositories registered</option></select>
+      <select id="repository-select" aria-label="Active repository"><option value="">Loading repositories...</option></select>
       <button class="secondary" id="refresh-button">Refresh</button>
     </div>
   </div>

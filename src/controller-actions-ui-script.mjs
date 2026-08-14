@@ -61,7 +61,7 @@ export const CONTROLLER_ACTIONS_UI_SCRIPT = String.raw`
     }
 
     if (reviewToggle) {
-      const enabled = data && data.config ? data.config.enabled === true : null;
+      const enabled = data && data.config ? data.config.browserReview?.enabled === true : null;
       const paused = data && data.config && data.config.reviewQueue
         ? data.config.reviewQueue.paused === true
         : null;

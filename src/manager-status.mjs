@@ -18,6 +18,7 @@ import {
   loadIntegration,
   loadIssueLifecycle,
   loadRuntime,
+  listLifecycleIssueNumbers,
   statePaths,
 } from './state.mjs';
 import { run } from './process.mjs';
@@ -44,7 +45,7 @@ export function managerPrReviewSummary(root, { loadStore = loadPrReviewStore } =
     const store = loadStore(root);
     return {
       available: true,
-      enabled: store.config?.enabled === true,
+      enabled: store.config?.reviewQueue?.paused === false,
       browserReviewEnabled: store.config?.browserReview?.enabled === true,
       queuePaused: store.config?.reviewQueue?.paused !== false,
       waitingReviewCount: (store.reviewJobs || []).filter((job) => job?.state === 'queued').length,
@@ -84,10 +85,27 @@ export function managerRepositoryStatus(repository, {
   const migrationAdoption = controllerMode === CONTROLLER_MODES.embedded
     ? inspectExternalMigrationAdoption(inspected.path, { runner })
     : null;
-  const runs = listRuns(inspected.path).map((item) => ({
+  const recordedRuns = listRuns(inspected.path);
+  const runNumbers = new Set(recordedRuns.map((item) => Number(item.issueNumber)));
+  const lifecycleOnlyRuns = listLifecycleIssueNumbers(inspected.path)
+    .filter((issueNumber) => !runNumbers.has(issueNumber))
+    .map((issueNumber) => {
+      const lifecycle = loadIssueLifecycle(inspected.path, issueNumber, { limit: 250 });
+      const latest = lifecycle.at(-1) || {};
+      return {
+        issueNumber,
+        issueTitle: `Issue #${issueNumber}`,
+        status: latest.status === 'failed' ? 'paseo:failed' : null,
+        phase: latest.evidence?.phase || null,
+        reason: latest.status === 'failed' ? latest.message : null,
+        updatedAt: latest.at || null,
+        lifecycle,
+      };
+    });
+  const runs = [...recordedRuns.map((item) => ({
     ...item,
     lifecycle: loadIssueLifecycle(inspected.path, item.issueNumber, { limit: 250 }),
-  }));
+  })), ...lifecycleOnlyRuns];
   let prReviewStore = null;
   try { prReviewStore = loadPrReviewStore(inspected.path); } catch {}
   const prHealth = managerPrHealthSummary(runs, prReviewStore, {
@@ -99,9 +117,13 @@ export function managerRepositoryStatus(repository, {
     prHealth,
     reviewEvidence,
   };
-  const activeRuns = runs.filter((item) =>
-    !['human-review', 'automation-failed', 'automation-blocked', 'completed', 'merged', 'closed'].includes(String(item?.status || '')),
-  );
+  const activeRuns = runs.filter((item) => {
+    const status = String(item?.status || '');
+    const phase = String(item?.phase || '');
+    return !['abandoned', 'agent-blocked', 'agent-failed', 'automation-failed', 'automation-blocked',
+      'human-review', 'paseo:failed', 'paseo:needs-attention', 'paseo:review-failed', 'completed', 'merged', 'closed', 'failed'].includes(status)
+      && !['abandoned', 'blocked', 'failed', 'launch-failed', 'needs-attention'].includes(phase);
+  });
   const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const prReviews = prReviewStore

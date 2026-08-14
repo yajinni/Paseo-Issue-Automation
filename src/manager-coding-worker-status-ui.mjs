@@ -360,8 +360,8 @@ export const MANAGER_CODING_WORKER_STATUS_SCRIPT = String.raw`
     setToggleMetric('overview-claims', {
       enabled: claimsEnabled,
       label: 'Issue Claiming',
-      startAction: 'resume',
-      stopAction: 'pause',
+      startAction: 'issue-processing/start',
+      stopAction: 'issue-processing/pause',
     });
     setToggleMetric('overview-review-worker', {
       enabled: prReviewsEnabled,
