@@ -30,6 +30,20 @@ test('overview lists active issues oldest first and excludes available/terminal 
   assert.equal(result.activeIssues[0].stageLabel, 'Reviewing');
 });
 
+test('overview excludes an explicitly historical unknown record but keeps live unknown work', () => {
+  const result = managerOverviewStatus(status({
+    workQueue: {
+      items: [
+        { issueNumber: 1, title: 'Historical record', stage: 'unknown', active: false, timeline: [{ at: '2026-08-09T10:00:00.000Z' }] },
+        { issueNumber: 2, title: 'Live incomplete record', stage: 'unknown', active: true, startedAt: '2026-08-09T11:00:00.000Z' },
+      ],
+      prHealth: { byIssue: {} },
+    },
+  }));
+
+  assert.deepEqual(result.activeIssues.map((item) => item.issueNumber), [2]);
+});
+
 test('active PR uses managed PR creation time before workflow fallbacks', () => {
   const result = managerOverviewStatus(status({
     workQueue: {
@@ -94,6 +108,23 @@ test('closed-unmerged PRs are not presented as active PRs', () => {
 
   assert.deepEqual(result.activePullRequests, []);
   assert.equal(result.needsAttention[0].title, 'PR closed without merge');
+});
+
+test('terminal historical PR evidence is not presented as active work', () => {
+  const result = managerOverviewStatus(status({
+    workQueue: {
+      items: [{
+        issueNumber: 8,
+        title: 'Historical failed PR',
+        stage: 'review-failed',
+        active: false,
+        pullRequest: { number: 10, url: 'https://github.test/pull/10' },
+      }],
+      prHealth: { byIssue: {} },
+    },
+  }));
+
+  assert.deepEqual(result.activePullRequests, []);
 });
 
 test('intentional Issue Claiming and PR-review stops are omitted from Needs Attention', () => {

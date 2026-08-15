@@ -45,6 +45,75 @@ const PHASE_META = Object.freeze({
   closed: ['completed', 'Completed'],
 });
 
+const ACTIVE_STAGES = new Set([
+  'queued',
+  'coding',
+  'review-queued',
+  'reviewing',
+  'changes-requested',
+  'fixing',
+  'merged',
+  'closure-verified',
+]);
+
+const ACTIVE_PHASES = new Set([
+  'auto-merge-requested',
+  'creating-workspace',
+  'finalizing-approved-pr',
+  'manual-review-fix-queued',
+  'manual-review-merged-pending-finalization',
+  'manual-review-stale-head',
+  'recovering-completion-evidence',
+  'recovering-failed-attempt',
+  'repairing',
+  'resuming-existing-pr-controller',
+  'restarting',
+  'restart-queued',
+  'reviewing-heavy',
+  'reviewing-light',
+  'updating-from-base',
+  'verifying-workspace',
+  'waiting-for-ci',
+]);
+
+const TERMINAL_STAGES = new Set(['completed', 'failed', 'abandoned', 'review-failed', 'needs-attention']);
+
+const TERMINAL_PHASES = new Set([
+  'abandoned',
+  'blocked',
+  'failed',
+  'invalid-issue',
+  'launch-failed',
+  'needs-attention',
+  'review-attention',
+]);
+
+const TERMINAL_STATUSES = new Set([
+  'abandoned',
+  'agent-blocked',
+  'agent-failed',
+  'automation-blocked',
+  'automation-failed',
+  'blocked',
+  'closed',
+  'completed',
+  'failed',
+  'merged',
+]);
+
+const ACTIVE_REVIEW_STATES = new Set([
+  'queued',
+  'submitting',
+  'awaiting_result',
+  'awaiting-result',
+  'starting',
+  'running',
+  'reviewing',
+  'fixing',
+  'in-progress',
+  'in_progress',
+]);
+
 function lifecycleForRun(run = {}) {
   const stored = String(run.status || '').trim();
   if (isManagedLifecycleLabel(stored)) return stored;
@@ -70,6 +139,62 @@ function stageForRun(run = {}) {
   }
   if (run.completedAt) return { id: 'completed', label: 'Completed', waiting: false };
   return { id: 'unknown', label: 'Unknown', waiting: false };
+}
+
+function hasValue(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+  return typeof value === 'string' && Boolean(value.trim());
+}
+
+function hasLiveReviewEvidence(work = {}) {
+  const reviewAutomation = work.reviewAutomation && typeof work.reviewAutomation === 'object'
+    ? work.reviewAutomation
+    : {};
+  const reviewJob = reviewAutomation.latestReviewJob || {};
+  const fixJob = reviewAutomation.latestFixJob || {};
+  return ACTIVE_REVIEW_STATES.has(String(reviewJob.state || '').trim().toLowerCase())
+    || ACTIVE_REVIEW_STATES.has(String(fixJob.state || '').trim().toLowerCase())
+    || hasValue(reviewAutomation.activeReviewRequestId);
+}
+
+function hasLiveManagedEvidence(work = {}) {
+  const diagnostics = work.diagnostics && typeof work.diagnostics === 'object' ? work.diagnostics : {};
+  return [
+    work.workspaceId,
+    work.worktreePath,
+    work.coderAgentId,
+    work.agentId,
+    work.controllerPid,
+    work.pullRequestNumber,
+    work.prNumber,
+    work.pullRequest?.number,
+    diagnostics.workspaceId,
+    diagnostics.worktreePath,
+    diagnostics.coderAgentId,
+    diagnostics.controllerPid,
+  ].some(hasValue) || hasLiveReviewEvidence(work);
+}
+
+function hasLiveProcessEvidence(work = {}) {
+  const diagnostics = work.diagnostics && typeof work.diagnostics === 'object' ? work.diagnostics : {};
+  return [
+    work.controllerPid,
+    diagnostics.controllerPid,
+  ].some(hasValue) || hasLiveReviewEvidence(work);
+}
+
+export function isManagerWorkActive(work = {}) {
+  if (typeof work.active === 'boolean') return work.active;
+  const stage = String(work.stage || stageForRun(work).id);
+  const phase = String(work.phase || '').trim();
+  const status = String(work.status || '').trim();
+  if (ACTIVE_STAGES.has(stage)) return true;
+  if (TERMINAL_STAGES.has(stage) || TERMINAL_PHASES.has(phase) || TERMINAL_STATUSES.has(status)) {
+    return hasLiveProcessEvidence(work);
+  }
+  if (ACTIVE_PHASES.has(phase)) return true;
+  if (stage === 'ready' || stage === 'waiting') return false;
+  return hasLiveManagedEvidence(work);
 }
 
 function firstNumber(...values) {
@@ -445,12 +570,15 @@ export function managerWorkQueueItem(run = {}, config = {}, prReviewStore = null
   const stage = stageForRun(run);
   const lifecycleLabel = lifecycleForRun(run);
   const issueNumber = firstNumber(run.issueNumber, run.issue?.number);
+  const reviewAutomation = prAutomationFromStore(run, prReviewStore);
+  const active = isManagerWorkActive({ ...run, stage: stage.id, reviewAutomation });
   return {
     issueNumber,
     title: firstString(run.issueTitle, run.issue?.title) || (issueNumber ? `Issue #${issueNumber}` : 'Recorded issue'),
     issueUrl: firstString(run.issueUrl, run.issue?.url),
     stage: stage.id,
     stageLabel: stage.label,
+    active,
     lifecycleLabel,
     waitingForDependencies: stage.waiting,
     phase: firstString(run.phase),
@@ -469,7 +597,7 @@ export function managerWorkQueueItem(run = {}, config = {}, prReviewStore = null
     lifecycle: Array.isArray(run.lifecycle) ? run.lifecycle : [],
     legacyTimeline: legacyTimelineExtrasFromRun(run),
     diagnostics: diagnosticsFromRun(run),
-    reviewAutomation: prAutomationFromStore(run, prReviewStore),
+    reviewAutomation,
   };
 }
 
@@ -490,7 +618,7 @@ export function managerWorkQueue(runs = [], config = {}, prReviewStore = null) {
     items,
     counts: stageCounts(items),
     total: items.length,
-    active: items.filter((item) => !['completed', 'failed', 'abandoned', 'review-failed', 'needs-attention', 'ready', 'waiting'].includes(item.stage)).length,
+    active: items.filter((item) => item.active === true).length,
     attention: items.filter((item) => ['failed', 'abandoned', 'review-failed', 'needs-attention'].includes(item.stage)).length,
   };
 }

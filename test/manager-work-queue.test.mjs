@@ -269,6 +269,142 @@ test('abandoned attempts remain visible as abandoned and are not active or compl
   assert.equal(queue.attention, 1);
 });
 
+test('lifecycle-only completed skipped evidence stays visible but is historical and inactive', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 294,
+    issueTitle: 'Completed skipped issue',
+    issue: { state: 'CLOSED', stateReason: 'COMPLETED' },
+    lifecycle: [{
+      at: '2026-08-13T02:15:57.309Z',
+      type: 'operator-action',
+      source: 'operator',
+      status: 'success',
+      message: 'Skip issue completed.',
+      evidence: { action: 'skip-issue' },
+    }],
+  }]);
+
+  assert.equal(queue.items.length, 1);
+  assert.equal(queue.items[0].stage, 'unknown');
+  assert.equal(queue.items[0].active, false);
+  assert.equal(queue.items[0].timeline[0].type, 'operator-action');
+  assert.equal(queue.active, 0);
+});
+
+test('closed lifecycle-only history remains inactive without a live managed resource', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 295,
+    issue: { state: 'CLOSED', stateReason: 'COMPLETED' },
+    lifecycle: [{
+      at: '2026-08-13T02:15:57.309Z',
+      type: 'operator-action',
+      source: 'operator',
+      status: 'success',
+      message: 'Skip issue completed.',
+    }],
+  }]);
+
+  assert.equal(queue.items[0].active, false);
+  assert.equal(queue.items[0].timeline.length, 1);
+  assert.equal(queue.active, 0);
+});
+
+test('terminal failed and blocked history is inactive even when stale identifiers remain', () => {
+  const queue = managerWorkQueue([
+    {
+      issueNumber: 296,
+      status: PASEO_LABELS.failed,
+      phase: 'failed',
+      branch: 'ai/issue-296',
+      workspaceId: 'old-workspace-296',
+      completedAt: '2026-08-13T03:00:00.000Z',
+    },
+    {
+      issueNumber: 297,
+      status: PASEO_LABELS.needsAttention,
+      phase: 'blocked',
+      branch: 'ai/issue-297',
+      workspaceId: 'old-workspace-297',
+      completedAt: '2026-08-13T03:01:00.000Z',
+    },
+    {
+      issueNumber: 298,
+      phase: 'blocked',
+      workspaceId: 'old-workspace-298',
+      completedAt: '2026-08-13T03:02:00.000Z',
+    },
+  ]);
+
+  assert.deepEqual(queue.items.map((item) => item.active), [false, false, false]);
+  assert.equal(queue.active, 0);
+});
+
+test('terminal history can remain active only with a live controller or review job signal', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 299,
+    status: PASEO_LABELS.failed,
+    phase: 'failed',
+    completedAt: '2026-08-13T03:03:00.000Z',
+    controllerPid: 299,
+  }]);
+
+  assert.equal(queue.items[0].active, true);
+  assert.equal(queue.active, 1);
+});
+
+test('unknown execution metadata remains active when live managed resources are recorded', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 300,
+    workspaceId: 'workspace-300',
+    coderAgentId: 'agent-300',
+    controllerPid: 300,
+  }]);
+
+  assert.equal(queue.items[0].stage, 'unknown');
+  assert.equal(queue.items[0].active, true);
+  assert.equal(queue.active, 1);
+});
+
+test('workspace creation phase remains active before workspace identity is recorded', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 303,
+    phase: 'creating-workspace',
+    branch: 'ai/issue-303',
+    startedAt: '2026-08-13T03:04:30.000Z',
+  }]);
+
+  assert.equal(queue.items[0].active, true);
+  assert.equal(queue.active, 1);
+});
+
+test('historical lifecycle evidence remains visible after active exclusion', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 301,
+    lifecycle: [{
+      at: '2026-08-13T03:04:00.000Z',
+      type: 'operator-action',
+      source: 'operator',
+      status: 'success',
+      message: 'Issue skipped.',
+    }],
+  }]);
+
+  assert.equal(queue.active, 0);
+  assert.equal(queue.total, 1);
+  assert.match(queue.items[0].timeline[0].detail, /Issue skipped/);
+});
+
+test('unknown execution metadata stays active for a queued review job', () => {
+  const item = managerWorkQueueItem({ issueNumber: 302 }, {}, {
+    managedPullRequests: [{ id: 'managed-302', issueNumber: 302 }],
+    reviewJobs: [{ id: 'review-302', managedPullRequestId: 'managed-302', state: 'submitting' }],
+    fixJobs: [],
+  });
+
+  assert.equal(item.stage, 'unknown');
+  assert.equal(item.active, true);
+});
+
 test('prior-attempt coder prompts are included in deep diagnostics', () => {
   const item = managerWorkQueueItem({
     issueNumber: 17,
