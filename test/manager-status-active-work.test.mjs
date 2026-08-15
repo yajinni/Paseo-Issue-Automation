@@ -49,3 +49,31 @@ test('lifecycle-only skipped history is visible without inflating manager active
   assert.equal(status.workQueue.items[0].active, false);
   assert.equal(status.workQueue.items[0].timeline[0].type, 'operator-action');
 });
+
+test('removed-run lifecycle phase evidence remains historical and inactive', () => {
+  const parent = mkdtempSync(path.join(tmpdir(), 'paseo-manager-historical-phase-'));
+  const root = createRepository(parent, 'HistoricalPhase');
+  const config = loadConfig(root);
+  saveConfig(root, { ...config, setupComplete: true, baseBranch: 'main' });
+  appendIssueLifecycle(root, 303, {
+    at: '2026-08-13T02:16:57.309Z',
+    type: 'state-transition',
+    source: 'state',
+    status: 'success',
+    message: 'Historical coding phase recorded.',
+    evidence: { phase: 'coding' },
+  });
+
+  const status = managerRepositoryStatus({
+    id: 'historical-phase',
+    path: root,
+    repository: 'yajinni/HistoricalPhase',
+  });
+
+  assert.equal(status.automation.activeRunCount, 0);
+  assert.equal(status.workQueue.active, 0);
+  assert.equal(status.workQueue.items.length, 1);
+  assert.equal(status.workQueue.items[0].phase, null);
+  assert.equal(status.workQueue.items[0].active, false);
+  assert.equal(status.workQueue.items[0].timeline[0].evidence.phase, 'coding');
+});

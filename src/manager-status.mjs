@@ -96,7 +96,7 @@ export function managerRepositoryStatus(repository, {
         issueNumber,
         issueTitle: `Issue #${issueNumber}`,
         status: latest.status === 'failed' ? 'paseo:failed' : null,
-        phase: latest.evidence?.phase || null,
+        phase: null,
         reason: latest.status === 'failed' ? latest.message : null,
         updatedAt: latest.at || null,
         lifecycle,
