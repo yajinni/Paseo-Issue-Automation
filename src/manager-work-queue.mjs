@@ -167,23 +167,17 @@ function hasLiveManagedEvidence(work = {}) {
     work.worktreePath,
     work.coderAgentId,
     work.agentId,
-    work.controllerPid,
     work.pullRequestNumber,
     work.prNumber,
     work.pullRequest?.number,
     diagnostics.workspaceId,
     diagnostics.worktreePath,
     diagnostics.coderAgentId,
-    diagnostics.controllerPid,
-  ].some(hasValue) || hasLiveReviewEvidence(work);
+  ].some(hasValue) || work.controllerLive === true || hasLiveReviewEvidence(work);
 }
 
 function hasLiveProcessEvidence(work = {}) {
-  const diagnostics = work.diagnostics && typeof work.diagnostics === 'object' ? work.diagnostics : {};
-  return [
-    work.controllerPid,
-    diagnostics.controllerPid,
-  ].some(hasValue) || hasLiveReviewEvidence(work);
+  return work.controllerLive === true || hasLiveReviewEvidence(work);
 }
 
 export function isManagerWorkActive(work = {}) {
@@ -549,7 +543,7 @@ function diagnosticsFromRun(run = {}) {
     worktreePath: firstString(run.worktreePath),
     workspaceId: firstString(run.workspaceId),
     coderAgentId: firstString(run.coderAgentId, run.agentId),
-    controllerPid: Number.isInteger(Number(run.controllerPid)) ? Number(run.controllerPid) : null,
+    controllerPid: firstNumber(run.controllerPid, run.diagnostics?.controllerPid),
     coderModel: firstString(run.coderModel),
     coderThinking: firstString(run.coderThinking),
     codingHarness: firstString(run.codingHarness),
@@ -586,6 +580,7 @@ export function managerWorkQueueItem(run = {}, config = {}, prReviewStore = null
     stage: stage.id,
     stageLabel: stage.label,
     active,
+    controllerLive: run.controllerLive === true,
     lifecycleLabel,
     waitingForDependencies: stage.waiting,
     phase: firstString(run.phase),

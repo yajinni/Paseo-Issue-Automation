@@ -147,8 +147,10 @@ export function buildAttemptPrompt(repository, issue, branch, config) {
   return `${buildCoderPrompt({ repository, issue, branch, config })}\n\nThis attempt cannot be resumed or recovered. If interrupted, it will be abandoned and restarted fresh.`;
 }
 
-function startControllerWorker(root, issueNumber) {
-  const child = spawn(process.execPath, [workerPath, root, String(issueNumber)], {
+function startControllerWorker(root, issueNumber, attempt) {
+  const args = [workerPath, path.resolve(root), String(issueNumber)];
+  if (Number.isInteger(Number(attempt)) && Number(attempt) > 0) args.push(String(attempt));
+  const child = spawn(process.execPath, args, {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
@@ -243,7 +245,7 @@ function finalizeAgentLaunch(root, issue, agent, { recovered = false } = {}) {
   }, recovered ? 'agent-start-reconciled' : 'agent-started', recovered
     ? `Recovered agent ${coderAgentId} after the create command reported failure.`
     : `Agent ${coderAgentId} started in workspace ${current.workspaceId}.`);
-  const controllerPid = startControllerWorker(root, issue.number);
+  const controllerPid = startControllerWorker(root, issue.number, current.attempt);
   saveActivity(root, issue.number, { ...state, controllerPid, startedAt: started }, 'controller-started',
     `Issue Execution Controller PID ${controllerPid}.`);
   unskipIssue(root, issue.number);

@@ -243,7 +243,11 @@ function checkFailureDetails(checks) {
   }).join('\n');
 }
 
-async function execute(root, issueNumber) {
+async function execute(root, issueNumber, expectedAttempt = null) {
+  const initialState = loadRun(root, issueNumber);
+  if (expectedAttempt && Number(initialState?.attempt) !== expectedAttempt) {
+    throw new Error(`Controller attempt ownership changed for issue #${issueNumber}.`);
+  }
   const config = loadConfig(root);
   let repairCycles = 0;
   const completionRecovery = { attempts: 0 };
@@ -252,7 +256,7 @@ async function execute(root, issueNumber) {
     Number(config.review?.fullMaxRounds || config.maxReviewRounds || 0),
   ) + 4;
 
-  waitForCoder(root, loadRun(root, issueNumber));
+  waitForCoder(root, initialState);
 
   while (repairCycles <= maximumRepairCycles) {
     const snapshot = requireValidatedPrWithRecovery(root, issueNumber, completionRecovery);
@@ -469,14 +473,18 @@ async function execute(root, issueNumber) {
 }
 
 async function main() {
-  const [root, rawIssue] = process.argv.slice(2);
+  const [root, rawIssue, rawAttempt] = process.argv.slice(2);
   const issueNumber = Number(rawIssue);
-  if (!root || !Number.isInteger(issueNumber)) throw new Error('Usage: controller-worker.mjs <repository-root> <issue-number>');
+  const expectedAttempt = rawAttempt === undefined ? null : Number(rawAttempt);
+  if (!root || !Number.isInteger(issueNumber) || (rawAttempt !== undefined && (!Number.isInteger(expectedAttempt) || expectedAttempt <= 0))) {
+    throw new Error('Usage: controller-worker.mjs <repository-root> <issue-number> [attempt]');
+  }
   try {
-    await execute(root, issueNumber);
+    await execute(root, issueNumber, expectedAttempt);
   } catch (error) {
     const state = loadRun(root, issueNumber);
-    if (state?.status === 'agent-running') {
+    const ownsCurrentAttempt = !expectedAttempt || Number(state?.attempt) === expectedAttempt;
+    if (ownsCurrentAttempt && state?.status === 'agent-running') {
       terminalState(root, issueNumber, 'failed', error.message);
     }
     process.exitCode = 1;

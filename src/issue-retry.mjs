@@ -7,8 +7,10 @@ const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cont
 
 function nowIso() { return new Date().toISOString(); }
 
-function startControllerWorker(root, issueNumber) {
-  const child = spawn(process.execPath, [workerPath, root, String(issueNumber)], {
+function startControllerWorker(root, issueNumber, attempt) {
+  const args = [workerPath, path.resolve(root), String(issueNumber)];
+  if (Number.isInteger(Number(attempt)) && Number(attempt) > 0) args.push(String(attempt));
+  const child = spawn(process.execPath, args, {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
@@ -35,7 +37,7 @@ export function resumeTemporaryFailureRetries(root, {
     const issueNumber = Number(pendingState.issueNumber);
     const current = runLoader(root, issueNumber) || pendingState;
     if (current.phase !== 'retry-pending') continue;
-    const controllerPid = startWorker(root, issueNumber);
+    const controllerPid = startWorker(root, issueNumber, current.attempt);
     const at = nowIso();
     const saved = runSaver(root, issueNumber, {
       ...current,

@@ -159,7 +159,7 @@ export function recoverFailedAttempt(root, number, {
 
   let child;
   try {
-    child = spawnFn(executable, [workerPath, path.resolve(root), String(issueNumber)], {
+    child = spawnFn(executable, [workerPath, path.resolve(root), String(issueNumber), String(state.attempt || 1)], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,

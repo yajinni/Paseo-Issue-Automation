@@ -7,6 +7,7 @@ import { PASEO_LABELS } from './label-catalog.mjs';
 import { expectedWorkspaceAgent, inspectWorkspaceAgents, verifyWorkspaceIdentity } from './launch-retry.mjs';
 import { pauseManagedPr } from './pr-review-queue.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
+import { controllerProcessAlive, controllerProcessIsLiveForRun } from './controller-liveness.mjs';
 import { run, runJson } from './process.mjs';
 import { LABELS, loadConfig, loadRun, saveRun } from './state.mjs';
 
@@ -15,17 +16,6 @@ const now = () => new Date().toISOString();
 
 function text(value) {
   return value === undefined || value === null ? '' : String(value).trim();
-}
-
-function controllerProcessAlive(pid) {
-  const value = Number(pid);
-  if (!Number.isInteger(value) || value <= 0) return false;
-  try {
-    process.kill(value, 0);
-    return true;
-  } catch (error) {
-    return error?.code === 'EPERM';
-  }
 }
 
 function appendActivity(state, type, details, at = now()) {
@@ -167,7 +157,9 @@ export function resumeExistingPrController(root, number, {
   verifyWorkspace = verifyWorkspaceIdentity,
   prReader = currentPr,
   remoteHeadReader = remoteBranchHead,
-  controllerAlive = controllerProcessAlive,
+  controllerAlive = null,
+  controllerLiveness = controllerProcessIsLiveForRun,
+  platform = process.platform,
   refreshHumanReview = false,
   jsonRunner = runJson,
   pauseReview = pauseExistingReviewForRefresh,
@@ -177,7 +169,8 @@ export function resumeExistingPrController(root, number, {
 } = {}) {
   const issueNumber = Number(number);
   const state = readRun(root, issueNumber);
-  const eligibility = existingPrControllerResumeEligibility(state, { branchAction, controllerAlive });
+  const isControllerAlive = controllerAlive || ((pid) => controllerLiveness(root, { ...state, controllerPid: pid }, { runner, platform }));
+  const eligibility = existingPrControllerResumeEligibility(state, { branchAction, controllerAlive: isControllerAlive });
   const selectedEligibility = refreshHumanReview
     ? humanReviewRefreshEligibility(state)
     : eligibility;
@@ -249,7 +242,7 @@ export function resumeExistingPrController(root, number, {
 
   let child;
   try {
-    child = spawnFn(executable, [workerPath, path.resolve(root), String(issueNumber)], {
+    child = spawnFn(executable, [workerPath, path.resolve(root), String(issueNumber), String(state.attempt || 1)], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,

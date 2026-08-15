@@ -371,6 +371,18 @@ test('terminal status and completion evidence override stale active phases', () 
   assert.equal(queue.active, 0);
 });
 
+test('terminal historical controller PIDs alone are not live evidence', () => {
+  const queue = managerWorkQueue([
+    { issueNumber: 239, status: 'completed', phase: 'completed', completedAt: '2026-08-13T03:00:00.000Z', controllerPid: 54748 },
+    { issueNumber: 275, status: 'completed', phase: 'completed', completedAt: '2026-08-13T03:01:00.000Z', diagnostics: { controllerPid: 52884 } },
+    { issueNumber: 276, status: 'completed', phase: 'completed', completedAt: '2026-08-13T03:02:00.000Z', controllerPid: 81552 },
+  ]);
+
+  assert.deepEqual(queue.items.map((item) => item.active), [false, false, false]);
+  assert.deepEqual(queue.items.map((item) => item.diagnostics.controllerPid), [81552, 52884, 54748]);
+  assert.equal(queue.active, 0);
+});
+
 test('terminal history remains active when live controller evidence is present despite stale phases', () => {
   const queue = managerWorkQueue([
     {
@@ -379,6 +391,7 @@ test('terminal history remains active when live controller evidence is present d
       phase: 'coding',
       completedAt: '2026-08-13T03:09:00.000Z',
       controllerPid: 307,
+      controllerLive: true,
     },
     {
       issueNumber: 308,
@@ -386,6 +399,7 @@ test('terminal history remains active when live controller evidence is present d
       phase: 'reviewing',
       completedAt: '2026-08-13T03:10:00.000Z',
       controllerPid: 308,
+      controllerLive: true,
     },
     {
       issueNumber: 309,
@@ -393,6 +407,7 @@ test('terminal history remains active when live controller evidence is present d
       phase: 'coding',
       completedAt: '2026-08-13T03:11:00.000Z',
       controllerPid: 309,
+      controllerLive: true,
     },
   ]);
 
@@ -407,6 +422,7 @@ test('terminal history can remain active only with a live controller or review j
     phase: 'failed',
     completedAt: '2026-08-13T03:03:00.000Z',
     controllerPid: 299,
+    controllerLive: true,
   }]);
 
   assert.equal(queue.items[0].active, true);
@@ -419,6 +435,7 @@ test('unknown execution metadata remains active when live managed resources are 
     workspaceId: 'workspace-300',
     coderAgentId: 'agent-300',
     controllerPid: 300,
+    controllerLive: true,
   }]);
 
   assert.equal(queue.items[0].stage, 'unknown');
