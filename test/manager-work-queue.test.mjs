@@ -339,6 +339,67 @@ test('terminal failed and blocked history is inactive even when stale identifier
   assert.equal(queue.active, 0);
 });
 
+test('terminal status and completion evidence override stale active phases', () => {
+  const queue = managerWorkQueue([
+    {
+      issueNumber: 303,
+      status: PASEO_LABELS.failed,
+      phase: 'coding',
+      completedAt: '2026-08-13T03:05:00.000Z',
+    },
+    {
+      issueNumber: 304,
+      status: 'blocked',
+      phase: 'reviewing',
+      completedAt: '2026-08-13T03:06:00.000Z',
+    },
+    {
+      issueNumber: 305,
+      status: 'completed',
+      phase: 'coding',
+      completedAt: '2026-08-13T03:07:00.000Z',
+    },
+    {
+      issueNumber: 306,
+      status: PASEO_LABELS.reviewFailed,
+      phase: 'reviewing',
+      completedAt: '2026-08-13T03:08:00.000Z',
+    },
+  ]);
+
+  assert.deepEqual(queue.items.map((item) => item.active), [false, false, false, false]);
+  assert.equal(queue.active, 0);
+});
+
+test('terminal history remains active when live controller evidence is present despite stale phases', () => {
+  const queue = managerWorkQueue([
+    {
+      issueNumber: 307,
+      status: PASEO_LABELS.failed,
+      phase: 'coding',
+      completedAt: '2026-08-13T03:09:00.000Z',
+      controllerPid: 307,
+    },
+    {
+      issueNumber: 308,
+      status: 'blocked',
+      phase: 'reviewing',
+      completedAt: '2026-08-13T03:10:00.000Z',
+      controllerPid: 308,
+    },
+    {
+      issueNumber: 309,
+      status: 'completed',
+      phase: 'coding',
+      completedAt: '2026-08-13T03:11:00.000Z',
+      controllerPid: 309,
+    },
+  ]);
+
+  assert.deepEqual(queue.items.map((item) => item.active), [true, true, true]);
+  assert.equal(queue.active, 3);
+});
+
 test('terminal history can remain active only with a live controller or review job signal', () => {
   const queue = managerWorkQueue([{
     issueNumber: 299,

@@ -99,6 +99,9 @@ const TERMINAL_STATUSES = new Set([
   'completed',
   'failed',
   'merged',
+  PASEO_LABELS.failed,
+  PASEO_LABELS.needsAttention,
+  PASEO_LABELS.reviewFailed,
 ]);
 
 const ACTIVE_REVIEW_STATES = new Set([
@@ -188,10 +191,14 @@ export function isManagerWorkActive(work = {}) {
   const stage = String(work.stage || stageForRun(work).id);
   const phase = String(work.phase || '').trim();
   const status = String(work.status || '').trim();
-  if (ACTIVE_STAGES.has(stage)) return true;
-  if (TERMINAL_STAGES.has(stage) || TERMINAL_PHASES.has(phase) || TERMINAL_STATUSES.has(status)) {
+  const terminal = Boolean(work.completedAt)
+    || TERMINAL_STAGES.has(stage)
+    || TERMINAL_PHASES.has(phase)
+    || TERMINAL_STATUSES.has(status);
+  if (terminal) {
     return hasLiveProcessEvidence(work);
   }
+  if (ACTIVE_STAGES.has(stage)) return true;
   if (ACTIVE_PHASES.has(phase)) return true;
   if (stage === 'ready' || stage === 'waiting') return false;
   return hasLiveManagedEvidence(work);
