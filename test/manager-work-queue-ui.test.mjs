@@ -19,6 +19,16 @@ test('Work Queue becomes the Issue Lifecycle surface with separate status and st
   assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /Ready \/ Backlog/);
 });
 
+test('Active Work Queue filtering and Abandon gating use serialized active classification', () => {
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /function isActive\(item\) \{ return item\.active === true; \}/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /filter === 'active' && !isActive\(item\)/);
+  assert.match(MANAGER_WORK_QUEUE_SCRIPT, /if \(mutable && isActive\(item\)\)/);
+  assert.doesNotMatch(MANAGER_WORK_QUEUE_SCRIPT, /function isActive\(item\) \{ return !\[/);
+
+  const historical = { stage: 'unknown', active: false };
+  assert.equal(historical.active === true, false);
+});
+
 test('PR problems filter uses current Work Queue PR health instead of lifecycle attention alone', () => {
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /prHealthFor\(item\)/);
   assert.match(MANAGER_WORK_QUEUE_SCRIPT, /hasPrProblems\(item\)/);

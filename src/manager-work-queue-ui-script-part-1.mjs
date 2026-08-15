@@ -29,7 +29,7 @@ export const MANAGER_WORK_QUEUE_SCRIPT_PART_1 = String.raw`
 
   function onWorkQueue() { return document.querySelector('[data-manager-view="work-queue"]'); }
   function isAttention(item) { return ['failed', 'abandoned', 'review-failed', 'needs-attention'].includes(item.stage); }
-  function isActive(item) { return !['completed', 'failed', 'abandoned', 'review-failed', 'needs-attention', 'ready', 'waiting'].includes(item.stage); }
+  function isActive(item) { return item.active === true; }
   function isReviewStage(item) { return ['review-queued', 'reviewing', 'changes-requested', 'fixing', 'review-failed'].includes(item.stage) || Boolean(item.review); }
   function prHealthFor(item) { return queueData?.prHealth?.byIssue?.[String(item.issueNumber)] || null; }
   function hasPrProblems(item) { const health = prHealthFor(item); return Boolean(health && ['blocking', 'attention', 'unavailable'].includes(health.status)); }

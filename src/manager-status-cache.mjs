@@ -40,6 +40,8 @@ export function createManagerStatusCache({
 } = {}) {
   const entries = new Map();
   const workers = new Map();
+  let closePromise = null;
+  let closing = false;
   const timer = refreshIntervalMs > 0
     ? setInterval(() => {
       for (const entry of entries.values()) refresh(entry.repository);
@@ -48,6 +50,7 @@ export function createManagerStatusCache({
   timer?.unref?.();
 
   function refresh(repository) {
+    if (closing) return;
     const key = repositoryKey(repository);
     if (!key) return;
     const previous = entries.get(key) || { repository: { ...repository }, status: null, error: null, loadedAt: null };
@@ -79,6 +82,7 @@ export function createManagerStatusCache({
       if (settled) return;
       settled = true;
       workers.delete(key);
+      if (closing) return;
       entries.set(key, { ...previous, ...patch, repository: { ...repository }, refreshingAt: null });
     };
     worker.once('message', (message) => {
@@ -128,9 +132,19 @@ export function createManagerStatusCache({
   }
 
   function close() {
+    if (closePromise) return closePromise;
+    closing = true;
     if (timer) clearInterval(timer);
-    for (const worker of workers.values()) worker.terminate();
+    const terminations = [...workers.values()].map((worker) => {
+      try {
+        return Promise.resolve(worker.terminate?.());
+      } catch {
+        return Promise.resolve();
+      }
+    });
     workers.clear();
+    closePromise = Promise.allSettled(terminations).then(() => undefined);
+    return closePromise;
   }
 
   return { read, refresh, refreshAll, close };

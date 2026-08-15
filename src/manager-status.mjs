@@ -96,7 +96,7 @@ export function managerRepositoryStatus(repository, {
         issueNumber,
         issueTitle: `Issue #${issueNumber}`,
         status: latest.status === 'failed' ? 'paseo:failed' : null,
-        phase: latest.evidence?.phase || null,
+        phase: null,
         reason: latest.status === 'failed' ? latest.message : null,
         updatedAt: latest.at || null,
         lifecycle,
@@ -117,13 +117,6 @@ export function managerRepositoryStatus(repository, {
     prHealth,
     reviewEvidence,
   };
-  const activeRuns = runs.filter((item) => {
-    const status = String(item?.status || '');
-    const phase = String(item?.phase || '');
-    return !['abandoned', 'agent-blocked', 'agent-failed', 'automation-failed', 'automation-blocked',
-      'human-review', 'paseo:failed', 'paseo:needs-attention', 'paseo:review-failed', 'completed', 'merged', 'closed', 'failed'].includes(status)
-      && !['abandoned', 'blocked', 'failed', 'launch-failed', 'needs-attention'].includes(phase);
-  });
   const worker = workerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const reviewWorker = reviewWorkerManager?.status?.(repository.id) || { running: false, state: 'stopped' };
   const prReviews = prReviewStore
@@ -180,7 +173,7 @@ export function managerRepositoryStatus(repository, {
       lastDispatchAt: runtime.lastDispatchAt || null,
       lastDispatchResult: runtime.lastDispatchResult || null,
       skippedIssueNumbers: runtime.skippedIssueNumbers || [],
-      activeRunCount: activeRuns.length,
+      activeRunCount: workQueue.active,
       runCount: runs.length,
       statusCounts: statusCounts(runs),
     },

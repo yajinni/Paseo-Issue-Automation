@@ -100,6 +100,26 @@ test('manager issue plan returns eligible issues in lowest issue-number order', 
   assert.equal(plan.nextIssueNumber, 3);
 });
 
+test('historical unknown run does not override skipped and non-eligible state', () => {
+  const issues = [issue(5)];
+  const plan = managerIssuePlan('/repo', { issueSelection: { mode: 'all-open' } }, {
+    jsonRunner: () => issues,
+    runtimeLoader: () => ({ skippedIssueNumbers: [5] }),
+    runLister: () => [{ issueNumber: 5, lifecycle: [{ type: 'operator-action', status: 'success' }] }],
+    queueEvaluator: () => ({
+      mode: 'all-open',
+      eligible: [{ issue: issues[0], dependency: { dependencies: [] } }],
+      waiting: [],
+      rejected: [],
+    }),
+  });
+
+  assert.equal(plan.items[0].status, 'Skipped');
+  assert.equal(plan.items[0].statusId, 'skipped');
+  assert.equal(plan.active, 0);
+  assert.equal(plan.skipped, 1);
+});
+
 test('all-open graph keeps native relationships for unselected issues and computes exact levels', () => {
   const issues = [
     issue(1, 'Ready A', { blocking: [relation(3), relation(4)] }),

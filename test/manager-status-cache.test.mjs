@@ -74,3 +74,33 @@ test('failed refresh retains last-known-good status and reports a delayed state'
     cache.close();
   }
 });
+
+test('status cache shutdown is awaitable, idempotent, and prevents new refresh workers', async () => {
+  let factoryCalls = 0;
+  let finishTermination;
+  const termination = new Promise((resolve) => { finishTermination = resolve; });
+  const cache = createManagerStatusCache({
+    refreshIntervalMs: 0,
+    workerFactory: () => {
+      factoryCalls += 1;
+      const worker = new EventEmitter();
+      worker.terminate = () => termination;
+      return worker;
+    },
+  });
+  const repository = { id: 'repo-shutdown', path: '/repo-shutdown' };
+  cache.read(repository);
+
+  const firstClose = cache.close();
+  assert.equal(firstClose, cache.close());
+  cache.refresh({ id: 'repo-after-shutdown', path: '/repo-after-shutdown' });
+  assert.equal(factoryCalls, 1);
+
+  let settled = false;
+  firstClose.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  finishTermination();
+  await firstClose;
+  assert.equal(settled, true);
+});
