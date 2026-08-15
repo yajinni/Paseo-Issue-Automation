@@ -269,6 +269,95 @@ test('abandoned attempts remain visible as abandoned and are not active or compl
   assert.equal(queue.attention, 1);
 });
 
+test('lifecycle-only completed skipped evidence stays visible but is historical and inactive', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 294,
+    issueTitle: 'Completed skipped issue',
+    issue: { state: 'CLOSED', stateReason: 'COMPLETED' },
+    lifecycle: [{
+      at: '2026-08-13T02:15:57.309Z',
+      type: 'operator-action',
+      source: 'operator',
+      status: 'success',
+      message: 'Skip issue completed.',
+      evidence: { action: 'skip-issue' },
+    }],
+  }]);
+
+  assert.equal(queue.items.length, 1);
+  assert.equal(queue.items[0].stage, 'unknown');
+  assert.equal(queue.items[0].active, false);
+  assert.equal(queue.items[0].timeline[0].type, 'operator-action');
+  assert.equal(queue.active, 0);
+});
+
+test('terminal failed and blocked history is inactive even when stale identifiers remain', () => {
+  const queue = managerWorkQueue([
+    {
+      issueNumber: 295,
+      status: PASEO_LABELS.failed,
+      phase: 'failed',
+      branch: 'ai/issue-295',
+      workspaceId: 'old-workspace-295',
+      completedAt: '2026-08-13T03:00:00.000Z',
+    },
+    {
+      issueNumber: 296,
+      status: PASEO_LABELS.needsAttention,
+      phase: 'blocked',
+      branch: 'ai/issue-296',
+      workspaceId: 'old-workspace-296',
+      completedAt: '2026-08-13T03:01:00.000Z',
+    },
+    {
+      issueNumber: 298,
+      phase: 'blocked',
+      workspaceId: 'old-workspace-298',
+      completedAt: '2026-08-13T03:02:00.000Z',
+    },
+  ]);
+
+  assert.deepEqual(queue.items.map((item) => item.active), [false, false, false]);
+  assert.equal(queue.active, 0);
+});
+
+test('terminal history can remain active only with a live controller or review job signal', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 299,
+    status: PASEO_LABELS.failed,
+    phase: 'failed',
+    completedAt: '2026-08-13T03:03:00.000Z',
+    controllerPid: 299,
+  }]);
+
+  assert.equal(queue.items[0].active, true);
+  assert.equal(queue.active, 1);
+});
+
+test('unknown execution metadata remains active when live managed resources are recorded', () => {
+  const queue = managerWorkQueue([{
+    issueNumber: 297,
+    workspaceId: 'workspace-297',
+    coderAgentId: 'agent-297',
+    controllerPid: 297,
+  }]);
+
+  assert.equal(queue.items[0].stage, 'unknown');
+  assert.equal(queue.items[0].active, true);
+  assert.equal(queue.active, 1);
+});
+
+test('unknown execution metadata remains active for a queued or running review job', () => {
+  const item = managerWorkQueueItem({ issueNumber: 300 }, {}, {
+    managedPullRequests: [{ id: 'managed-300', issueNumber: 300 }],
+    reviewJobs: [{ id: 'review-300', managedPullRequestId: 'managed-300', state: 'submitting' }],
+    fixJobs: [],
+  });
+
+  assert.equal(item.stage, 'unknown');
+  assert.equal(item.active, true);
+});
+
 test('prior-attempt coder prompts are included in deep diagnostics', () => {
   const item = managerWorkQueueItem({
     issueNumber: 17,

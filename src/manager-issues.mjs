@@ -1,5 +1,6 @@
 import { detectDependencyCycles, relationshipNodes } from './dependencies.mjs';
 import { evaluateIssueQueue } from './issue-eligibility.mjs';
+import { isManagerWorkActive } from './manager-work-queue.mjs';
 import { runJson } from './process.mjs';
 import { listRuns, loadRuntime } from './state.mjs';
 
@@ -57,12 +58,6 @@ function runByIssue(runs) {
   return new Map((runs || [])
     .filter((run) => Number.isInteger(Number(run?.issueNumber)))
     .map((run) => [Number(run.issueNumber), run]));
-}
-
-function activeRun(run) {
-  if (!run || run.completedAt) return false;
-  return !['waiting-for-dependencies', 'invalid-issue', 'ready', 'retry-pending'].includes(String(run.phase || ''))
-    && Boolean(run.branch || run.workspaceId || run.agentId || run.coderAgentId || run.controllerPid || run.startedAt);
 }
 
 function activeLabel(run) {
@@ -297,7 +292,7 @@ export function managerIssuePlan(root, config, {
       activePhase: run?.phase || null,
       ...relationships,
     };
-    if (activeRun(run)) {
+    if (isManagerWorkActive(run)) {
       return {
         ...base,
         status: activeLabel(run),

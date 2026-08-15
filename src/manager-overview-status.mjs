@@ -1,4 +1,5 @@
-const INACTIVE_ISSUE_STAGES = new Set(['ready', 'waiting', 'completed', 'failed', 'abandoned', 'review-failed', 'needs-attention']);
+import { isManagerWorkActive } from './manager-work-queue.mjs';
+
 const TERMINAL_PR_STAGES = new Set(['completed', 'failed', 'abandoned']);
 const INTENTIONAL_STOP_CODES = new Set(['claims-paused', 'review-worker-stopped']);
 
@@ -74,7 +75,7 @@ function currentPrHealth(workQueue, issueNumber) {
 
 function activeIssues(workQueue) {
   return (workQueue?.items || [])
-    .filter((item) => item?.issueNumber && !INACTIVE_ISSUE_STAGES.has(String(item.stage || '')))
+    .filter((item) => item?.issueNumber && isManagerWorkActive(item))
     .map((item) => ({
       issueNumber: Number(item.issueNumber),
       title: item.title || `Issue #${item.issueNumber}`,
