@@ -12,7 +12,7 @@ function fakeWorkers() {
   return { close() {} };
 }
 
-function configuredManager(t) {
+function configuredManager() {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'paseo-manager-theme-'));
   const repositoryRoot = path.join(rootDir, 'Configured');
   execFileSync('git', ['init', repositoryRoot], { stdio: 'ignore' });
@@ -20,19 +20,25 @@ function configuredManager(t) {
   addRepository(repositoryRoot, { rootDir });
   const config = loadConfig(repositoryRoot);
   saveConfig(repositoryRoot, { ...config, setupComplete: true, baseBranch: 'main' });
-  t.after(() => rmSync(rootDir, { recursive: true, force: true }));
   return rootDir;
 }
 
 test('configured manager uses the shared theme and sidebar shell while setup keeps the same theme', async (t) => {
-  const rootDir = configuredManager(t);
-  const { server, url } = await startManagerServer({
+  const rootDir = configuredManager();
+  let server = null;
+  let statusCache = null;
+  let url = null;
+  t.after(async () => {
+    if (statusCache) await statusCache.close();
+    if (server) await new Promise((resolve) => server.close(resolve));
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+  ({ server, url, statusCache } = await startManagerServer({
     port: 0,
     rootDir,
     workerManager: fakeWorkers(),
     reviewWorkerManager: fakeWorkers(),
-  });
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  }));
 
   const dashboardResponse = await fetch(`${url}/?view=reviews`);
   assert.equal(dashboardResponse.status, 200);
