@@ -103,7 +103,7 @@ test('controller-only resume preserves an exhausted failed attempt with an exact
   assert.equal(writes.length, 2);
   assert.ok(!calls.some(([command, args]) => command === 'paseo' && args[0] === 'send'));
   assert.equal(spawns.length, 1);
-  assert.deepEqual(spawns[0].args, ['/recovery-controller-worker.mjs', path.resolve('/repo'), '239']);
+  assert.deepEqual(spawns[0].args, ['/recovery-controller-worker.mjs', path.resolve('/repo'), '239', '1']);
 });
 
 test('existing PR controller resume does not depend on remaining failed-attempt recovery budget', () => {
@@ -185,7 +185,7 @@ test('explicit human-review refresh preserves the existing PR identity and inval
   assert.match(current.reason, /prior approval will not be reused/i);
   assert.equal(writes.length, 2);
   assert.equal(spawns.length, 1);
-  assert.deepEqual(spawns[0].args, ['/recovery-controller-worker.mjs', path.resolve('/repo'), '239']);
+   assert.deepEqual(spawns[0].args, ['/recovery-controller-worker.mjs', path.resolve('/repo'), '239', '1']);
   assert.ok(calls.some(([command, args]) => command === 'gh' && args.includes('paseo:coding')));
 });
 

@@ -11,6 +11,7 @@ import { inspectRepository } from './repository-registry.mjs';
 import { managedRepositoryOperationalSummary } from './repository-health.mjs';
 import { managerReviewProfileStatus } from './manager-review-profile-status.mjs';
 import { managerWorkQueue } from './manager-work-queue.mjs';
+import { controllerProcessIsLiveForRun } from './controller-liveness.mjs';
 import { loadSetupPullRequest, setupChangeStatus } from './setup-pr.mjs';
 import {
   listRuns,
@@ -38,6 +39,15 @@ function safeBranch(root, runner = run) {
     allowFailure: true,
   });
   return result.ok && result.stdout ? result.stdout : null;
+}
+
+function controllerLiveForRun(root, run, { controllerLiveness, runner, platform }) {
+  if (!Number.isInteger(Number(run?.controllerPid)) || Number(run.controllerPid) <= 0) return false;
+  try {
+    return controllerLiveness(root, run, { runner, platform }) === true;
+  } catch {
+    return false;
+  }
 }
 
 export function managerPrReviewSummary(root, { loadStore = loadPrReviewStore } = {}) {
@@ -71,6 +81,7 @@ export function managerRepositoryStatus(repository, {
   reviewWorkerManager = null,
   rootDir = undefined,
   prSnapshotLoader = managerPrHealthSnapshot,
+  controllerLiveness = controllerProcessIsLiveForRun,
 } = {}) {
   if (!repository?.path) throw new Error('A registered repository path is required.');
   const inspected = inspectRepository(repository.path, { runner, platform });
@@ -102,10 +113,19 @@ export function managerRepositoryStatus(repository, {
         lifecycle,
       };
     });
-  const runs = [...recordedRuns.map((item) => ({
-    ...item,
-    lifecycle: loadIssueLifecycle(inspected.path, item.issueNumber, { limit: 250 }),
-  })), ...lifecycleOnlyRuns];
+  const runs = [
+    ...recordedRuns.map((item) => {
+      const run = {
+        ...item,
+        lifecycle: loadIssueLifecycle(inspected.path, item.issueNumber, { limit: 250 }),
+      };
+      return {
+        ...run,
+        controllerLive: controllerLiveForRun(inspected.path, run, { controllerLiveness, runner, platform }),
+      };
+    }),
+    ...lifecycleOnlyRuns,
+  ];
   let prReviewStore = null;
   try { prReviewStore = loadPrReviewStore(inspected.path); } catch {}
   const prHealth = managerPrHealthSummary(runs, prReviewStore, {

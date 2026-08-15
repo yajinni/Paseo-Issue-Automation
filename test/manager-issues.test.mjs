@@ -120,6 +120,41 @@ test('historical unknown run does not override skipped and non-eligible state', 
   assert.equal(plan.skipped, 1);
 });
 
+test('issue plan uses verified controller ownership instead of a persisted PID', () => {
+  const issues = [issue(239)];
+  const baseOptions = {
+    jsonRunner: () => issues,
+    runtimeLoader: () => ({ skippedIssueNumbers: [] }),
+    runLister: () => [{
+      issueNumber: 239,
+      status: 'completed',
+      phase: 'completed',
+      completedAt: '2026-08-13T03:00:00.000Z',
+      controllerPid: 54748,
+    }],
+    queueEvaluator: (_root, _config, options) => ({
+      mode: 'all-open',
+      eligible: [{ issue: options.issues[0], dependency: { dependencies: [] } }],
+      waiting: [],
+      rejected: [],
+    }),
+  };
+
+  const stale = managerIssuePlan('/repo', { issueSelection: { mode: 'all-open' } }, {
+    ...baseOptions,
+    controllerLiveness: () => false,
+  });
+  assert.equal(stale.active, 0);
+  assert.equal(stale.items[0].statusId, 'next');
+
+  const live = managerIssuePlan('/repo', { issueSelection: { mode: 'all-open' } }, {
+    ...baseOptions,
+    controllerLiveness: () => true,
+  });
+  assert.equal(live.active, 1);
+  assert.equal(live.items[0].statusId, 'active');
+});
+
 test('all-open graph keeps native relationships for unselected issues and computes exact levels', () => {
   const issues = [
     issue(1, 'Ready A', { blocking: [relation(3), relation(4)] }),

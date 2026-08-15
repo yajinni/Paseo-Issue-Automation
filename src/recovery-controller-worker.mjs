@@ -1,17 +1,21 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { loadRun } from './state.mjs';
 
-const [root, rawIssue] = process.argv.slice(2);
+const [root, rawIssue, rawAttempt] = process.argv.slice(2);
 const issueNumber = Number(rawIssue);
+const expectedAttempt = rawAttempt === undefined ? null : Number(rawAttempt);
 
-if (!root || !Number.isInteger(issueNumber)) {
-  throw new Error('Usage: recovery-controller-worker.mjs <repository-root> <issue-number>');
+if (!root || !Number.isInteger(issueNumber) || (rawAttempt !== undefined && (!Number.isInteger(expectedAttempt) || expectedAttempt <= 0))) {
+  throw new Error('Usage: recovery-controller-worker.mjs <repository-root> <issue-number> [attempt]');
 }
 
 let owned = false;
 for (let attempt = 0; attempt < 200; attempt += 1) {
   const state = loadRun(root, issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${issueNumber}.`);
+  if (expectedAttempt && Number(state.attempt) !== expectedAttempt) {
+    throw new Error(`Recovery controller attempt ownership changed for issue #${issueNumber}.`);
+  }
   if (Number(state.controllerPid) === process.pid) {
     owned = true;
     break;

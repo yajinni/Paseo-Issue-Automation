@@ -1,7 +1,8 @@
 import { detectDependencyCycles, relationshipNodes } from './dependencies.mjs';
 import { evaluateIssueQueue } from './issue-eligibility.mjs';
 import { isManagerWorkActive } from './manager-work-queue.mjs';
-import { runJson } from './process.mjs';
+import { controllerProcessIsLiveForRun } from './controller-liveness.mjs';
+import { run, runJson } from './process.mjs';
 import { listRuns, loadRuntime } from './state.mjs';
 
 function issueFields() {
@@ -58,6 +59,15 @@ function runByIssue(runs) {
   return new Map((runs || [])
     .filter((run) => Number.isInteger(Number(run?.issueNumber)))
     .map((run) => [Number(run.issueNumber), run]));
+}
+
+function controllerLiveForRun(root, runState, { controllerLiveness, runner, platform }) {
+  if (!Number.isInteger(Number(runState?.controllerPid)) || Number(runState.controllerPid) <= 0) return false;
+  try {
+    return controllerLiveness(root, runState, { runner, platform }) === true;
+  } catch {
+    return false;
+  }
 }
 
 function activeLabel(run) {
@@ -254,6 +264,9 @@ export function managerIssuePlan(root, config, {
   runtimeLoader = loadRuntime,
   runLister = listRuns,
   queueEvaluator = evaluateIssueQueue,
+  runner = run,
+  platform = process.platform,
+  controllerLiveness = controllerProcessIsLiveForRun,
 } = {}) {
   const issues = listOpenIssues(root, jsonRunner).sort((left, right) => Number(left.number) - Number(right.number));
   const runtime = runtimeLoader(root);
@@ -277,7 +290,10 @@ export function managerIssuePlan(root, config, {
 
   const items = issues.map((issue) => {
     const number = Number(issue.number);
-    const run = runs.get(number);
+    const recordedRun = runs.get(number);
+    const run = recordedRun && controllerLiveForRun(root, recordedRun, { controllerLiveness, runner, platform })
+      ? { ...recordedRun, controllerLive: true }
+      : recordedRun;
     const relationships = nativeRelationships(issue);
     const base = {
       issueNumber: number,
