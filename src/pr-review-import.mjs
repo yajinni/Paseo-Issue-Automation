@@ -24,7 +24,12 @@ function repositoryIdentity(value) {
 }
 
 function repositoryFromSnapshot(value) {
-  return text(value?.nameWithOwner || value?.repository?.nameWithOwner || value);
+  if (typeof value === 'string') return text(value);
+  if (!value || typeof value !== 'object') return '';
+  if (value.nameWithOwner) return text(value.nameWithOwner);
+  const owner = text(value.owner?.login || value.owner?.name);
+  const name = text(value.name);
+  return owner && name ? `${owner}/${name}` : '';
 }
 
 export function parseManagedPullRequestId(value) {

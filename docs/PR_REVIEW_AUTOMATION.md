@@ -43,6 +43,8 @@ npx paseo-issue-automation pr-review review-now --id OWNER/REPOSITORY#PR
 
 Imported pull requests follow the same Light/Full staged review, CI, base-freshness, exact-head, stale-head, repair, unresolved-finding, and guarded-merge gates as controller-created managed pull requests. Import never edits the store directly or bypasses those gates.
 
+For an imported PR, requested changes are retained as a paused operator repair handoff rather than a Paseo coder job. Repair the existing PR branch through the normal external workflow, then run `pr-review reconcile` so the new exact head is queued; Paseo never creates a coder, controller, workspace, or fake validation state for an import.
+
 ## Persistent state
 
 Repository-specific state uses the package's existing atomic JSON storage beneath the repository's Git common directory:

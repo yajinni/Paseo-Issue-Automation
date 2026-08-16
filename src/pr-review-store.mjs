@@ -200,6 +200,7 @@ export function normalizeManagedPullRequest(record) {
     currentHeadSha: String(record.currentHeadSha),
     lastSubmittedReviewSha: record.lastSubmittedReviewSha || null,
     lastCompletedReviewSha: record.lastCompletedReviewSha || null,
+    lastValidatedReviewSha: record.lastValidatedReviewSha || null,
     reviewRound: Math.max(1, Number(record.reviewRound) || 1),
     reviewPromptVersion: Math.max(1, Number(record.reviewPromptVersion) || REVIEW_PROMPT_VERSION),
     reviewState,

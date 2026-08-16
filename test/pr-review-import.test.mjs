@@ -86,6 +86,19 @@ test('explicit issue association is required when the PR has no safe reference',
   assert.equal(result.inferredIssue, false);
 });
 
+test('normal GitHub issue-reference repository objects support inferred and explicit association', (t) => {
+  const repository = { name: 'repo', owner: { login: 'owner' } };
+  const { root, options, issue } = fixture(t, {
+    closingIssuesReferences: [{ number: 101, repository }],
+  });
+  const inferred = importManagedPullRequest(root, { id: 'owner/repo#45' }, options);
+  assert.equal(inferred.inferredIssue, true);
+
+  const explicit = importManagedPullRequest(root, { id: 'owner/repo#45', issueNumber: issue.number }, options);
+  assert.equal(explicit.inferredIssue, false);
+  assert.equal(explicit.idempotent, true);
+});
+
 test('an imported managed PR enters the normal review queue through review-now', (t) => {
   const { root, options } = fixture(t);
   savePrAutomationConfig(root, {

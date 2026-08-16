@@ -112,6 +112,7 @@ export function enqueueReviewInStore(store, managed, {
   };
   store.reviewJobs.push(job);
   managed.currentHeadSha = sha;
+  managed.lastValidatedReviewSha = null;
   managed.queuePosition = job.queuePosition;
   managed.activeReviewRequestId = job.reviewRequestId;
   transitionManaged(store, managed, 'queued', { reason: `Review queued for ${sha}.`, actor: 'queue', sha, at });
@@ -143,6 +144,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         currentHeadSha: validSha(input.currentHeadSha),
         lastSubmittedReviewSha: null,
         lastCompletedReviewSha: null,
+        lastValidatedReviewSha: null,
         reviewRound: Math.max(1, Number(input.reviewRound) || 1),
         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
          reviewState: store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
@@ -174,6 +176,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         worktreePath: input.worktreePath || managed.worktreePath, workspaceId: input.workspaceId || managed.workspaceId,
         coderAgentId: input.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(input.currentHeadSha), updatedAt: at, lastActivityAt: at,
       });
+      managed.lastValidatedReviewSha = null;
       if (input.baseBranch) managed.baseBranch = String(input.baseBranch);
       if (input.provenance) managed.provenance = clone(input.provenance);
     }
@@ -271,6 +274,10 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
   const existing = store.fixJobs.find((job) => job.reviewRequestId === reviewJob.reviewRequestId);
   if (existing) return existing;
   const at = nowIso(now);
+  const imported = managed.provenance?.type === 'manual-import';
+  const repairReason = imported
+    ? 'Imported PR findings are recorded for external same-PR repair; Paseo will not create coder, workspace, or controller state.'
+    : 'Validated review findings created a coding fix job.';
   const job = {
     id: `fix-${randomUUID()}`,
     managedPullRequestId: managed.id,
@@ -284,7 +291,7 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
     branchName: managed.branchName,
     reviewedHeadSha: reviewJob.headSha,
     findings: String(findings || ''),
-    state: 'queued',
+    state: imported ? 'paused' : 'queued',
     priority: managed.priority || 0,
     attempts: 0,
     workerLease: null,
@@ -305,8 +312,18 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
   managed.lastCompletedReviewSha = reviewJob.headSha;
   managed.lastReviewCommentId = sourceCommentId;
   managed.lastProcessedReviewRequestId = reviewJob.reviewRequestId;
-  transitionManaged(store, managed, 'fix_queued', { reason: 'Validated review findings created a coding fix job.', actor: 'reconciliation', sha: reviewJob.headSha, at });
-  appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: null, newState: 'queued', reason: 'Fix job created from matching review result.', actor: 'reconciliation', sha: reviewJob.headSha, timestamp: at });
+  if (imported) {
+    managed.activeReviewRequestId = null;
+    managed.queuePosition = null;
+  }
+  transitionManaged(store, managed, imported ? 'changes_requested' : 'fix_queued', {
+    reason: repairReason,
+    actor: 'reconciliation',
+    sha: reviewJob.headSha,
+    error: imported ? repairReason : undefined,
+    at,
+  });
+  appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: null, newState: job.state, reason: imported ? repairReason : 'Fix job created from matching review result.', actor: 'reconciliation', sha: reviewJob.headSha, timestamp: at });
   return job;
 }
 

@@ -97,6 +97,8 @@ function exactMergedApproval(precomputed, mergedHead) {
 function hasExactApprovedReview(store, managed, mergedHead) {
   if (!mergedHead || String(managed.lastCompletedReviewSha || '').toLowerCase() !== mergedHead
       || !managed.lastProcessedReviewRequestId) return false;
+  if (managed.provenance?.type === 'manual-import'
+      && String(managed.lastValidatedReviewSha || '').toLowerCase() !== mergedHead) return false;
   return store.reviewJobs.some((job) => job.managedPullRequestId === managed.id
     && job.state === 'completed'
     && job.result === 'approved'
@@ -171,6 +173,7 @@ function reconcileHeadChange(store, managed, pr, at) {
   if (!newSha || newSha === managed.currentHeadSha) return null;
   const previousSha = managed.currentHeadSha;
   managed.currentHeadSha = newSha;
+  if (managed.provenance?.type === 'manual-import') managed.lastValidatedReviewSha = null;
   managed.updatedAt = at;
   managed.lastActivityAt = at;
   managed.reviewRound += 1;
@@ -340,6 +343,31 @@ function clearIssueLifecycleLabelsOnce(root, effect, issueLabelCleaner) {
 }
 
 function completeMergedLifecycle(root, effect) {
+  const current = loadPrReviewStore(root);
+  const imported = findManaged(current, effect.managedId);
+  if (imported?.provenance?.type === 'manual-import') {
+    return mutatePrReviewStore(root, (store) => {
+      const managed = findManaged(store, effect.managedId);
+      if (!managed) throw new Error(`Managed PR ${effect.managedId} disappeared while recording imported merge completion.`);
+      Object.assign(managed, {
+        issueClosurePending: false,
+        lifecycleCompletionPending: false,
+        reviewEvidenceMissing: false,
+        lastError: null,
+        updatedAt: nowIso(),
+      });
+      appendHistory(store, {
+        entityType: 'managed_pull_request',
+        entityId: managed.id,
+        previousState: managed.reviewState,
+        newState: managed.reviewState,
+        reason: 'Imported PR merge and associated issue closure were verified without creating issue-run state.',
+        actor: 'reconciliation',
+        sha: effect.headSha,
+      });
+      return { imported: true, managed: { ...managed } };
+    });
+  }
   const completed = markIssueMerged(root, {
     issueNumber: effect.issueNumber,
     pullRequestNumber: effect.pullRequestNumber,
