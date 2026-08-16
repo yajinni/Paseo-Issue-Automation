@@ -10,9 +10,10 @@ import { createFixJobInStore, registerManagedPullRequest } from '../src/pr-revie
 import { prReviewCommand } from '../src/cli.mjs';
 import { reviewWorkerPath } from '../src/pr-review-scheduler.mjs';
 import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
-import { loadRun, saveConfig, saveRun } from '../src/state.mjs';
+import { loadIssueLifecycle, loadRun, saveConfig, saveRun } from '../src/state.mjs';
 
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
+const NEXT_HEAD = 'fedcba9876543210fedcba9876543210fedcba98';
 
 function fixture(t, { withGitRefs = false, manualImport = true } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-pr-review-import-lifecycle-'));
@@ -493,6 +494,79 @@ test('imported Light changes require a new exact head before another Light round
   assert.equal(after.reviewJobs.length, 0);
   assert.equal(after.managedPullRequests[0].currentHeadSha, HEAD);
   assert.equal(managed.workspaceId, null);
+});
+
+test('a stale imported Light head resets to staged Light before Web ChatGPT Full review', async (t) => {
+  const { root, managed, pr } = fixture(t);
+  stagedReviewConfig(root);
+
+  const first = await reviewNow(root, pr, () => {
+    pr.headRefOid = NEXT_HEAD;
+    return { result: 'pass', summary: 'The imported head changed during Light review.', findings: [] };
+  });
+  assert.equal(first.lightReview.event.result, 'stale');
+  assert.equal(first.reviewJob, null);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
+
+  const reconciled = reconcileManagedPullRequest(root, managed.id, {
+    now: 3000,
+    snapshot: pr,
+    effectRunner: () => [],
+  });
+  assert.equal(reconciled.headChanged, true);
+  assert.equal(reconciled.stagedReviewQueued, true);
+  const staged = loadPrReviewStore(root);
+  assert.equal(staged.reviewJobs.length, 0);
+  assert.equal(staged.managedPullRequests[0].currentHeadSha, NEXT_HEAD);
+  assert.equal(staged.managedPullRequests[0].reviewState, 'queued');
+  assert.equal(staged.managedPullRequests[0].workspaceId, null);
+  assert.equal(staged.managedPullRequests[0].worktreePath, null);
+  assert.equal(staged.managedPullRequests[0].coderAgentId, null);
+  assert.equal(loadRun(root, 101), null);
+  assert.deepEqual(loadIssueLifecycle(root, 101), []);
+
+  const next = await reviewNow(root, pr, () => ({
+    result: 'pass',
+    summary: 'The replacement head passed Light review.',
+    findings: [],
+  }));
+  assert.equal(next.lightReview.event.headSha, NEXT_HEAD);
+  assert.equal(next.lightReview.decision.action, 'quick-passed');
+  assert.equal(next.reviewJob.headSha, NEXT_HEAD);
+  assert.equal(next.metadata.stage, 'full');
+  assert.equal(next.metadata.headSha, NEXT_HEAD);
+  assert.match(reviewWorkerPath(root, next.reviewJob.id), /web-chatgpt-full-review-worker\.mjs$/);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 1);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].workspaceId, null);
+  assert.equal(loadRun(root, 101), null);
+  assert.deepEqual(loadIssueLifecycle(root, 101), []);
+});
+
+test('an imported quick head advance before the first Light review stays staged', async (t) => {
+  const { root, managed, pr } = fixture(t);
+  stagedReviewConfig(root);
+  pr.headRefOid = NEXT_HEAD;
+
+  const reconciled = reconcileManagedPullRequest(root, managed.id, {
+    now: 3000,
+    snapshot: pr,
+    effectRunner: () => [],
+  });
+  assert.equal(reconciled.headChanged, true);
+  assert.equal(reconciled.stagedReviewQueued, true);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].currentHeadSha, NEXT_HEAD);
+
+  const next = await reviewNow(root, pr, () => ({
+    result: 'pass',
+    summary: 'The first Light review passed on the current head.',
+    findings: [],
+  }));
+  assert.equal(next.reviewJob.headSha, NEXT_HEAD);
+  assert.equal(next.metadata.stage, 'full');
+  assert.match(reviewWorkerPath(root, next.reviewJob.id), /web-chatgpt-full-review-worker\.mjs$/);
+  assert.equal(loadRun(root, 101), null);
+  assert.deepEqual(loadIssueLifecycle(root, 101), []);
 });
 
 test('a repaired imported Light head returns to staged Light before Full review', async (t) => {

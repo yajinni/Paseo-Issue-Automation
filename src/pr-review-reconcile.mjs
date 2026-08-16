@@ -25,6 +25,8 @@ import {
 } from './pr-review-github.mjs';
 import { markIssueMerged } from './issue-merge-state.mjs';
 import { matchingReviewResult } from './review-result.mjs';
+import { loadConfig } from './state.mjs';
+import { webChatGptFullReviewMetadata } from './web-chatgpt-full-review.mjs';
 
 const FINALIZATION_REQUEST_PREFIX = 'approved-finalization:';
 
@@ -177,7 +179,16 @@ function importedLightRepairPending(managed, headSha) {
       && String(event.headSha || '').toLowerCase() === String(headSha || '').toLowerCase());
 }
 
-function reconcileHeadChange(store, managed, pr, at) {
+function importedStagedLightReset(root, store, managed) {
+  if (managed.provenance?.type !== 'manual-import') return false;
+  let config;
+  try { config = loadConfig(root); } catch { return false; }
+  if (config.review?.workflow !== 'quick-web-chatgpt') return false;
+  return !store.reviewJobs.some((job) => job.managedPullRequestId === managed.id
+    && webChatGptFullReviewMetadata(root, job.id)?.stage === 'full');
+}
+
+function reconcileHeadChange(root, store, managed, pr, at) {
   const newSha = String(pr.headRefOid || '').toLowerCase();
   if (!newSha || newSha === managed.currentHeadSha) return null;
   const previousSha = managed.currentHeadSha;
@@ -219,6 +230,27 @@ function reconcileHeadChange(store, managed, pr, at) {
     managed.queuePosition = null;
     transitionManaged(store, managed, 'queued', {
       reason: `Imported PR repair advanced to ${newSha}; the next Light review must use this exact head.`,
+      actor: 'reconciliation',
+      sha: newSha,
+      at,
+    });
+    return {
+      stagedReviewQueued: true,
+      headSha: newSha,
+      effects: [{
+        type: 'set-review-labels',
+        pullRequestNumber: managed.pullRequestNumber,
+        add: [PR_REVIEW_LABELS.queued],
+        remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.failed],
+      }],
+    };
+  }
+
+  if (importedStagedLightReset(root, store, managed)) {
+    managed.activeReviewRequestId = null;
+    managed.queuePosition = null;
+    transitionManaged(store, managed, 'queued', {
+      reason: `Imported PR advanced to ${newSha} before Full review; the next Light review must use this exact head.`,
       actor: 'reconciliation',
       sha: newSha,
       at,
@@ -501,7 +533,9 @@ export function reconcileManagedPullRequest(root, managedId, {
   const current = loadPrReviewStore(root);
   const currentManaged = findManaged(current, managedId);
   if (!currentManaged) throw new Error(`Managed PR ${managedId} was not found.`);
-  if (currentManaged.reviewState === 'paused') return { state: 'paused', skipped: true };
+  if (currentManaged.reviewState === 'paused' && !importedStagedLightReset(root, current, currentManaged)) {
+    return { state: 'paused', skipped: true };
+  }
   const pr = snapshot || managedPrSnapshot(root, currentManaged.pullRequestNumber);
   if (!pr) throw new Error(`Could not reconcile PR #${currentManaged.pullRequestNumber}.`);
 
@@ -541,7 +575,7 @@ export function reconcileManagedPullRequest(root, managedId, {
     if (String(pr.state).toUpperCase() === 'CLOSED') {
       return reconcileClosedUnmergedInStore(store, managed, at);
     }
-    const headJob = reconcileHeadChange(store, managed, pr, at);
+    const headJob = reconcileHeadChange(root, store, managed, pr, at);
     const review = reconcileReviewResultInStore(store, managed, pr, at, precomputed);
     return {
       state: managed.reviewState,
@@ -558,7 +592,7 @@ export function reconcileManagedPullRequest(root, managedId, {
 export function reconcileManagedPullRequests(root, options = {}) {
   const store = loadPrReviewStore(root);
   const records = store.managedPullRequests.filter((managed) => {
-    if (managed.reviewState === 'paused') return false;
+    if (managed.reviewState === 'paused' && !importedStagedLightReset(root, store, managed)) return false;
     const pendingMergedCompletion = managed.reviewState === 'merged'
       && (managed.issueClosurePending || managed.lifecycleCompletionPending || !managed.issueLifecycleLabelsClearedAt);
     return !TERMINAL_PR_STATES.has(managed.reviewState) || pendingMergedCompletion;

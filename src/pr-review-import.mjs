@@ -1,7 +1,14 @@
 import { loadConfig } from './state.mjs';
 import { runJson } from './process.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, ensurePrReviewLabels, setPrReviewLabels } from './pr-review-github.mjs';
-import { findManaged, loadPrReviewStore, managedPullRequestId, mutatePrReviewStore, nowIso } from './pr-review-store.mjs';
+import {
+  findManaged,
+  loadPrReviewStore,
+  managedPullRequestId,
+  mutatePrReviewStore,
+  nowIso,
+  transitionManaged,
+} from './pr-review-store.mjs';
 import { enqueueManagedReview, registerManagedPullRequest } from './pr-review-queue.mjs';
 import {
   createHarnessReviewEvent,
@@ -267,8 +274,16 @@ function recordImportedLightEvent(root, managedId, event, decision) {
     }].slice(-100);
     managed.updatedAt = new Date().toISOString();
     if (decision.action === 'stale') {
-      managed.lastError = 'The imported PR head changed during the Light review; no Full review was queued.';
-      managed.reviewState = 'paused';
+      const reason = 'The imported PR head changed during the Light review; the next Light review must use the new exact head.';
+      managed.activeReviewRequestId = null;
+      managed.queuePosition = null;
+      transitionManaged(store, managed, 'queued', {
+        reason,
+        actor: 'review-reconciliation',
+        sha: event.headSha,
+        error: reason,
+        at: managed.updatedAt,
+      });
     } else if (decision.action === 'repair') {
       managed.lastError = event.summary || 'The imported PR Light review requested changes; no Full review was queued.';
       managed.reviewState = 'changes_requested';
