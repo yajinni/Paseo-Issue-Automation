@@ -470,6 +470,7 @@ export function reconcileManagedPullRequest(root, managedId, {
   now = Date.now(),
   snapshot = null,
   effectRunner = applyReconciliationEffects,
+  finalizeApprovedReview = finalizeApprovedBrowserReview,
 } = {}) {
   const at = nowIso(now);
   const current = loadPrReviewStore(root);
@@ -493,11 +494,14 @@ export function reconcileManagedPullRequest(root, managedId, {
         recordApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
           findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
         });
-        finalizeApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
-          findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
-          pr,
-          gate: precomputed.gate,
-        });
+        if (!current.config.githubActions.allowChatGPTMerge
+            || currentManaged.provenance?.type === 'manual-import') {
+          finalizeApprovedReview(root, currentManaged, precomputed.reviewJob, {
+            findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
+            pr,
+            gate: precomputed.gate,
+          });
+        }
       }
     }
   }

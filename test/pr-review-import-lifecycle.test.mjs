@@ -8,13 +8,14 @@ import { evaluateApprovedReviewGate, finalizeApprovedBrowserReview } from '../sr
 import { applyMergedIssueEffect, reconcileManagedPullRequest } from '../src/pr-review-reconcile.mjs';
 import { createFixJobInStore, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
 import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
-import { loadRun, saveConfig } from '../src/state.mjs';
+import { loadRun, saveConfig, saveRun } from '../src/state.mjs';
 
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
 
-function fixture(t, { withGitRefs = false } = {}) {
+function fixture(t, { withGitRefs = false, manualImport = true } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-pr-review-import-lifecycle-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });
+  const branchName = manualImport ? 'feature/import-me' : 'ai/issue-101';
   if (withGitRefs) {
     const origin = path.join(root, 'origin.git');
     execFileSync('git', ['init', '--bare', '--quiet', origin], { cwd: root });
@@ -24,8 +25,8 @@ function fixture(t, { withGitRefs = false } = {}) {
     execFileSync('git', ['branch', '--quiet', '-M', 'main'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', origin], { cwd: root });
     execFileSync('git', ['push', '--quiet', 'origin', 'main'], { cwd: root });
-    execFileSync('git', ['checkout', '--quiet', '-b', 'feature/import-me'], { cwd: root });
-    execFileSync('git', ['push', '--quiet', 'origin', 'feature/import-me'], { cwd: root });
+    execFileSync('git', ['checkout', '--quiet', '-b', branchName], { cwd: root });
+    execFileSync('git', ['push', '--quiet', 'origin', branchName], { cwd: root });
   }
   saveConfig(root, { baseBranch: 'main' });
   savePrAutomationConfig(root, { reviewQueue: { paused: true } });
@@ -36,26 +37,32 @@ function fixture(t, { withGitRefs = false } = {}) {
     issueUrl: 'https://github.com/owner/repo/issues/101',
     pullRequestNumber: 45,
     pullRequestUrl: 'https://github.com/owner/repo/pull/45',
-    branchName: 'feature/import-me',
+    branchName,
     baseBranch: 'main',
     currentHeadSha: HEAD,
-    provenance: {
-      type: 'manual-import',
-      importedAt: new Date(1000).toISOString(),
-      repository: 'owner/repo',
-      pullRequestNumber: 45,
-      issueNumber: 101,
-      headSha: HEAD,
-      headBranch: 'feature/import-me',
-      baseBranch: 'main',
-    },
+    ...(manualImport ? {
+      provenance: {
+        type: 'manual-import',
+        importedAt: new Date(1000).toISOString(),
+        repository: 'owner/repo',
+        pullRequestNumber: 45,
+        issueNumber: 101,
+        headSha: HEAD,
+        headBranch: branchName,
+        baseBranch: 'main',
+      },
+    } : {
+      worktreePath: root,
+      workspaceId: 'workspace-101',
+      coderAgentId: 'coder-101',
+    }),
   }, { now: 1000 });
   const pr = {
     number: 45,
     url: 'https://github.com/owner/repo/pull/45',
     state: 'OPEN',
     headRefOid: HEAD,
-    headRefName: 'feature/import-me',
+    headRefName: branchName,
     baseRefName: 'main',
     mergeable: 'MERGEABLE',
     mergeStateStatus: 'CLEAN',
@@ -81,8 +88,7 @@ function approvedMarker(reviewRequestId) {
   })}\n-->\nApproved exact head.`;
 }
 
-function seedAwaitingImportedReview(root, managed) {
-  const reviewRequestId = 'review-imported-merged';
+function seedAwaitingReview(root, managed, reviewRequestId = 'review-imported-merged') {
   mutatePrReviewStore(root, (store) => {
     const record = store.managedPullRequests[0];
     record.reviewState = 'awaiting_result';
@@ -163,7 +169,7 @@ test('imported approval finalizes the managed record and never creates an automa
 test('imported approval with ChatGPT merge preserves validation for merged lifecycle completion', (t) => {
   const { root, managed, pr } = fixture(t, { withGitRefs: true });
   savePrAutomationConfig(root, { githubActions: { allowChatGPTMerge: true } });
-  const reviewRequestId = seedAwaitingImportedReview(root, managed);
+  const reviewRequestId = seedAwaitingReview(root, managed);
 
   const approvedOpenSnapshot = {
     ...pr,
@@ -206,9 +212,53 @@ test('imported approval with ChatGPT merge preserves validation for merged lifec
   assert.equal(loadPrReviewStore(root).managedPullRequests[0].lifecycleCompletionPending, false);
 });
 
+test('controller-created approval with ChatGPT merge does not invoke controller finalization', (t) => {
+  const { root, managed, pr } = fixture(t, { withGitRefs: true, manualImport: false });
+  savePrAutomationConfig(root, { githubActions: { allowChatGPTMerge: true } });
+  saveRun(root, managed.issueNumber, {
+    issueNumber: managed.issueNumber,
+    issueUrl: managed.issueUrl,
+    status: 'agent-running',
+    phase: 'reviewing-heavy',
+    reviewRuntimeStage: 'full',
+    branch: managed.branchName,
+    workspaceId: managed.workspaceId,
+    coderAgentId: managed.coderAgentId,
+    prNumber: managed.pullRequestNumber,
+    prUrl: managed.pullRequestUrl,
+    events: [{ event: 'validation-summary', result: 'PASS', commit: HEAD }],
+    activity: [],
+  });
+  const reviewRequestId = seedAwaitingReview(root, managed, 'review-controller');
+  let finalizationCalls = 0;
+  const outcome = reconcileManagedPullRequest(root, managed.id, {
+    now: 4000,
+    snapshot: {
+      ...pr,
+      comments: [{ id: 7788, body: approvedMarker(reviewRequestId), createdAt: '2026-08-10T04:09:00Z' }],
+      reviews: [],
+    },
+    effectRunner() {
+      return [];
+    },
+    finalizeApprovedReview() {
+      finalizationCalls += 1;
+      throw new Error('Controller finalization must not run for ChatGPT-approved managed PRs.');
+    },
+  });
+
+  assert.equal(outcome.review.result, 'approved');
+  assert.equal(finalizationCalls, 0);
+  const run = loadRun(root, managed.issueNumber);
+  assert.equal(run.phase, 'reviewing-heavy');
+  assert.notEqual(run.phase, 'human-review');
+  assert.notEqual(run.phase, 'auto-merge-requested');
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].lastValidatedReviewSha, null);
+});
+
 test('first imported merged reconciliation fails closed when validation evidence is absent', (t) => {
   const { root, managed, pr } = fixture(t);
-  const reviewRequestId = seedAwaitingImportedReview(root, managed);
+  const reviewRequestId = seedAwaitingReview(root, managed);
   let pendingEffects;
   const outcome = reconcileManagedPullRequest(root, managed.id, {
     now: 5000,
