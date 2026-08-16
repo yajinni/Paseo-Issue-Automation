@@ -493,13 +493,11 @@ export function reconcileManagedPullRequest(root, managedId, {
         recordApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
           findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
         });
-        if (!current.config.githubActions.allowChatGPTMerge) {
-          finalizeApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
-            findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
-            pr,
-            gate: precomputed.gate,
-          });
-        }
+        finalizeApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
+          findings: precomputed.result.humanMarkdown || 'Browser Reviewer approved this exact validated commit.',
+          pr,
+          gate: precomputed.gate,
+        });
       }
     }
   }

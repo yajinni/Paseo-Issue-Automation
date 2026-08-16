@@ -12,9 +12,21 @@ import { loadRun, saveConfig } from '../src/state.mjs';
 
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
 
-function fixture(t) {
+function fixture(t, { withGitRefs = false } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-pr-review-import-lifecycle-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });
+  if (withGitRefs) {
+    const origin = path.join(root, 'origin.git');
+    execFileSync('git', ['init', '--bare', '--quiet', origin], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Paseo Test'], { cwd: root });
+    execFileSync('git', ['commit', '--quiet', '--allow-empty', '-m', 'fixture'], { cwd: root });
+    execFileSync('git', ['branch', '--quiet', '-M', 'main'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', origin], { cwd: root });
+    execFileSync('git', ['push', '--quiet', 'origin', 'main'], { cwd: root });
+    execFileSync('git', ['checkout', '--quiet', '-b', 'feature/import-me'], { cwd: root });
+    execFileSync('git', ['push', '--quiet', 'origin', 'feature/import-me'], { cwd: root });
+  }
   saveConfig(root, { baseBranch: 'main' });
   savePrAutomationConfig(root, { reviewQueue: { paused: true } });
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -148,13 +160,26 @@ test('imported approval finalizes the managed record and never creates an automa
   assert.equal(loadRun(root, 101), null);
 });
 
-test('first imported merged reconciliation completes only with preserved validation evidence', (t) => {
-  const { root, managed, pr } = fixture(t);
+test('imported approval with ChatGPT merge preserves validation for merged lifecycle completion', (t) => {
+  const { root, managed, pr } = fixture(t, { withGitRefs: true });
   savePrAutomationConfig(root, { githubActions: { allowChatGPTMerge: true } });
   const reviewRequestId = seedAwaitingImportedReview(root, managed);
-  mutatePrReviewStore(root, (store) => {
-    store.managedPullRequests[0].lastValidatedReviewSha = HEAD;
+
+  const approvedOpenSnapshot = {
+    ...pr,
+    comments: [{ id: 7788, body: approvedMarker(reviewRequestId), createdAt: '2026-08-10T04:09:00Z' }],
+    reviews: [],
+  };
+  const openOutcome = reconcileManagedPullRequest(root, managed.id, {
+    now: 4000,
+    snapshot: approvedOpenSnapshot,
+    effectRunner() {
+      return [];
+    },
   });
+  assert.equal(openOutcome.review.result, 'approved');
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].lastValidatedReviewSha, HEAD);
+  assert.equal(loadRun(root, 101), null);
 
   let pendingEffects;
   const outcome = reconcileManagedPullRequest(root, managed.id, {
