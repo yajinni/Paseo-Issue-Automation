@@ -136,6 +136,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         pullRequestNumber: Number(input.pullRequestNumber),
         pullRequestUrl: String(input.pullRequestUrl),
         branchName: String(input.branchName),
+        baseBranch: input.baseBranch ? String(input.baseBranch) : null,
         worktreePath: input.worktreePath || null,
         workspaceId: input.workspaceId || null,
         coderAgentId: input.coderAgentId || null,
@@ -158,6 +159,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         lastError: null,
         issueClosurePending: false,
         diagnosticScreenshot: null,
+        provenance: input.provenance ? clone(input.provenance) : null,
       };
       store.managedPullRequests.push(managed);
       appendHistory(store, {
@@ -172,6 +174,8 @@ export function registerManagedPullRequest(root, input, options = {}) {
         worktreePath: input.worktreePath || managed.worktreePath, workspaceId: input.workspaceId || managed.workspaceId,
         coderAgentId: input.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(input.currentHeadSha), updatedAt: at, lastActivityAt: at,
       });
+      if (input.baseBranch) managed.baseBranch = String(input.baseBranch);
+      if (input.provenance) managed.provenance = clone(input.provenance);
     }
     let reviewJob = null;
     if (store.config.reviewQueue.paused === false && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
