@@ -48,6 +48,9 @@ export function enqueueReviewInStore(store, managed, {
   conversationUrlOverride = null,
   now = Date.now(),
 } = {}) {
+  if (managed.provenance?.type === 'manual-import') {
+    throw new Error('Manual-import review execution is not implemented in this registration foundation; review-now cannot enqueue an imported PR review.');
+  }
   if (TERMINAL_PR_STATES.has(managed.reviewState)) throw new Error(`Managed PR ${managed.id} is terminal and cannot be queued.`);
   const sha = validSha(headSha);
   const at = nowIso(now);
@@ -127,30 +130,36 @@ export function registerManagedPullRequest(root, input, options = {}) {
     const id = managedPullRequestId(input.repository, input.pullRequestNumber);
     const at = nowIso(options.now || Date.now());
     let managed = findManaged(store, id);
+    const registrationInput = options.prepare
+      ? options.prepare({ store, id, managed, input }) || input
+      : input;
     if (!managed) {
       managed = {
         id,
-        repository: String(input.repository),
-        issueNumber: Number(input.issueNumber),
-        issueUrl: input.issueUrl || null,
-        pullRequestNumber: Number(input.pullRequestNumber),
-        pullRequestUrl: String(input.pullRequestUrl),
-        branchName: String(input.branchName),
-        worktreePath: input.worktreePath || null,
-        workspaceId: input.workspaceId || null,
-        coderAgentId: input.coderAgentId || null,
-        currentHeadSha: validSha(input.currentHeadSha),
+        repository: String(registrationInput.repository),
+        issueNumber: Number(registrationInput.issueNumber),
+        issueUrl: registrationInput.issueUrl || null,
+        pullRequestNumber: Number(registrationInput.pullRequestNumber),
+        pullRequestUrl: String(registrationInput.pullRequestUrl),
+        branchName: String(registrationInput.branchName),
+        baseBranch: registrationInput.baseBranch ? String(registrationInput.baseBranch) : null,
+        worktreePath: registrationInput.worktreePath || null,
+        workspaceId: registrationInput.workspaceId || null,
+        coderAgentId: registrationInput.coderAgentId || null,
+        currentHeadSha: validSha(registrationInput.currentHeadSha),
         lastSubmittedReviewSha: null,
         lastCompletedReviewSha: null,
-        reviewRound: Math.max(1, Number(input.reviewRound) || 1),
+        reviewRound: Math.max(1, Number(registrationInput.reviewRound) || 1),
         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
-         reviewState: store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
+         reviewState: options.skipQueue
+           ? 'paused'
+           : store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
         queuePosition: null,
-        priority: Number(input.priority) || 0,
+        priority: Number(registrationInput.priority) || 0,
         activeReviewRequestId: null,
         lastReviewCommentId: null,
         lastProcessedReviewRequestId: null,
-        conversationUrlOverride: input.conversationUrlOverride || null,
+        conversationUrlOverride: registrationInput.conversationUrlOverride || null,
         createdAt: at,
         updatedAt: at,
         lastReconciledAt: null,
@@ -158,6 +167,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         lastError: null,
         issueClosurePending: false,
         diagnosticScreenshot: null,
+        provenance: registrationInput.provenance ? clone(registrationInput.provenance) : null,
       };
       store.managedPullRequests.push(managed);
       appendHistory(store, {
@@ -167,14 +177,18 @@ export function registerManagedPullRequest(root, input, options = {}) {
       });
     } else {
       Object.assign(managed, {
-        issueNumber: Number(input.issueNumber), issueUrl: input.issueUrl || managed.issueUrl,
-        pullRequestUrl: String(input.pullRequestUrl || managed.pullRequestUrl), branchName: String(input.branchName || managed.branchName),
-        worktreePath: input.worktreePath || managed.worktreePath, workspaceId: input.workspaceId || managed.workspaceId,
-        coderAgentId: input.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(input.currentHeadSha), updatedAt: at, lastActivityAt: at,
+        issueNumber: Number(registrationInput.issueNumber), issueUrl: registrationInput.issueUrl || managed.issueUrl,
+        pullRequestUrl: String(registrationInput.pullRequestUrl || managed.pullRequestUrl), branchName: String(registrationInput.branchName || managed.branchName),
+        worktreePath: registrationInput.worktreePath || managed.worktreePath, workspaceId: registrationInput.workspaceId || managed.workspaceId,
+        coderAgentId: registrationInput.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(registrationInput.currentHeadSha), updatedAt: at, lastActivityAt: at,
       });
+      if (registrationInput.baseBranch) managed.baseBranch = String(registrationInput.baseBranch);
+      if (registrationInput.provenance) managed.provenance = clone(registrationInput.provenance);
     }
     let reviewJob = null;
-    if (store.config.reviewQueue.paused === false && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
+    if (!options.skipQueue && store.config.reviewQueue.paused === false && store.config.browserReview.enabled) {
+      reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
+    }
     return { managed: clone(managed), reviewJob: reviewJob ? clone(reviewJob) : null };
   });
 }
@@ -193,7 +207,10 @@ export function nextDueReview(store, now = Date.now()) {
     .filter((job) => {
       if (job.state !== 'queued' || Date.parse(job.dueAt) > now) return false;
       const managed = findManaged(store, job.managedPullRequestId);
-      return Boolean(managed && managed.reviewState !== 'paused' && !TERMINAL_PR_STATES.has(managed.reviewState));
+      return Boolean(managed
+        && managed.provenance?.type !== 'manual-import'
+        && managed.reviewState !== 'paused'
+        && !TERMINAL_PR_STATES.has(managed.reviewState));
     })
     .sort((a, b) => Number(b.priority) - Number(a.priority) || Number(a.queuePosition) - Number(b.queuePosition))[0] || null;
 }
