@@ -135,7 +135,7 @@ test('an imported managed PR enters the normal review queue through review-now',
   assert.equal(loadPrReviewStore(root).managedPullRequests[0].reviewState, 'queued');
 });
 
-test('public review-now runs imported Light review before queuing exact-head Web ChatGPT full review', async (t) => {
+test('public review-now canonicalizes mixed-case imported identity before staged review', async (t) => {
   const { root, options, pr, issue } = fixture(t);
   saveConfig(root, {
     baseBranch: 'main',
@@ -147,13 +147,13 @@ test('public review-now runs imported Light review before queuing exact-head Web
     browserReview: { enabled: true, projectConversationUrl: 'https://chatgpt.com/c/example' },
     reviewQueue: { paused: false },
   });
-  const imported = importManagedPullRequest(root, { id: 'owner/repo#45' }, options);
+  const imported = importManagedPullRequest(root, { id: 'Owner/Repo#45' }, options);
   assert.equal(imported.reviewJob, null);
 
   const calls = [];
   const result = await prReviewCommand(root, {
     _: ['pr-review', 'review-now'],
-    id: 'owner/repo#45',
+    id: 'Owner/Repo#45',
   }, {
     snapshotReader: () => pr,
     issueReader: () => issue,

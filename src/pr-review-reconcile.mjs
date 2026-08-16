@@ -168,6 +168,15 @@ function importedFinalizationEvidence(managed) {
   return String(managed.lastProcessedReviewRequestId || '').startsWith(FINALIZATION_REQUEST_PREFIX);
 }
 
+function importedLightRepairPending(managed, headSha) {
+  return managed.provenance?.type === 'manual-import'
+    && managed.reviewState === 'changes_requested'
+    && (managed.stagedReviewEvents || []).some((event) => event?.stage === 'quick'
+      && event?.result === 'changes'
+      && event?.decision === 'repair'
+      && String(event.headSha || '').toLowerCase() === String(headSha || '').toLowerCase());
+}
+
 function reconcileHeadChange(store, managed, pr, at) {
   const newSha = String(pr.headRefOid || '').toLowerCase();
   if (!newSha || newSha === managed.currentHeadSha) return null;
@@ -201,6 +210,27 @@ function reconcileHeadChange(store, managed, pr, at) {
         pullRequestNumber: managed.pullRequestNumber,
         add: [PR_REVIEW_LABELS.failed],
         remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.changesRequested],
+      }],
+    };
+  }
+
+  if (importedLightRepairPending(managed, previousSha)) {
+    managed.activeReviewRequestId = null;
+    managed.queuePosition = null;
+    transitionManaged(store, managed, 'queued', {
+      reason: `Imported PR repair advanced to ${newSha}; the next Light review must use this exact head.`,
+      actor: 'reconciliation',
+      sha: newSha,
+      at,
+    });
+    return {
+      stagedReviewQueued: true,
+      headSha: newSha,
+      effects: [{
+        type: 'set-review-labels',
+        pullRequestNumber: managed.pullRequestNumber,
+        add: [PR_REVIEW_LABELS.queued],
+        remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.failed],
       }],
     };
   }
@@ -516,6 +546,7 @@ export function reconcileManagedPullRequest(root, managedId, {
     return {
       state: managed.reviewState,
       headChanged: Boolean(headJob),
+      stagedReviewQueued: Boolean(headJob?.stagedReviewQueued),
       review,
       effects: [...(headJob?.effects || []), ...(review?.effects || [])],
     };

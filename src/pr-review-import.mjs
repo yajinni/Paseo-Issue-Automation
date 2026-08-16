@@ -48,6 +48,11 @@ export function parseManagedPullRequestId(value) {
   };
 }
 
+function canonicalManagedPullRequestId(value) {
+  const parsed = parseManagedPullRequestId(value);
+  return managedPullRequestId(parsed.repository, parsed.pullRequestNumber);
+}
+
 function defaultRepositoryReader(root) {
   return runJson('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: root, allowFailure: true });
 }
@@ -272,6 +277,13 @@ function recordImportedLightEvent(root, managedId, event, decision) {
   });
 }
 
+function importedLightRepairPending(events, headSha) {
+  return events.some((event) => event?.stage === REVIEW_STAGES.quick
+    && event?.result === 'changes'
+    && event?.decision === 'repair'
+    && String(event.headSha || '').toLowerCase() === String(headSha || '').toLowerCase());
+}
+
 function currentImportedHead(snapshot, expectedHead) {
   return snapshot
     && String(snapshot.state || '').toUpperCase() === 'OPEN'
@@ -281,7 +293,7 @@ function currentImportedHead(snapshot, expectedHead) {
 }
 
 export function importedStagedReviewRequired(root, managedId, config = loadConfig(root)) {
-  const managed = findManaged(loadPrReviewStore(root), managedId);
+  const managed = findManaged(loadPrReviewStore(root), canonicalManagedPullRequestId(managedId));
   return Boolean(
     managed?.provenance?.type === 'manual-import'
       && config.review?.workflow === 'quick-web-chatgpt',
@@ -296,8 +308,9 @@ export function reviewImportedPullRequestNow(root, managedId, {
   conversationUrlOverride = null,
   now = Date.now(),
 } = {}) {
+  const canonicalId = canonicalManagedPullRequestId(managedId);
   const store = loadPrReviewStore(root);
-  const managed = findManaged(store, managedId);
+  const managed = findManaged(store, canonicalId);
   if (!managed?.provenance || managed.provenance.type !== 'manual-import'
       || config.review?.workflow !== 'quick-web-chatgpt') return null;
 
@@ -315,6 +328,9 @@ export function reviewImportedPullRequestNow(root, managedId, {
   }
 
   const events = Array.isArray(managed.stagedReviewEvents) ? managed.stagedReviewEvents : [];
+  if (importedLightRepairPending(events, expectedHead)) {
+    throw new Error('Imported Light review requires a new exact PR head after changes were requested.');
+  }
   const round = nextReviewRound({ events }, REVIEW_STAGES.quick);
   const expected = {
     repository: managed.repository,
@@ -346,14 +362,14 @@ export function reviewImportedPullRequestNow(root, managedId, {
       findings: [],
     }, expected);
   const decision = reviewStageDecision({ config, state: { events }, stage: REVIEW_STAGES.quick, verdict: event });
-  recordImportedLightEvent(root, managedId, event, decision);
+  recordImportedLightEvent(root, canonicalId, event, decision);
   if (!['quick-passed', 'handoff'].includes(decision.action)) {
     return {
       staged: true,
       lightReview: { event, decision },
       reviewJob: null,
       metadata: null,
-      managed: findManaged(loadPrReviewStore(root), managedId),
+      managed: findManaged(loadPrReviewStore(root), canonicalId),
     };
   }
 
@@ -365,16 +381,16 @@ export function reviewImportedPullRequestNow(root, managedId, {
       findings: [],
     }, expected);
     const staleDecision = reviewStageDecision({ config, state: { events: [...events, event] }, stage: REVIEW_STAGES.quick, verdict: stale });
-    recordImportedLightEvent(root, managedId, stale, staleDecision);
+    recordImportedLightEvent(root, canonicalId, stale, staleDecision);
     return {
       staged: true,
       lightReview: { event: stale, decision: staleDecision },
       reviewJob: null,
       metadata: null,
-      managed: findManaged(loadPrReviewStore(root), managedId),
+      managed: findManaged(loadPrReviewStore(root), canonicalId),
     };
   }
-  const queued = queueWebChatGptFullReview(root, managedId, {
+  const queued = queueWebChatGptFullReview(root, canonicalId, {
     quickOutcome: decision,
     quickFindings: event.findings,
     reviewEvents: [...events, event],
@@ -393,6 +409,7 @@ export function reviewImportedPullRequestNow(root, managedId, {
 }
 
 export function reviewManagedNow(root, managedId, options = {}) {
-  const imported = reviewImportedPullRequestNow(root, managedId, options);
-  return imported || enqueueManagedReview(root, managedId, options);
+  const canonicalId = canonicalManagedPullRequestId(managedId);
+  const imported = reviewImportedPullRequestNow(root, canonicalId, options);
+  return imported || enqueueManagedReview(root, canonicalId, options);
 }

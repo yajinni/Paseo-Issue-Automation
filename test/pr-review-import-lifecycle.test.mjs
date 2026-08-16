@@ -7,6 +7,8 @@ import test from 'node:test';
 import { evaluateApprovedReviewGate, finalizeApprovedBrowserReview } from '../src/pr-review-finalize.mjs';
 import { applyMergedIssueEffect, reconcileManagedPullRequest } from '../src/pr-review-reconcile.mjs';
 import { createFixJobInStore, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
+import { prReviewCommand } from '../src/cli.mjs';
+import { reviewWorkerPath } from '../src/pr-review-scheduler.mjs';
 import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
 import { loadRun, saveConfig, saveRun } from '../src/state.mjs';
 
@@ -100,6 +102,30 @@ function changesRequestedMarker(reviewRequestId, overrides = {}) {
     result: 'changes_requested',
     ...overrides,
   })}\n-->\nChanges requested.`;
+}
+
+function stagedReviewConfig(root) {
+  saveConfig(root, {
+    baseBranch: 'main',
+    models: { reviewer: 'provider/light-model' },
+    review: { workflow: 'quick-web-chatgpt', quickMaxRounds: 3, fullMaxRounds: 3 },
+  });
+  savePrAutomationConfig(root, {
+    enabled: true,
+    browserReview: { enabled: true },
+    reviewQueue: { paused: false },
+  });
+}
+
+function reviewNow(root, pr, lightRunner) {
+  return prReviewCommand(root, {
+    _: ['pr-review', 'review-now'],
+    id: 'OWNER/REPO#45',
+  }, {
+    snapshotReader: () => pr,
+    issueReader: () => ({ number: 101, title: 'Issue', body: 'Acceptance criteria.' }),
+    lightRunner,
+  });
 }
 
 function seedAwaitingReview(root, managed, reviewRequestId = 'review-imported-merged') {
@@ -439,6 +465,81 @@ test('reconciling the same changes-requested marker is idempotent', (t) => {
   assert.equal(first.review.result, 'changes_requested');
   assert.equal(second.review, null);
   assert.equal(loadPrReviewStore(root).fixJobs.length, 1);
+});
+
+test('imported Light changes require a new exact head before another Light round', async (t) => {
+  const { root, managed, pr } = fixture(t);
+  stagedReviewConfig(root);
+  let lightCalls = 0;
+
+  const first = await reviewNow(root, pr, () => {
+    lightCalls += 1;
+    return { result: 'changes', summary: 'Repair is required.', findings: [{ severity: 'blocking', message: 'Repair the imported head.' }] };
+  });
+  assert.equal(first.lightReview.decision.action, 'repair');
+
+  const before = loadPrReviewStore(root);
+  await assert.rejects(
+    () => reviewNow(root, pr, () => {
+      lightCalls += 1;
+      return { result: 'pass', summary: 'Unexpected retry.', findings: [] };
+    }),
+    /new exact PR head after changes were requested/,
+  );
+  const after = loadPrReviewStore(root);
+  assert.equal(lightCalls, 1);
+  assert.equal(after.managedPullRequests[0].reviewRound, before.managedPullRequests[0].reviewRound);
+  assert.equal(after.managedPullRequests[0].stagedReviewEvents.length, 1);
+  assert.equal(after.reviewJobs.length, 0);
+  assert.equal(after.managedPullRequests[0].currentHeadSha, HEAD);
+  assert.equal(managed.workspaceId, null);
+});
+
+test('a repaired imported Light head returns to staged Light before Full review', async (t) => {
+  const { root, managed, pr } = fixture(t);
+  stagedReviewConfig(root);
+
+  const first = await reviewNow(root, pr, () => ({
+    result: 'changes',
+    summary: 'Repair is required.',
+    findings: [{ severity: 'blocking', message: 'Repair the imported head.' }],
+  }));
+  assert.equal(first.lightReview.decision.action, 'repair');
+
+  const repairedPr = { ...pr, headRefOid: 'fedcba9876543210fedcba9876543210fedcba98' };
+  let effects = [];
+  const reconciled = reconcileManagedPullRequest(root, managed.id, {
+    now: 3000,
+    snapshot: repairedPr,
+    effectRunner(_root, _managedId, nextEffects) {
+      effects = nextEffects;
+      return [];
+    },
+  });
+  assert.equal(reconciled.headChanged, true);
+  assert.equal(reconciled.review, null);
+  assert.equal(reconciled.stagedReviewQueued, true);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].reviewState, 'queued');
+  assert.deepEqual(effects, [{
+    type: 'set-review-labels',
+    pullRequestNumber: 45,
+    add: ['paseo:review-queued'],
+    remove: ['paseo:reviewing', 'paseo:changes-requested', 'paseo:fixing', 'paseo:review-failed'],
+  }]);
+
+  const next = await reviewNow(root, repairedPr, () => ({
+    result: 'pass',
+    summary: 'The repaired Light head passed.',
+    findings: [],
+  }));
+  assert.equal(next.lightReview.decision.action, 'quick-passed');
+  assert.equal(next.reviewJob.headSha, repairedPr.headRefOid);
+  assert.equal(next.metadata.stage, 'full');
+  assert.match(next.reviewJob.id, /^review-/);
+  assert.match(reviewWorkerPath(root, next.reviewJob.id), /web-chatgpt-full-review-worker\.mjs$/);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 1);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].workspaceId, null);
 });
 
 test('imported approval remains blocked on stale head or failed CI', (t) => {
