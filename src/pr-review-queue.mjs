@@ -48,6 +48,9 @@ export function enqueueReviewInStore(store, managed, {
   conversationUrlOverride = null,
   now = Date.now(),
 } = {}) {
+  if (managed.provenance?.type === 'manual-import') {
+    throw new Error('Manual-import review execution is not implemented in this registration foundation; review-now cannot enqueue an imported PR review.');
+  }
   if (TERMINAL_PR_STATES.has(managed.reviewState)) throw new Error(`Managed PR ${managed.id} is terminal and cannot be queued.`);
   const sha = validSha(headSha);
   const at = nowIso(now);
@@ -136,6 +139,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         pullRequestNumber: Number(input.pullRequestNumber),
         pullRequestUrl: String(input.pullRequestUrl),
         branchName: String(input.branchName),
+        baseBranch: input.baseBranch ? String(input.baseBranch) : null,
         worktreePath: input.worktreePath || null,
         workspaceId: input.workspaceId || null,
         coderAgentId: input.coderAgentId || null,
@@ -144,7 +148,9 @@ export function registerManagedPullRequest(root, input, options = {}) {
         lastCompletedReviewSha: null,
         reviewRound: Math.max(1, Number(input.reviewRound) || 1),
         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
-         reviewState: store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
+         reviewState: options.skipQueue
+           ? 'paused'
+           : store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
         queuePosition: null,
         priority: Number(input.priority) || 0,
         activeReviewRequestId: null,
@@ -158,6 +164,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         lastError: null,
         issueClosurePending: false,
         diagnosticScreenshot: null,
+        provenance: input.provenance ? clone(input.provenance) : null,
       };
       store.managedPullRequests.push(managed);
       appendHistory(store, {
@@ -172,9 +179,13 @@ export function registerManagedPullRequest(root, input, options = {}) {
         worktreePath: input.worktreePath || managed.worktreePath, workspaceId: input.workspaceId || managed.workspaceId,
         coderAgentId: input.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(input.currentHeadSha), updatedAt: at, lastActivityAt: at,
       });
+      if (input.baseBranch) managed.baseBranch = String(input.baseBranch);
+      if (input.provenance) managed.provenance = clone(input.provenance);
     }
     let reviewJob = null;
-    if (store.config.reviewQueue.paused === false && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
+    if (!options.skipQueue && store.config.reviewQueue.paused === false && store.config.browserReview.enabled) {
+      reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
+    }
     return { managed: clone(managed), reviewJob: reviewJob ? clone(reviewJob) : null };
   });
 }
@@ -193,7 +204,10 @@ export function nextDueReview(store, now = Date.now()) {
     .filter((job) => {
       if (job.state !== 'queued' || Date.parse(job.dueAt) > now) return false;
       const managed = findManaged(store, job.managedPullRequestId);
-      return Boolean(managed && managed.reviewState !== 'paused' && !TERMINAL_PR_STATES.has(managed.reviewState));
+      return Boolean(managed
+        && managed.provenance?.type !== 'manual-import'
+        && managed.reviewState !== 'paused'
+        && !TERMINAL_PR_STATES.has(managed.reviewState));
     })
     .sort((a, b) => Number(b.priority) - Number(a.priority) || Number(a.queuePosition) - Number(b.queuePosition))[0] || null;
 }

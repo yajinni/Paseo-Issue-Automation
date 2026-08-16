@@ -23,6 +23,20 @@ The Issue Execution Controller runs two independent schedulers:
 
 When a Coder creates a draft PR and records validation for its exact head, Paseo registers the managed PR, releases the coding slot, and adds a persistent review job. The coding scheduler may immediately start another issue.
 
+## Registering an existing pull request
+
+An already-open pull request can be registered without creating an issue run, coder workspace, controller state, or Issue Claiming state:
+
+```bash
+npx paseo-issue-automation pr-review import --id OWNER/REPOSITORY#PR [--issue N] [--head FULL_HEAD_SHA]
+```
+
+The repository selector must match the configured checkout. Registration fails closed unless the pull request is open, non-fork, same-repository, targets the configured base branch, and has a current full head SHA and branch. Paseo infers one same-repository closing issue only when the association is unambiguous; otherwise pass `--issue N`. The selected issue must be an issue rather than another pull request. Forks, cross-repository references, wrong bases, stale or mismatched heads, unsupported selectors, and conflicting PR/issue ownership are rejected.
+
+The repository-scoped API is `POST /api/repositories/{repository-selector}/pr-reviews/import` with `{ "pullRequestNumber": PR, "issueNumber": N, "headSha": "FULL_HEAD_SHA" }`. The repository-local API is `POST /api/pr-reviews/import` with `id: "OWNER/REPOSITORY#PR"` and the same optional fields.
+
+Successful imports are idempotent by canonical repository and pull-request identity and persist `manual-import` provenance containing the exact PR, issue, base, branch, and head. This registration foundation intentionally does not execute imported reviews: `pr-review review-now` fails closed with an incomplete-capability error and creates no review job or legacy worker selection. Controller-created managed PR registration and review behavior are unchanged.
+
 ## Persistent state
 
 Repository-specific state uses the package's existing atomic JSON storage beneath the repository's Git common directory:

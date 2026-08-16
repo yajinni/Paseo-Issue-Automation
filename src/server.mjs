@@ -63,6 +63,7 @@ import {
 } from './browser-service.mjs';
 import { loadBrowserConfig, resetBrowserProfile, saveBrowserConfig, uninstallBrowserState } from './browser-profile.mjs';
 import { normalizeChatGptConversationUrl } from './chatgpt-url.mjs';
+import { importManagedPullRequest } from './pr-review-import.mjs';
 import {
   cancelAssociatedIssue,
   markManagedPrManuallyResolved,
@@ -387,6 +388,13 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
         resetPrReviewTimers();
       } else if (url.pathname === '/api/pr-reviews/pause') result = setReviewQueuePaused(root, true);
       else if (url.pathname === '/api/pr-reviews/resume') result = setReviewQueuePaused(root, false);
+      else if (url.pathname === '/api/pr-reviews/import') result = importManagedPullRequest(root, {
+        id: body.id,
+        repository: body.repository,
+        pullRequestNumber: body.pullRequestNumber,
+        issueNumber: body.issueNumber,
+        headSha: body.headSha,
+      });
       else if (url.pathname === '/api/pr-reviews/review-now') result = enqueueManagedReview(root, String(body.managedPullRequestId), {
         immediate: true,
         conversationUrlOverride: body.conversationUrlOverride ? normalizeChatGptConversationUrl(body.conversationUrlOverride) : null,

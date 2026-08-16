@@ -193,6 +193,7 @@ export function normalizeManagedPullRequest(record) {
     pullRequestNumber: Number(record.pullRequestNumber),
     pullRequestUrl: String(record.pullRequestUrl),
     branchName: String(record.branchName),
+    baseBranch: record.baseBranch ? String(record.baseBranch) : null,
     worktreePath: record.worktreePath || null,
     workspaceId: record.workspaceId || null,
     coderAgentId: record.coderAgentId || null,
@@ -220,6 +221,9 @@ export function normalizeManagedPullRequest(record) {
     issueLifecycleLabelsClearedAt: record.issueLifecycleLabelsClearedAt || null,
     reviewEvidenceMissing: record.reviewEvidenceMissing === true,
     diagnosticScreenshot: record.diagnosticScreenshot || null,
+    provenance: record.provenance && typeof record.provenance === 'object'
+      ? clone(record.provenance)
+      : null,
   };
 }
 
@@ -441,7 +445,10 @@ export function transitionManaged(store, record, nextState, {
 }
 
 export function findManaged(store, id) {
-  return store.managedPullRequests.find((record) => record.id === id) || null;
+  const value = String(id || '').trim();
+  const match = value.match(/^(.+)#([1-9][0-9]*)$/);
+  const canonical = match ? managedPullRequestId(match[1], Number(match[2])) : value;
+  return store.managedPullRequests.find((record) => record.id === canonical) || null;
 }
 
 export function findReviewJob(store, id) {
