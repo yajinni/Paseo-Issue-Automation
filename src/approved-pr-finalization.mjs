@@ -96,6 +96,7 @@ export function ensureManagedApprovedFinalization(root, {
   state,
   headSha,
   approvalSource = 'full-review',
+  validation = null,
 } = {}) {
   const head = normalizedHead(headSha || pullRequest?.headRefOid);
   if (!/^[0-9a-f]{7,64}$/.test(head)) throw new Error('Approved finalization requires an exact PR head SHA.');
@@ -123,6 +124,7 @@ export function ensureManagedApprovedFinalization(root, {
         currentHeadSha: head,
         lastSubmittedReviewSha: null,
         lastCompletedReviewSha: null,
+        lastValidatedReviewSha: normalizedHead(validation?.commit || validation?.headSha) === head ? head : null,
         reviewRound: 1,
         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
         reviewState: 'ready_to_merge',
@@ -162,6 +164,7 @@ export function ensureManagedApprovedFinalization(root, {
       managed.workspaceId = state?.workspaceId || managed.workspaceId;
       managed.coderAgentId = state?.coderAgentId || state?.agentId || managed.coderAgentId;
       managed.currentHeadSha = head;
+      if (normalizedHead(validation?.commit || validation?.headSha) === head) managed.lastValidatedReviewSha = head;
       managed.updatedAt = at;
       managed.lastActivityAt = at;
     }

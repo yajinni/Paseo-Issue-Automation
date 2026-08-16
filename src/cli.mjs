@@ -12,7 +12,6 @@ import { dispatchAvailableIssues } from './dispatch-batch.mjs';
 import {
   applyManualReviewResult,
   cancelQueuedReview,
-  enqueueManagedReview,
   moveReviewJob,
   pauseManagedPr,
   retryReviewJob,
@@ -20,6 +19,7 @@ import {
 import { setReviewQueuePaused } from './pr-review-store.mjs';
 import { saveValidatedPrAutomationConfig } from './pr-review-config.mjs';
 import { normalizeChatGptConversationUrl } from './chatgpt-url.mjs';
+import { importManagedPullRequest, reviewManagedNow } from './pr-review-import.mjs';
 
 function argsToObject(args) {
   const result = { _: [] };
@@ -66,6 +66,7 @@ PR review commands:
   pr-review enable | disable
   pr-review pause | resume
   pr-review reconcile | recover
+  pr-review import --id REPOSITORY#PR [--issue N] [--head SHA]
   pr-review review-now --id REPOSITORY#PR [--url CHATGPT_CONVERSATION_URL]
   pr-review retry --job REVIEW_JOB_ID
   pr-review retry-fix --job FIX_JOB_ID
@@ -88,7 +89,7 @@ Browser commands:
 `);
 }
 
-async function prReviewCommand(root, options) {
+export async function prReviewCommand(root, options, services = {}) {
   const action = options._[1] || 'status';
   if (action === 'status') return prReviewStatus(root);
   if (action === 'enable') return saveValidatedPrAutomationConfig(root, { enabled: true, browserReview: { enabled: true } });
@@ -97,9 +98,17 @@ async function prReviewCommand(root, options) {
   if (action === 'resume') return setReviewQueuePaused(root, false);
   if (action === 'reconcile') return reconcileManagedPullRequests(root);
   if (action === 'recover') return recoverPrReviewState(root);
-  if (action === 'review-now') return enqueueManagedReview(root, required(options, 'id'), {
+  if (action === 'import' || action === 'register') return (services.importer || importManagedPullRequest)(root, {
+    id: required(options, 'id'),
+    issueNumber: options.issue,
+    headSha: options.head,
+  });
+  if (action === 'review-now') return (services.reviewNow || reviewManagedNow)(root, required(options, 'id'), {
     immediate: true,
     conversationUrlOverride: options.url ? normalizeChatGptConversationUrl(options.url) : null,
+    lightRunner: services.lightRunner,
+    snapshotReader: services.snapshotReader,
+    issueReader: services.issueReader,
   });
   if (action === 'retry') return retryReviewJob(root, required(options, 'job'));
   if (action === 'retry-fix') return retryFixJob(root, required(options, 'job'));

@@ -193,14 +193,19 @@ export function normalizeManagedPullRequest(record) {
     pullRequestNumber: Number(record.pullRequestNumber),
     pullRequestUrl: String(record.pullRequestUrl),
     branchName: String(record.branchName),
+    baseBranch: record.baseBranch ? String(record.baseBranch) : null,
     worktreePath: record.worktreePath || null,
     workspaceId: record.workspaceId || null,
     coderAgentId: record.coderAgentId || null,
     currentHeadSha: String(record.currentHeadSha),
     lastSubmittedReviewSha: record.lastSubmittedReviewSha || null,
     lastCompletedReviewSha: record.lastCompletedReviewSha || null,
+    lastValidatedReviewSha: record.lastValidatedReviewSha || null,
     reviewRound: Math.max(1, Number(record.reviewRound) || 1),
     reviewPromptVersion: Math.max(1, Number(record.reviewPromptVersion) || REVIEW_PROMPT_VERSION),
+    stagedReviewEvents: Array.isArray(record.stagedReviewEvents)
+      ? clone(record.stagedReviewEvents).slice(-100)
+      : [],
     reviewState,
     queuePosition: record.queuePosition === null || record.queuePosition === undefined
       ? null
@@ -220,6 +225,9 @@ export function normalizeManagedPullRequest(record) {
     issueLifecycleLabelsClearedAt: record.issueLifecycleLabelsClearedAt || null,
     reviewEvidenceMissing: record.reviewEvidenceMissing === true,
     diagnosticScreenshot: record.diagnosticScreenshot || null,
+    provenance: record.provenance && typeof record.provenance === 'object'
+      ? clone(record.provenance)
+      : null,
   };
 }
 

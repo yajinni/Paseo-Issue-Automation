@@ -112,6 +112,7 @@ export function enqueueReviewInStore(store, managed, {
   };
   store.reviewJobs.push(job);
   managed.currentHeadSha = sha;
+  managed.lastValidatedReviewSha = null;
   managed.queuePosition = job.queuePosition;
   managed.activeReviewRequestId = job.reviewRequestId;
   transitionManaged(store, managed, 'queued', { reason: `Review queued for ${sha}.`, actor: 'queue', sha, at });
@@ -136,15 +137,20 @@ export function registerManagedPullRequest(root, input, options = {}) {
         pullRequestNumber: Number(input.pullRequestNumber),
         pullRequestUrl: String(input.pullRequestUrl),
         branchName: String(input.branchName),
+        baseBranch: input.baseBranch ? String(input.baseBranch) : null,
         worktreePath: input.worktreePath || null,
         workspaceId: input.workspaceId || null,
         coderAgentId: input.coderAgentId || null,
         currentHeadSha: validSha(input.currentHeadSha),
         lastSubmittedReviewSha: null,
         lastCompletedReviewSha: null,
+        lastValidatedReviewSha: null,
         reviewRound: Math.max(1, Number(input.reviewRound) || 1),
-        reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
-         reviewState: store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
+         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
+         stagedReviewEvents: [],
+         reviewState: options.skipQueue
+           ? 'paused'
+           : store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
         queuePosition: null,
         priority: Number(input.priority) || 0,
         activeReviewRequestId: null,
@@ -158,6 +164,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
         lastError: null,
         issueClosurePending: false,
         diagnosticScreenshot: null,
+        provenance: input.provenance ? clone(input.provenance) : null,
       };
       store.managedPullRequests.push(managed);
       appendHistory(store, {
@@ -166,15 +173,20 @@ export function registerManagedPullRequest(root, input, options = {}) {
         sha: managed.currentHeadSha, timestamp: at,
       });
     } else {
+      const previousHeadSha = String(managed.currentHeadSha || '').toLowerCase();
+      const nextHeadSha = validSha(input.currentHeadSha);
       Object.assign(managed, {
         issueNumber: Number(input.issueNumber), issueUrl: input.issueUrl || managed.issueUrl,
         pullRequestUrl: String(input.pullRequestUrl || managed.pullRequestUrl), branchName: String(input.branchName || managed.branchName),
         worktreePath: input.worktreePath || managed.worktreePath, workspaceId: input.workspaceId || managed.workspaceId,
-        coderAgentId: input.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(input.currentHeadSha), updatedAt: at, lastActivityAt: at,
+        coderAgentId: input.coderAgentId || managed.coderAgentId, currentHeadSha: nextHeadSha, updatedAt: at, lastActivityAt: at,
       });
+      if (nextHeadSha !== previousHeadSha) managed.lastValidatedReviewSha = null;
+      if (input.baseBranch) managed.baseBranch = String(input.baseBranch);
+      if (input.provenance) managed.provenance = clone(input.provenance);
     }
     let reviewJob = null;
-    if (store.config.reviewQueue.paused === false && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
+    if (!options.skipQueue && store.config.reviewQueue.paused === false && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
     return { managed: clone(managed), reviewJob: reviewJob ? clone(reviewJob) : null };
   });
 }
@@ -267,6 +279,10 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
   const existing = store.fixJobs.find((job) => job.reviewRequestId === reviewJob.reviewRequestId);
   if (existing) return existing;
   const at = nowIso(now);
+  const imported = managed.provenance?.type === 'manual-import';
+  const repairReason = imported
+    ? 'Imported PR findings are recorded for external same-PR repair; Paseo will not create coder, workspace, or controller state.'
+    : 'Validated review findings created a coding fix job.';
   const job = {
     id: `fix-${randomUUID()}`,
     managedPullRequestId: managed.id,
@@ -280,7 +296,7 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
     branchName: managed.branchName,
     reviewedHeadSha: reviewJob.headSha,
     findings: String(findings || ''),
-    state: 'queued',
+    state: imported ? 'paused' : 'queued',
     priority: managed.priority || 0,
     attempts: 0,
     workerLease: null,
@@ -301,8 +317,18 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
   managed.lastCompletedReviewSha = reviewJob.headSha;
   managed.lastReviewCommentId = sourceCommentId;
   managed.lastProcessedReviewRequestId = reviewJob.reviewRequestId;
-  transitionManaged(store, managed, 'fix_queued', { reason: 'Validated review findings created a coding fix job.', actor: 'reconciliation', sha: reviewJob.headSha, at });
-  appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: null, newState: 'queued', reason: 'Fix job created from matching review result.', actor: 'reconciliation', sha: reviewJob.headSha, timestamp: at });
+  if (imported) {
+    managed.activeReviewRequestId = null;
+    managed.queuePosition = null;
+  }
+  transitionManaged(store, managed, imported ? 'changes_requested' : 'fix_queued', {
+    reason: repairReason,
+    actor: 'reconciliation',
+    sha: reviewJob.headSha,
+    error: imported ? repairReason : undefined,
+    at,
+  });
+  appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: null, newState: job.state, reason: imported ? repairReason : 'Fix job created from matching review result.', actor: 'reconciliation', sha: reviewJob.headSha, timestamp: at });
   return job;
 }
 

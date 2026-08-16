@@ -157,6 +157,7 @@ paseo-issue-automation abandon --issue 123 --reason "Interrupted" --repo OWNER/R
 paseo-issue-automation restart --issue 123 --branch-action keep --repo OWNER/REPOSITORY
 paseo-issue-automation pr-review status --repo OWNER/REPOSITORY
 paseo-issue-automation pr-review reconcile --repo OWNER/REPOSITORY
+paseo-issue-automation pr-review import --id OWNER/REPOSITORY#PR [--issue N] [--head SHA] --repo OWNER/REPOSITORY
 paseo-issue-automation browser doctor --repo OWNER/REPOSITORY
 ```
 

@@ -69,6 +69,7 @@ export function recordWebChatGptFullReviewMetadata(root, reviewJobId, input = {}
   const state = readMetadata(root);
   state.jobs[id] = {
     stage: REVIEW_STAGES.full,
+    headSha: input.headSha ? String(input.headSha).toLowerCase() : null,
     stageRound: Number(input.stageRound),
     maxStageRounds: Number(input.maxStageRounds),
     quickFindings: normalizedFindings(input.quickFindings),
@@ -93,6 +94,7 @@ export function queueWebChatGptFullReview(root, managedId, {
   quickFindings = [],
   reviewEvents = [],
   config,
+  conversationUrlOverride = null,
   immediate = true,
   now = Date.now(),
 } = {}) {
@@ -113,11 +115,13 @@ export function queueWebChatGptFullReview(root, managedId, {
     const job = enqueueReviewInStore(store, managed, {
       headSha: managed.currentHeadSha,
       immediate,
+      conversationUrlOverride,
       now,
     });
     return { queued: true, job: clone(job) };
   });
   const metadata = recordWebChatGptFullReviewMetadata(root, queued.job.id, {
+    headSha: queued.job.headSha,
     stageRound,
     maxStageRounds,
     quickFindings,

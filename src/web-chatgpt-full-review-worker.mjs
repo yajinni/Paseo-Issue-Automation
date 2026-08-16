@@ -40,6 +40,9 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
   if (managed.currentHeadSha !== job.headSha) throw new Error('The PR head changed before Web ChatGPT full-review submission began.');
   const metadata = webChatGptFullReviewMetadata(root, job.id);
   if (!metadata) throw new Error('Web ChatGPT full-review metadata is missing for the claimed review job.');
+  if (metadata.headSha && String(metadata.headSha).toLowerCase() !== String(job.headSha).toLowerCase()) {
+    throw new Error('Web ChatGPT full-review metadata does not match the claimed exact PR head.');
+  }
   const conversationUrl = resolveFullReviewConversationUrl(store, managed, job);
   if (!conversationUrl) throw new Error('No ChatGPT conversation is configured for this PR or project.');
   const prompt = renderWebChatGptFullReviewPrompt({ managed, job, metadata });

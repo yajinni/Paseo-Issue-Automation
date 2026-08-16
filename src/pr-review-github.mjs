@@ -48,7 +48,7 @@ export function clearIssueLifecycleLabels(root, issueNumber, { runner = run } = 
 export function managedPrSnapshot(root, prNumber) {
   return runJson('gh', [
     'pr', 'view', String(prNumber), '--json',
-    'number,url,state,isDraft,headRefOid,headRefName,baseRefName,mergedAt,closedAt,labels,reviewDecision,comments,reviews,statusCheckRollup,body,closingIssuesReferences',
+    'number,url,state,isDraft,isCrossRepository,headRefOid,headRefName,headRepository,baseRefName,mergeable,mergeStateStatus,mergedAt,closedAt,labels,reviewDecision,comments,reviews,statusCheckRollup,body,closingIssuesReferences',
   ], { cwd: root, allowFailure: true });
 }
 

@@ -1,5 +1,5 @@
 import { recordEvent } from './automation.mjs';
-import { finalizeApprovedPullRequest } from './approved-pr-finalization.mjs';
+import { ensureManagedApprovedFinalization, finalizeApprovedPullRequest } from './approved-pr-finalization.mjs';
 import { managedPrSnapshot, managerPrHealthSnapshot } from './pr-review-github.mjs';
 import { loadConfig, loadRun, saveRun } from './state.mjs';
 import { run } from './process.mjs';
@@ -14,6 +14,10 @@ function checkState(check) {
 
 function importedFinalizationEvidence(reviewJob) {
   return String(reviewJob?.reviewRequestId || '').startsWith(IMPORTED_FINALIZATION_PREFIX);
+}
+
+function importedManagedPullRequest(managed) {
+  return managed?.provenance?.type === 'manual-import';
 }
 
 export function summarizeReviewGateChecks(checks = []) {
@@ -147,6 +151,21 @@ export function evaluateApprovedReviewGate(root, managed, reviewJob, pr, {
     return { ok: false, repair: true, reason: `The reviewed branch does not contain the latest ${config.baseBranch}.` };
   }
 
+  if (importedManagedPullRequest(managed)) {
+    return {
+      ok: true,
+      imported: true,
+      commit: reviewedHead,
+      checks,
+      validation: {
+        result: 'PASS',
+        commit: reviewedHead,
+        details: 'Imported PR approval uses current exact-head GitHub CI and base-freshness evidence; no issue run or coder workspace is created.',
+        source: 'manual-import',
+      },
+      validationRecovered: false,
+    };
+  }
   let validation = latestValidationForCommit(runState, reviewedHead);
   let validationRecovered = false;
   if (!validation) {
@@ -172,6 +191,7 @@ export function evaluateApprovedReviewGate(root, managed, reviewJob, pr, {
 export function recordApprovedBrowserReview(root, managed, reviewJob, {
   findings = 'Browser Reviewer approved this exact validated commit.',
 } = {}) {
+  if (importedManagedPullRequest(managed)) return null;
   const state = loadRun(root, managed.issueNumber);
   if (!state) throw new Error(`No automation state exists for issue #${managed.issueNumber}.`);
   if (importedFinalizationEvidence(reviewJob)) return state;
@@ -217,6 +237,24 @@ export function finalizeApprovedBrowserReview(root, managed, reviewJob, {
     const error = new Error(evaluated.reason || 'The browser-review completion gate did not pass.');
     error.gate = evaluated;
     throw error;
+  }
+  if (importedManagedPullRequest(managed)) {
+    const finalized = ensureManagedApprovedFinalization(root, {
+      repository: managed.repository,
+      issueNumber: managed.issueNumber,
+      issueUrl: managed.issueUrl,
+      pullRequest: currentPr,
+      state: { branch: managed.branchName, prNumber: managed.pullRequestNumber },
+      headSha: reviewJob.headSha,
+      approvalSource: 'manual-import-review',
+      validation: evaluated.validation,
+    });
+    return {
+      mode: 'managed-finalization',
+      imported: true,
+      managed: finalized,
+      gate: evaluated,
+    };
   }
   const state = recordApprovedBrowserReview(root, managed, reviewJob, { findings });
   const health = managerPrHealthSnapshot(root, managed.pullRequestNumber);

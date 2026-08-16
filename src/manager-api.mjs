@@ -22,6 +22,7 @@ import {
 import { findRepository } from './repository-registry.mjs';
 import { managerRepositoryStatus } from './manager-status.mjs';
 import { loadPrReviewStore } from './pr-review-store.mjs';
+import { importManagedPullRequest } from './pr-review-import.mjs';
 import { setupWizardApiRequest } from './setup-wizard/api.mjs';
 import { loadConfig } from './state.mjs';
 
@@ -212,6 +213,18 @@ export function managerApiRequest({ method, pathname, body = {} }, options = {})
     const installationRoute = installationRoutes.get(context.pathname);
     if (installationRoute) {
       return installationResult(context, options, installationRoute[0], installationRoute[1]);
+    }
+
+    if (context.pathname === '/api/pr-reviews/import') {
+      const importer = options.prReviewImportHandler || importManagedPullRequest;
+      const result = importer(context.root, {
+        id: body.id,
+        repository: context.repository.repository,
+        pullRequestNumber: body.pullRequestNumber,
+        issueNumber: body.issueNumber,
+        headSha: body.headSha,
+      });
+      return refreshedResult(context, options, result);
     }
 
     const actionHandler = options.actionHandler || managerRepositoryAction;
