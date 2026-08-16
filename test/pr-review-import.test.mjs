@@ -4,10 +4,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { prReviewCommand } from '../src/cli.mjs';
 import { importManagedPullRequest } from '../src/pr-review-import.mjs';
 import { enqueueManagedReview } from '../src/pr-review-queue.mjs';
+import { reviewWorkerPath } from '../src/pr-review-scheduler.mjs';
 import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
 import { saveConfig } from '../src/state.mjs';
+import { webChatGptFullReviewMetadata } from '../src/web-chatgpt-full-review.mjs';
 
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
 const NEXT_HEAD = 'fedcba9876543210fedcba9876543210fedcba98';
@@ -130,4 +133,125 @@ test('an imported managed PR enters the normal review queue through review-now',
   assert.equal(review.state, 'queued');
   assert.equal(review.headSha, HEAD);
   assert.equal(loadPrReviewStore(root).managedPullRequests[0].reviewState, 'queued');
+});
+
+test('public review-now runs imported Light review before queuing exact-head Web ChatGPT full review', async (t) => {
+  const { root, options, pr, issue } = fixture(t);
+  saveConfig(root, {
+    baseBranch: 'main',
+    models: { reviewer: 'provider/light-model' },
+    review: { workflow: 'quick-web-chatgpt', quickMaxRounds: 1, fullMaxRounds: 3 },
+  });
+  savePrAutomationConfig(root, {
+    enabled: true,
+    browserReview: { enabled: true, projectConversationUrl: 'https://chatgpt.com/c/example' },
+    reviewQueue: { paused: false },
+  });
+  const imported = importManagedPullRequest(root, { id: 'owner/repo#45' }, options);
+  assert.equal(imported.reviewJob, null);
+
+  const calls = [];
+  const result = await prReviewCommand(root, {
+    _: ['pr-review', 'review-now'],
+    id: 'owner/repo#45',
+  }, {
+    snapshotReader: () => pr,
+    issueReader: () => issue,
+    lightRunner(command, args, runnerOptions) {
+      calls.push({ command, args, runnerOptions });
+      return { result: 'pass', summary: 'Light review passed.', findings: [] };
+    },
+  });
+
+  assert.equal(result.staged, true);
+  assert.equal(result.lightReview.event.stage, 'quick');
+  assert.equal(result.lightReview.decision.action, 'quick-passed');
+  assert.equal(result.reviewJob.headSha, HEAD);
+  assert.equal(result.metadata.stage, 'full');
+  assert.equal(result.metadata.stageRound, 1);
+  assert.match(reviewWorkerPath(root, result.reviewJob.id), /web-chatgpt-full-review-worker\.mjs$/);
+  assert.equal(webChatGptFullReviewMetadata(root, result.reviewJob.id).headSha, HEAD);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, 'paseo');
+  assert.equal(calls[0].args.includes('--workspace'), false);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 1);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].workspaceId, null);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].worktreePath, null);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].stagedReviewEvents[0].stage, 'quick');
+  assert.equal(issue.number, 101);
+  assert.equal(pr.headRefOid, HEAD);
+});
+
+test('imported Light exhaustion hands off its findings to exact-head Full review metadata', async (t) => {
+  const { root, options, pr } = fixture(t);
+  saveConfig(root, {
+    baseBranch: 'main',
+    models: { reviewer: 'provider/light-model' },
+    review: { workflow: 'quick-web-chatgpt', quickMaxRounds: 1, fullMaxRounds: 3 },
+  });
+  savePrAutomationConfig(root, {
+    enabled: true,
+    browserReview: { enabled: true },
+    reviewQueue: { paused: false },
+  });
+  importManagedPullRequest(root, { id: 'owner/repo#45' }, options);
+
+  const result = await prReviewCommand(root, {
+    _: ['pr-review', 'review-now'],
+    id: 'owner/repo#45',
+  }, {
+    snapshotReader: () => pr,
+    issueReader: () => ({ number: 101, title: 'Issue', body: 'Acceptance criteria.' }),
+    lightRunner: () => ({
+      result: 'changes',
+      summary: 'The Light review found a blocking issue.',
+      findings: [{ severity: 'blocking', message: 'Recheck the imported edge case.' }],
+    }),
+  });
+
+  assert.equal(result.lightReview.decision.action, 'handoff');
+  assert.equal(result.metadata.stage, 'full');
+  assert.equal(result.metadata.headSha, HEAD);
+  assert.equal(result.metadata.quickFindings[0].message, 'Recheck the imported edge case.');
+  assert.match(reviewWorkerPath(root, result.reviewJob.id), /web-chatgpt-full-review-worker\.mjs$/);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].workspaceId, null);
+});
+
+test('imported staged Light review does not queue Full review for stale or non-exhausted changes', async (t) => {
+  for (const mode of ['stale', 'changes']) {
+    const { root, options, pr } = fixture(t);
+    saveConfig(root, {
+      baseBranch: 'main',
+      models: { reviewer: 'provider/light-model' },
+      review: { workflow: 'quick-web-chatgpt', quickMaxRounds: mode === 'changes' ? 3 : 1, fullMaxRounds: 3 },
+    });
+    savePrAutomationConfig(root, {
+      enabled: true,
+      browserReview: { enabled: true },
+      reviewQueue: { paused: false },
+    });
+    importManagedPullRequest(root, { id: 'owner/repo#45' }, options);
+    let reads = 0;
+    const result = await prReviewCommand(root, {
+      _: ['pr-review', 'review-now'],
+      id: 'owner/repo#45',
+    }, {
+      snapshotReader: () => {
+        reads += 1;
+        return reads > 1 && mode === 'stale' ? { ...pr, headRefOid: NEXT_HEAD } : pr;
+      },
+      issueReader: () => ({ number: 101, title: 'Issue', body: 'Acceptance criteria.' }),
+      lightRunner: () => ({
+        result: mode === 'stale' ? 'pass' : 'changes',
+        summary: 'The Light review found a blocking issue.',
+        findings: [{ severity: 'blocking', message: 'The blocking issue.' }],
+      }),
+    });
+
+    assert.equal(result.reviewJob, null);
+    assert.equal(result.metadata, null);
+    assert.equal(result.lightReview.event.result, mode === 'stale' ? 'stale' : 'changes');
+    assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
+    assert.equal(loadPrReviewStore(root).managedPullRequests[0].workspaceId, null);
+  }
 });

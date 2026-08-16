@@ -146,8 +146,11 @@ export function registerManagedPullRequest(root, input, options = {}) {
         lastCompletedReviewSha: null,
         lastValidatedReviewSha: null,
         reviewRound: Math.max(1, Number(input.reviewRound) || 1),
-        reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
-         reviewState: store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
+         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
+         stagedReviewEvents: [],
+         reviewState: options.skipQueue
+           ? 'paused'
+           : store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
         queuePosition: null,
         priority: Number(input.priority) || 0,
         activeReviewRequestId: null,
@@ -183,7 +186,7 @@ export function registerManagedPullRequest(root, input, options = {}) {
       if (input.provenance) managed.provenance = clone(input.provenance);
     }
     let reviewJob = null;
-    if (store.config.reviewQueue.paused === false && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
+    if (!options.skipQueue && store.config.reviewQueue.paused === false && store.config.browserReview.enabled) reviewJob = enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: options.now });
     return { managed: clone(managed), reviewJob: reviewJob ? clone(reviewJob) : null };
   });
 }

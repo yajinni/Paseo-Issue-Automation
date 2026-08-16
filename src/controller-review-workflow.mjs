@@ -326,6 +326,7 @@ export function enterConfiguredQuickHandoff(root, issueNumber, snapshot, review,
       reviewPromptVersion: promptVersion,
     });
     recordWebChatGptFullReviewMetadata(root, id, {
+      headSha: snapshot.head,
       stageRound: nextReviewRound(review.state, REVIEW_STAGES.full),
       maxStageRounds: config.review.fullMaxRounds,
       quickFindings: findings,
