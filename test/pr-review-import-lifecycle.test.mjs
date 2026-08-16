@@ -88,6 +88,20 @@ function approvedMarker(reviewRequestId) {
   })}\n-->\nApproved exact head.`;
 }
 
+function changesRequestedMarker(reviewRequestId, overrides = {}) {
+  return `<!-- paseo-review:v1\n${JSON.stringify({
+    reviewRequestId,
+    repository: 'owner/repo',
+    pullRequestNumber: 45,
+    issueNumber: 101,
+    headSha: HEAD,
+    reviewRound: 1,
+    promptVersion: 1,
+    result: 'changes_requested',
+    ...overrides,
+  })}\n-->\nChanges requested.`;
+}
+
 function seedAwaitingReview(root, managed, reviewRequestId = 'review-imported-merged') {
   mutatePrReviewStore(root, (store) => {
     const record = store.managedPullRequests[0];
@@ -312,6 +326,119 @@ test('imported changes requested findings are preserved as an operator repair ho
   assert.equal(stored.fixJobs[0].state, 'paused');
   assert.equal(stored.managedPullRequests[0].lastError.includes('external same-PR repair'), true);
   assert.equal(loadRun(root, 101), null);
+});
+
+test('exact changes-requested marker owns the label effect without a preexisting label', (t) => {
+  const { root, managed, pr } = fixture(t, { manualImport: false });
+  const reviewRequestId = seedAwaitingReview(root, managed, 'review-label-effect');
+  let effects = [];
+  const outcome = reconcileManagedPullRequest(root, managed.id, {
+    now: 4000,
+    snapshot: {
+      ...pr,
+      labels: ['paseo:reviewing'],
+      comments: [{ id: 7788, body: changesRequestedMarker(reviewRequestId), createdAt: '2026-08-10T04:09:00Z' }],
+      reviews: [],
+    },
+    effectRunner(_root, _managedId, nextEffects) {
+      effects = nextEffects;
+      return [];
+    },
+  });
+
+  assert.equal(outcome.review.result, 'changes_requested');
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].reviewState, 'fix_queued');
+  assert.deepEqual(effects, [{
+    type: 'set-review-labels',
+    pullRequestNumber: 45,
+    add: ['paseo:changes-requested'],
+    remove: ['paseo:reviewing', 'paseo:review-queued', 'paseo:review-failed'],
+  }]);
+});
+
+test('exact changes-requested marker is consumed when no lifecycle labels exist', (t) => {
+  const { root, managed, pr } = fixture(t, { manualImport: false });
+  const reviewRequestId = seedAwaitingReview(root, managed, 'review-no-labels');
+  const outcome = reconcileManagedPullRequest(root, managed.id, {
+    now: 4000,
+    snapshot: {
+      ...pr,
+      labels: [],
+      comments: [{ id: 7788, body: changesRequestedMarker(reviewRequestId), createdAt: '2026-08-10T04:09:00Z' }],
+      reviews: [],
+    },
+    effectRunner() {
+      return [];
+    },
+  });
+
+  assert.equal(outcome.review.result, 'changes_requested');
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].reviewState, 'fix_queued');
+});
+
+test('changes-requested label without an exact marker does not fabricate a result', (t) => {
+  const { root, managed, pr } = fixture(t, { manualImport: false });
+  seedAwaitingReview(root, managed, 'review-label-without-marker');
+  const outcome = reconcileManagedPullRequest(root, managed.id, {
+    now: 4000,
+    snapshot: {
+      ...pr,
+      labels: ['paseo:changes-requested'],
+      comments: [],
+      reviews: [],
+    },
+    effectRunner() {
+      return [];
+    },
+  });
+
+  assert.equal(outcome.review, null);
+  const stored = loadPrReviewStore(root);
+  assert.equal(stored.managedPullRequests[0].reviewState, 'awaiting_result');
+  assert.equal(stored.fixJobs.length, 0);
+});
+
+test('wrong changes-requested marker identity is rejected even when the label exists', (t) => {
+  const { root, managed, pr } = fixture(t, { manualImport: false });
+  seedAwaitingReview(root, managed, 'review-strict-label-identity');
+  const outcome = reconcileManagedPullRequest(root, managed.id, {
+    now: 4000,
+    snapshot: {
+      ...pr,
+      labels: ['paseo:changes-requested'],
+      comments: [{
+        id: 7788,
+        body: changesRequestedMarker('wrong-request', { headSha: 'fedcba9876543210fedcba9876543210fedcba98' }),
+        createdAt: '2026-08-10T04:09:00Z',
+      }],
+      reviews: [],
+    },
+    effectRunner() {
+      return [];
+    },
+  });
+
+  assert.equal(outcome.review, null);
+  const stored = loadPrReviewStore(root);
+  assert.equal(stored.managedPullRequests[0].reviewState, 'awaiting_result');
+  assert.equal(stored.fixJobs.length, 0);
+});
+
+test('reconciling the same changes-requested marker is idempotent', (t) => {
+  const { root, managed, pr } = fixture(t, { manualImport: false });
+  const reviewRequestId = seedAwaitingReview(root, managed, 'review-idempotent-changes');
+  const snapshot = {
+    ...pr,
+    labels: ['paseo:reviewing'],
+    comments: [{ id: 7788, body: changesRequestedMarker(reviewRequestId), createdAt: '2026-08-10T04:09:00Z' }],
+    reviews: [],
+  };
+  const first = reconcileManagedPullRequest(root, managed.id, { now: 4000, snapshot, effectRunner: () => [] });
+  const second = reconcileManagedPullRequest(root, managed.id, { now: 5000, snapshot, effectRunner: () => [] });
+
+  assert.equal(first.review.result, 'changes_requested');
+  assert.equal(second.review, null);
+  assert.equal(loadPrReviewStore(root).fixJobs.length, 1);
 });
 
 test('imported approval remains blocked on stale head or failed CI', (t) => {

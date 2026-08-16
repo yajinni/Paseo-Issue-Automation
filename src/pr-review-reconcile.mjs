@@ -28,10 +28,6 @@ import { matchingReviewResult } from './review-result.mjs';
 
 const FINALIZATION_REQUEST_PREFIX = 'approved-finalization:';
 
-function labelNames(pr) {
-  return new Set((pr?.labels || []).map((label) => typeof label === 'string' ? label : label.name));
-}
-
 function activeReviewForManaged(store, managed) {
   if (managed.activeReviewRequestId) {
     const exact = store.reviewJobs.find((job) => job.reviewRequestId === managed.activeReviewRequestId);
@@ -261,7 +257,6 @@ function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) 
     return { result: 'stale', requeued: true, effects: [] };
   }
   if (resolvedResult.result === 'changes_requested') {
-    if (!labelNames(pr).has(PR_REVIEW_LABELS.changesRequested)) return null;
     const fixJob = createFixJobInStore(store, managed, reviewJob, resolvedResult.humanMarkdown, {
       sourceCommentId: resolvedResult.sourceId,
       reviewResult: 'changes_requested',
