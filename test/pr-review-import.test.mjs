@@ -6,10 +6,11 @@ import path from 'node:path';
 import test from 'node:test';
 import { importManagedPullRequest } from '../src/pr-review-import.mjs';
 import { enqueueManagedReview } from '../src/pr-review-queue.mjs';
-import { loadPrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
+import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
 import { saveConfig } from '../src/state.mjs';
 
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
+const NEXT_HEAD = 'fedcba9876543210fedcba9876543210fedcba98';
 
 function fixture(t, overrides = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-pr-review-import-'));
@@ -64,6 +65,24 @@ test('repeating the same manual import is idempotent and preserves its timestamp
   assert.equal(second.idempotent, true);
   assert.equal(second.managed.provenance.importedAt, first.managed.provenance.importedAt);
   assert.equal(loadPrReviewStore(root).managedPullRequests.length, 1);
+});
+
+test('repeating an approved manual import preserves unchanged-head validation evidence', (t) => {
+  const { root, options, pr } = fixture(t);
+  importManagedPullRequest(root, { id: 'owner/repo#45' }, options);
+  mutatePrReviewStore(root, (store) => {
+    store.managedPullRequests[0].lastValidatedReviewSha = HEAD;
+  });
+
+  const repeated = importManagedPullRequest(root, { id: 'owner/repo#45' }, { ...options, now: 2000 });
+  assert.equal(repeated.managed.lastValidatedReviewSha, HEAD);
+
+  const advanced = importManagedPullRequest(root, { id: 'owner/repo#45' }, {
+    ...options,
+    now: 3000,
+    prReader: () => ({ ...pr, headRefOid: NEXT_HEAD }),
+  });
+  assert.equal(advanced.managed.lastValidatedReviewSha, null);
 });
 
 test('import rejects forks, wrong bases, stale heads, and ambiguous issue associations', (t) => {

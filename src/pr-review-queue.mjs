@@ -170,13 +170,15 @@ export function registerManagedPullRequest(root, input, options = {}) {
         sha: managed.currentHeadSha, timestamp: at,
       });
     } else {
+      const previousHeadSha = String(managed.currentHeadSha || '').toLowerCase();
+      const nextHeadSha = validSha(input.currentHeadSha);
       Object.assign(managed, {
         issueNumber: Number(input.issueNumber), issueUrl: input.issueUrl || managed.issueUrl,
         pullRequestUrl: String(input.pullRequestUrl || managed.pullRequestUrl), branchName: String(input.branchName || managed.branchName),
         worktreePath: input.worktreePath || managed.worktreePath, workspaceId: input.workspaceId || managed.workspaceId,
-        coderAgentId: input.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(input.currentHeadSha), updatedAt: at, lastActivityAt: at,
+        coderAgentId: input.coderAgentId || managed.coderAgentId, currentHeadSha: nextHeadSha, updatedAt: at, lastActivityAt: at,
       });
-      managed.lastValidatedReviewSha = null;
+      if (nextHeadSha !== previousHeadSha) managed.lastValidatedReviewSha = null;
       if (input.baseBranch) managed.baseBranch = String(input.baseBranch);
       if (input.provenance) managed.provenance = clone(input.provenance);
     }

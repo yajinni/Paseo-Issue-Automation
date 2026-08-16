@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { evaluateApprovedReviewGate, finalizeApprovedBrowserReview } from '../src/pr-review-finalize.mjs';
-import { applyMergedIssueEffect } from '../src/pr-review-reconcile.mjs';
+import { applyMergedIssueEffect, reconcileManagedPullRequest } from '../src/pr-review-reconcile.mjs';
 import { createFixJobInStore, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
 import { loadPrReviewStore, mutatePrReviewStore, savePrAutomationConfig } from '../src/pr-review-store.mjs';
 import { loadRun, saveConfig } from '../src/state.mjs';
@@ -56,6 +56,59 @@ function successfulRunner() {
   return { ok: true, stdout: '', stderr: '' };
 }
 
+function approvedMarker(reviewRequestId) {
+  return `<!-- paseo-review:v1\n${JSON.stringify({
+    reviewRequestId,
+    repository: 'owner/repo',
+    pullRequestNumber: 45,
+    issueNumber: 101,
+    headSha: HEAD,
+    reviewRound: 1,
+    promptVersion: 1,
+    result: 'approved',
+  })}\n-->\nApproved exact head.`;
+}
+
+function seedAwaitingImportedReview(root, managed) {
+  const reviewRequestId = 'review-imported-merged';
+  mutatePrReviewStore(root, (store) => {
+    const record = store.managedPullRequests[0];
+    record.reviewState = 'awaiting_result';
+    record.activeReviewRequestId = reviewRequestId;
+    store.reviewJobs.push({
+      id: reviewRequestId,
+      managedPullRequestId: managed.id,
+      repository: managed.repository,
+      pullRequestNumber: managed.pullRequestNumber,
+      headSha: HEAD,
+      promptVersion: 1,
+      reviewRound: 1,
+      reviewRequestId,
+      state: 'awaiting_result',
+      queuePosition: 1,
+      priority: 0,
+      dueAt: new Date(1000).toISOString(),
+      attempts: 1,
+      createdAt: new Date(1000).toISOString(),
+      updatedAt: new Date(1000).toISOString(),
+    });
+  });
+  return reviewRequestId;
+}
+
+function mergedSnapshot(pr, marker) {
+  return {
+    ...pr,
+    state: 'MERGED',
+    mergedAt: '2026-08-10T04:10:00Z',
+    labels: [],
+    comments: [{ id: 7788, body: marker, createdAt: '2026-08-10T04:09:00Z' }],
+    reviews: [],
+    body: 'Closes #101',
+    closingIssuesReferences: [{ number: 101 }],
+  };
+}
+
 test('imported approval uses exact-head CI/base evidence without run or workspace state', (t) => {
   const { root, managed, pr } = fixture(t);
   const job = {
@@ -93,6 +146,60 @@ test('imported approval finalizes the managed record and never creates an automa
   assert.equal(loadPrReviewStore(root).managedPullRequests[0].reviewState, 'ready_to_merge');
   assert.equal(loadPrReviewStore(root).managedPullRequests[0].lastValidatedReviewSha, HEAD);
   assert.equal(loadRun(root, 101), null);
+});
+
+test('first imported merged reconciliation completes only with preserved validation evidence', (t) => {
+  const { root, managed, pr } = fixture(t);
+  savePrAutomationConfig(root, { githubActions: { allowChatGPTMerge: true } });
+  const reviewRequestId = seedAwaitingImportedReview(root, managed);
+  mutatePrReviewStore(root, (store) => {
+    store.managedPullRequests[0].lastValidatedReviewSha = HEAD;
+  });
+
+  let pendingEffects;
+  const outcome = reconcileManagedPullRequest(root, managed.id, {
+    now: 5000,
+    snapshot: mergedSnapshot(pr, approvedMarker(reviewRequestId)),
+    effectRunner(_root, _managedId, effects) {
+      pendingEffects = effects;
+      return [];
+    },
+  });
+
+  assert.equal(outcome.state, 'merged');
+  assert.equal(outcome.reviewVerified, true);
+  assert.equal(pendingEffects.find((effect) => effect.type === 'verify-merged-issue').reviewVerified, true);
+  const stored = loadPrReviewStore(root);
+  assert.equal(stored.managedPullRequests[0].lastValidatedReviewSha, HEAD);
+  assert.equal(stored.reviewJobs[0].state, 'completed');
+
+  const completion = applyMergedIssueEffect(root, pendingEffects.find((effect) => effect.type === 'verify-merged-issue'), {
+    issueReader: () => ({ number: 101, state: 'CLOSED' }),
+    issueLabelCleaner: () => ({ changed: false }),
+  });
+  assert.equal(completion.issueClosed, true);
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].lifecycleCompletionPending, false);
+});
+
+test('first imported merged reconciliation fails closed when validation evidence is absent', (t) => {
+  const { root, managed, pr } = fixture(t);
+  const reviewRequestId = seedAwaitingImportedReview(root, managed);
+  let pendingEffects;
+  const outcome = reconcileManagedPullRequest(root, managed.id, {
+    now: 5000,
+    snapshot: mergedSnapshot(pr, approvedMarker(reviewRequestId)),
+    effectRunner(_root, _managedId, effects) {
+      pendingEffects = effects;
+      return [];
+    },
+  });
+
+  assert.equal(outcome.state, 'merged');
+  assert.equal(outcome.reviewVerified, false);
+  assert.equal(pendingEffects.find((effect) => effect.type === 'verify-merged-issue').reviewVerified, false);
+  const stored = loadPrReviewStore(root);
+  assert.equal(stored.managedPullRequests[0].reviewEvidenceMissing, true);
+  assert.equal(stored.reviewJobs[0].state, 'cancelled');
 });
 
 test('imported changes requested findings are preserved as an operator repair hold', (t) => {

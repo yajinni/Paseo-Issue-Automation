@@ -94,11 +94,15 @@ function exactMergedApproval(precomputed, mergedHead) {
     && result.reviewRequestId === job.reviewRequestId;
 }
 
+function importedValidationMatches(managed, mergedHead) {
+  return managed.provenance?.type !== 'manual-import'
+    || String(managed.lastValidatedReviewSha || '').toLowerCase() === mergedHead;
+}
+
 function hasExactApprovedReview(store, managed, mergedHead) {
   if (!mergedHead || String(managed.lastCompletedReviewSha || '').toLowerCase() !== mergedHead
       || !managed.lastProcessedReviewRequestId) return false;
-  if (managed.provenance?.type === 'manual-import'
-      && String(managed.lastValidatedReviewSha || '').toLowerCase() !== mergedHead) return false;
+  if (!importedValidationMatches(managed, mergedHead)) return false;
   return store.reviewJobs.some((job) => job.managedPullRequestId === managed.id
     && job.state === 'completed'
     && job.result === 'approved'
@@ -109,7 +113,7 @@ function hasExactApprovedReview(store, managed, mergedHead) {
 function reconcileMergedInStore(store, managed, pr, at, precomputed = {}) {
   const mergedHead = String(pr.headRefOid || managed.currentHeadSha || '').toLowerCase();
   const firstObservation = managed.reviewState !== 'merged';
-  if (exactMergedApproval(precomputed, mergedHead)) {
+  if (exactMergedApproval(precomputed, mergedHead) && importedValidationMatches(managed, mergedHead)) {
     const reviewJob = store.reviewJobs.find((job) => job.id === precomputed.reviewJob.id);
     if (reviewJob && reviewJob.state !== 'completed') {
       completeReviewJob(store, reviewJob, 'approved', precomputed.result.sourceId, at);
