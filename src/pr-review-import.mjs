@@ -1,7 +1,7 @@
 import { loadConfig } from './state.mjs';
 import { runJson } from './process.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, ensurePrReviewLabels, setPrReviewLabels } from './pr-review-github.mjs';
-import { findManaged, loadPrReviewStore, managedPullRequestId, nowIso } from './pr-review-store.mjs';
+import { managedPullRequestId, nowIso } from './pr-review-store.mjs';
 import { registerManagedPullRequest } from './pr-review-queue.mjs';
 
 const FULL_SHA = /^[0-9a-f]{40}$/i;
@@ -153,28 +153,10 @@ export function importManagedPullRequest(root, input = {}, options = {}) {
   const issue = (options.issueReader || defaultIssueReader)(root, configuredRepository, selectedIssue.issueNumber);
   validateAssociatedIssue(issue, configuredRepository, selectedIssue.issueNumber);
 
-  const managedId = managedPullRequestId(configuredRepository, parsed.pullRequestNumber);
-  const store = (options.storeLoader || loadPrReviewStore)(root);
-  const existing = findManaged(store, managedId);
-  if (existing && Number(existing.issueNumber) !== selectedIssue.issueNumber) {
-    throw new Error(`Pull request #${parsed.pullRequestNumber} is already managed for issue #${existing.issueNumber}; it cannot also be associated with #${selectedIssue.issueNumber}.`);
-  }
-  const issueConflict = existingConflict(store, configuredRepository, selectedIssue.issueNumber, managedId);
-  if (issueConflict) {
-    throw new Error(`Issue #${selectedIssue.issueNumber} is already managed by pull request #${issueConflict.pullRequestNumber}; conflicting PR/issue identities are not allowed.`);
-  }
-  if (existing && existing.provenance?.type && existing.provenance.type !== 'manual-import') {
-    throw new Error(`Pull request #${parsed.pullRequestNumber} is already managed with ${existing.provenance.type} provenance.`);
-  }
-  if (existing && !existing.provenance) {
-    throw new Error(`Pull request #${parsed.pullRequestNumber} is already managed by the controller; it cannot be reclassified as a manual import.`);
-  }
-
   const at = nowIso(options.now || Date.now());
   const provenance = {
-    ...(existing?.provenance || {}),
     type: 'manual-import',
-    importedAt: existing?.provenance?.importedAt || at,
+    importedAt: at,
     repository: configuredRepository,
     pullRequestNumber: parsed.pullRequestNumber,
     pullRequestUrl: text(pr.url),
@@ -184,6 +166,7 @@ export function importManagedPullRequest(root, input = {}, options = {}) {
     baseBranch,
   };
   if (options.ensureLabels !== false) (options.labelEnsurer || ensurePrReviewLabels)(root);
+  let existingAtLock = false;
   const registered = (options.registrar || registerManagedPullRequest)(root, {
     repository: configuredRepository,
     issueNumber: selectedIssue.issueNumber,
@@ -194,7 +177,33 @@ export function importManagedPullRequest(root, input = {}, options = {}) {
     baseBranch,
     currentHeadSha: head.headSha,
     provenance,
-  }, { now: options.now, skipQueue: true });
+  }, {
+    now: options.now,
+    skipQueue: true,
+    prepare({ store, id, managed, input: registrationInput }) {
+      existingAtLock = Boolean(managed);
+      if (managed && Number(managed.issueNumber) !== selectedIssue.issueNumber) {
+        throw new Error(`Pull request #${parsed.pullRequestNumber} is already managed for issue #${managed.issueNumber}; it cannot also be associated with #${selectedIssue.issueNumber}.`);
+      }
+      const issueConflict = existingConflict(store, configuredRepository, selectedIssue.issueNumber, id);
+      if (issueConflict) {
+        throw new Error(`Issue #${selectedIssue.issueNumber} is already managed by pull request #${issueConflict.pullRequestNumber}; conflicting PR/issue identities are not allowed.`);
+      }
+      if (managed?.provenance?.type && managed.provenance.type !== 'manual-import') {
+        throw new Error(`Pull request #${parsed.pullRequestNumber} is already managed with ${managed.provenance.type} provenance.`);
+      }
+      if (managed && !managed.provenance) {
+        throw new Error(`Pull request #${parsed.pullRequestNumber} is already managed by the controller; it cannot be reclassified as a manual import.`);
+      }
+      return {
+        ...registrationInput,
+        provenance: {
+          ...registrationInput.provenance,
+          importedAt: managed?.provenance?.importedAt || at,
+        },
+      };
+    },
+  });
 
   if (options.setLabels !== false && registered.managed.reviewState === 'queued') {
     (options.labelSetter || setPrReviewLabels)(root, parsed.pullRequestNumber, {
@@ -203,8 +212,8 @@ export function importManagedPullRequest(root, input = {}, options = {}) {
     });
   }
   return {
-    imported: !existing,
-    idempotent: Boolean(existing),
+    imported: !existingAtLock,
+    idempotent: existingAtLock,
     inferredIssue: selectedIssue.inferred,
     validation: {
       repository: configuredRepository,

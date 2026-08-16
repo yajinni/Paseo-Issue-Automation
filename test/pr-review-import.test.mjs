@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { importManagedPullRequest } from '../src/pr-review-import.mjs';
 import { enqueueManagedReview, registerManagedPullRequest } from '../src/pr-review-queue.mjs';
@@ -125,6 +126,93 @@ test('conflicting PR and issue ownership fails closed', (t) => {
     }),
     /conflicting PR\/issue identities/,
   );
+});
+
+test('multi-process imports atomically reject two PRs claiming one issue', async (t) => {
+  const { root, pr, issue } = fixture(t);
+  const importerUrl = pathToFileURL(path.resolve('src/pr-review-import.mjs')).href;
+  const script = `
+    import { existsSync, writeFileSync } from 'node:fs';
+    import path from 'node:path';
+    import { importManagedPullRequest } from ${JSON.stringify(importerUrl)};
+
+    const root = process.env.PASEO_ROOT;
+    const role = process.env.PASEO_ROLE;
+    const peer = role === 'a' ? 'b' : 'a';
+    function waitForPeer(prefix) {
+      const ready = path.join(root, prefix + '-' + role);
+      const peerReady = path.join(root, prefix + '-' + peer);
+      writeFileSync(ready, 'ready');
+      while (!existsSync(peerReady)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    const number = Number(process.env.PASEO_PR);
+    const snapshot = {
+      number,
+      url: 'https://github.com/owner/repo/pull/' + number,
+      state: 'OPEN',
+      isCrossRepository: false,
+      headRefOid: ${JSON.stringify(HEAD)},
+      headRefName: 'feature/import-' + number,
+      headRepository: { nameWithOwner: 'owner/repo' },
+      baseRefName: 'main',
+      closingIssuesReferences: [{ number: 101, repository: { nameWithOwner: 'owner/repo' } }],
+    };
+    const selectedIssue = { number: 101, url: 'https://github.com/owner/repo/issues/101', state: 'OPEN' };
+    try {
+      const result = importManagedPullRequest(root, { id: 'owner/repo#' + number }, {
+        repositoryReader: () => ({ nameWithOwner: 'owner/repo' }),
+        prReader: () => snapshot,
+        issueReader: () => selectedIssue,
+        labelEnsurer: () => waitForPeer('.import-race-label'),
+        setLabels: false,
+      });
+      console.log(JSON.stringify({ ok: true, id: result.managed.id }));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message }));
+      process.exitCode = 1;
+    }
+  `;
+  function run(role, number) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+        cwd: path.resolve('.'),
+        env: { ...process.env, PASEO_ROOT: root, PASEO_ROLE: role, PASEO_PR: String(number) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => { stdout += chunk; });
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      child.on('error', reject);
+      child.on('close', (code) => resolve({ code, stdout, stderr }));
+    });
+  }
+
+  const results = await Promise.all([run('a', 45), run('b', 46)]);
+  assert.equal(results.filter((result) => result.code === 0).length, 1);
+  assert.equal(results.filter((result) => result.code !== 0).length, 1);
+  assert.match(results.find((result) => result.code !== 0).stdout, /conflicting PR\/issue identities/);
+  const store = loadPrReviewStore(root);
+  assert.equal(store.managedPullRequests.length, 1);
+  assert.equal(store.managedPullRequests[0].issueNumber, issue.number);
+  assert.ok([pr.number, 46].includes(store.managedPullRequests[0].pullRequestNumber));
+});
+
+test('one pull request cannot be reassociated with a second issue after atomic registration', (t) => {
+  const { root, options, pr, issue } = fixture(t, {
+    closingIssuesReferences: [
+      { number: 101, repository: { nameWithOwner: 'owner/repo' } },
+      { number: 102, repository: { nameWithOwner: 'owner/repo' } },
+    ],
+  });
+  options.issueReader = (_root, _repository, issueNumber) => ({ ...issue, number: issueNumber });
+  importManagedPullRequest(root, { id: 'owner/repo#45', issueNumber: issue.number }, options);
+  assert.throws(
+    () => importManagedPullRequest(root, { id: `owner/repo#${pr.number}`, issueNumber: 102 }, options),
+    /already managed for issue #101/,
+  );
+  assert.equal(loadPrReviewStore(root).managedPullRequests[0].issueNumber, 101);
 });
 
 test('controller-managed PRs cannot be reclassified as manual imports', (t) => {
