@@ -60,7 +60,7 @@ test('manual import infers one same-repository issue and records canonical prove
   assert.equal(loadPrReviewStore(root).managedPullRequests.length, 1);
 });
 
-test('repeating the exact manual import is idempotent and does not create a review job', (t) => {
+test('repeating the exact manual import is idempotent and preserves the configured review job', (t) => {
   const { root, options } = fixture(t);
   savePrAutomationConfig(root, {
     enabled: true,
@@ -72,12 +72,10 @@ test('repeating the exact manual import is idempotent and does not create a revi
   assert.equal(second.imported, false);
   assert.equal(second.idempotent, true);
   assert.equal(second.managed.provenance.importedAt, first.managed.provenance.importedAt);
-  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
-  assert.throws(
-    () => enqueueManagedReview(root, 'OWNER/Repo#45', { immediate: true, now: 2000 }),
-    /incomplete-capability|not implemented.*registration foundation/i,
-  );
-  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 1);
+  const review = enqueueManagedReview(root, 'OWNER/Repo#45', { immediate: true, now: 2000 });
+  assert.equal(review.id, loadPrReviewStore(root).reviewJobs[0].id);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 1);
 });
 
 test('import rejects forks, wrong bases, stale heads, missing branches, and ambiguous associations', (t) => {

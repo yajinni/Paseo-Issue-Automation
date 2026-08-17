@@ -113,6 +113,7 @@ function carryFullReviewMetadataToCurrentHeads(root) {
     const nextRound = Number(prior.metadata.stageRound) + 1;
     if (nextRound > Number(prior.metadata.maxStageRounds)) continue;
     const metadata = recordWebChatGptFullReviewMetadata(root, current.id, {
+      headSha: current.headSha,
       stageRound: nextRound,
       maxStageRounds: prior.metadata.maxStageRounds,
       quickFindings: prior.metadata.quickFindings,

@@ -48,9 +48,6 @@ export function enqueueReviewInStore(store, managed, {
   conversationUrlOverride = null,
   now = Date.now(),
 } = {}) {
-  if (managed.provenance?.type === 'manual-import') {
-    throw new Error('Manual-import review execution is not implemented in this registration foundation; review-now cannot enqueue an imported PR review.');
-  }
   if (TERMINAL_PR_STATES.has(managed.reviewState)) throw new Error(`Managed PR ${managed.id} is terminal and cannot be queued.`);
   const sha = validSha(headSha);
   const at = nowIso(now);
@@ -115,6 +112,7 @@ export function enqueueReviewInStore(store, managed, {
   };
   store.reviewJobs.push(job);
   managed.currentHeadSha = sha;
+  managed.lastValidatedReviewSha = null;
   managed.queuePosition = job.queuePosition;
   managed.activeReviewRequestId = job.reviewRequestId;
   transitionManaged(store, managed, 'queued', { reason: `Review queued for ${sha}.`, actor: 'queue', sha, at });
@@ -146,11 +144,13 @@ export function registerManagedPullRequest(root, input, options = {}) {
         worktreePath: registrationInput.worktreePath || null,
         workspaceId: registrationInput.workspaceId || null,
         coderAgentId: registrationInput.coderAgentId || null,
-        currentHeadSha: validSha(registrationInput.currentHeadSha),
-        lastSubmittedReviewSha: null,
-        lastCompletedReviewSha: null,
-        reviewRound: Math.max(1, Number(registrationInput.reviewRound) || 1),
-        reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
+         currentHeadSha: validSha(registrationInput.currentHeadSha),
+         lastSubmittedReviewSha: null,
+         lastCompletedReviewSha: null,
+         lastValidatedReviewSha: null,
+         reviewRound: Math.max(1, Number(registrationInput.reviewRound) || 1),
+         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
+         stagedReviewEvents: [],
          reviewState: options.skipQueue
            ? 'paused'
            : store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
@@ -176,12 +176,15 @@ export function registerManagedPullRequest(root, input, options = {}) {
         sha: managed.currentHeadSha, timestamp: at,
       });
     } else {
+      const previousHeadSha = String(managed.currentHeadSha || '').toLowerCase();
+      const nextHeadSha = validSha(registrationInput.currentHeadSha);
       Object.assign(managed, {
         issueNumber: Number(registrationInput.issueNumber), issueUrl: registrationInput.issueUrl || managed.issueUrl,
         pullRequestUrl: String(registrationInput.pullRequestUrl || managed.pullRequestUrl), branchName: String(registrationInput.branchName || managed.branchName),
         worktreePath: registrationInput.worktreePath || managed.worktreePath, workspaceId: registrationInput.workspaceId || managed.workspaceId,
-        coderAgentId: registrationInput.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(registrationInput.currentHeadSha), updatedAt: at, lastActivityAt: at,
+        coderAgentId: registrationInput.coderAgentId || managed.coderAgentId, currentHeadSha: nextHeadSha, updatedAt: at, lastActivityAt: at,
       });
+      if (nextHeadSha !== previousHeadSha) managed.lastValidatedReviewSha = null;
       if (registrationInput.baseBranch) managed.baseBranch = String(registrationInput.baseBranch);
       if (registrationInput.provenance) managed.provenance = clone(registrationInput.provenance);
     }
@@ -208,7 +211,6 @@ export function nextDueReview(store, now = Date.now()) {
       if (job.state !== 'queued' || Date.parse(job.dueAt) > now) return false;
       const managed = findManaged(store, job.managedPullRequestId);
       return Boolean(managed
-        && managed.provenance?.type !== 'manual-import'
         && managed.reviewState !== 'paused'
         && !TERMINAL_PR_STATES.has(managed.reviewState));
     })
@@ -284,6 +286,10 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
   const existing = store.fixJobs.find((job) => job.reviewRequestId === reviewJob.reviewRequestId);
   if (existing) return existing;
   const at = nowIso(now);
+  const imported = managed.provenance?.type === 'manual-import';
+  const repairReason = imported
+    ? 'Imported PR findings are recorded for external same-PR repair; Paseo will not create coder, workspace, or controller state.'
+    : 'Validated review findings created a coding fix job.';
   const job = {
     id: `fix-${randomUUID()}`,
     managedPullRequestId: managed.id,
@@ -297,7 +303,7 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
     branchName: managed.branchName,
     reviewedHeadSha: reviewJob.headSha,
     findings: String(findings || ''),
-    state: 'queued',
+    state: imported ? 'paused' : 'queued',
     priority: managed.priority || 0,
     attempts: 0,
     workerLease: null,
@@ -318,8 +324,18 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
   managed.lastCompletedReviewSha = reviewJob.headSha;
   managed.lastReviewCommentId = sourceCommentId;
   managed.lastProcessedReviewRequestId = reviewJob.reviewRequestId;
-  transitionManaged(store, managed, 'fix_queued', { reason: 'Validated review findings created a coding fix job.', actor: 'reconciliation', sha: reviewJob.headSha, at });
-  appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: null, newState: 'queued', reason: 'Fix job created from matching review result.', actor: 'reconciliation', sha: reviewJob.headSha, timestamp: at });
+  if (imported) {
+    managed.activeReviewRequestId = null;
+    managed.queuePosition = null;
+  }
+  transitionManaged(store, managed, imported ? 'changes_requested' : 'fix_queued', {
+    reason: repairReason,
+    actor: 'reconciliation',
+    sha: reviewJob.headSha,
+    error: imported ? repairReason : undefined,
+    at,
+  });
+  appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: null, newState: job.state, reason: imported ? repairReason : 'Fix job created from matching review result.', actor: 'reconciliation', sha: reviewJob.headSha, timestamp: at });
   return job;
 }
 

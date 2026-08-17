@@ -1,8 +1,27 @@
 import { loadConfig } from './state.mjs';
 import { runJson } from './process.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, ensurePrReviewLabels, setPrReviewLabels } from './pr-review-github.mjs';
-import { managedPullRequestId, nowIso } from './pr-review-store.mjs';
-import { registerManagedPullRequest } from './pr-review-queue.mjs';
+import {
+  findManaged,
+  loadPrReviewStore,
+  managedPullRequestId,
+  mutatePrReviewStore,
+  nowIso,
+  transitionManaged,
+} from './pr-review-store.mjs';
+import { enqueueManagedReview, registerManagedPullRequest } from './pr-review-queue.mjs';
+import {
+  createHarnessReviewEvent,
+  nextReviewRound,
+  reviewStageDecision,
+} from './harness-review-stages.mjs';
+import {
+  REVIEW_STAGES,
+  REVIEW_WORKFLOW_OUTPUT_SCHEMA,
+  REVIEW_WORKFLOW_PROMPT_VERSION,
+  renderReviewWorkflowPrompt,
+} from './review-workflow-prompts.mjs';
+import { queueWebChatGptFullReview } from './web-chatgpt-full-review.mjs';
 
 const FULL_SHA = /^[0-9a-f]{40}$/i;
 const REPOSITORY_SELECTOR = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/;
@@ -179,7 +198,7 @@ export function importManagedPullRequest(root, input = {}, options = {}) {
     provenance,
   }, {
     now: options.now,
-    skipQueue: true,
+    skipQueue: config.review?.workflow === 'quick-web-chatgpt',
     prepare({ store, id, managed, input: registrationInput }) {
       existingAtLock = Boolean(managed);
       if (managed && Number(managed.issueNumber) !== selectedIssue.issueNumber) {
@@ -226,4 +245,219 @@ export function importManagedPullRequest(root, input = {}, options = {}) {
     managed: registered.managed,
     reviewJob: registered.reviewJob,
   };
+}
+
+function compactChecks(pr = {}) {
+  return (Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : []).map((check) => ({
+    name: check.name || check.context || check.workflowName || 'check',
+    state: check.conclusion || check.state || check.status || 'UNKNOWN',
+  }));
+}
+
+function importedLightPrompt({ managed, issue, pr, round, config }) {
+  return renderReviewWorkflowPrompt({
+    repository: managed.repository,
+    pullRequestNumber: managed.pullRequestNumber,
+    issueNumber: managed.issueNumber,
+    headSha: managed.currentHeadSha,
+    stage: REVIEW_STAGES.quick,
+    round,
+    promptVersion: REVIEW_WORKFLOW_PROMPT_VERSION,
+    issueContext: [
+      `Issue #${issue.number}: ${issue.title || ''}`,
+      issue.body || '',
+    ].filter(Boolean).join('\n\n'),
+    changeContext: [
+      `Review the exact pull request #${pr.number} at ${managed.currentHeadSha}.`,
+      `The pull request targets ${pr.baseRefName || config.baseBranch}.`,
+      'Use the connected GitHub tools to inspect the exact diff and relevant surrounding code.',
+    ].join('\n'),
+    validationContext: JSON.stringify({
+      exactHead: managed.currentHeadSha,
+      githubChecks: compactChecks(pr),
+    }),
+    quickFindings: '',
+  });
+}
+
+function defaultImportedLightRunner(command, args, runnerOptions) {
+  return runJson(command, args, runnerOptions);
+}
+
+function recordImportedLightEvent(root, managedId, event, decision) {
+  return mutatePrReviewStore(root, (store) => {
+    const managed = findManaged(store, managedId);
+    if (!managed) throw new Error(`Managed PR ${managedId} was not found.`);
+    managed.stagedReviewEvents = [...(managed.stagedReviewEvents || []), {
+      ...event,
+      decision: decision.action,
+    }].slice(-100);
+    managed.updatedAt = new Date().toISOString();
+    if (decision.action === 'stale') {
+      const reason = 'The imported PR head changed during the Light review; the next Light review must use the new exact head.';
+      managed.activeReviewRequestId = null;
+      managed.queuePosition = null;
+      transitionManaged(store, managed, 'queued', {
+        reason,
+        actor: 'review-reconciliation',
+        sha: event.headSha,
+        error: reason,
+        at: managed.updatedAt,
+      });
+    } else if (decision.action === 'repair') {
+      const reason = event.summary || 'The imported PR Light review requested changes; no Full review was queued.';
+      managed.activeReviewRequestId = null;
+      managed.queuePosition = null;
+      transitionManaged(store, managed, 'changes_requested', {
+        reason,
+        actor: 'review-reconciliation',
+        sha: event.headSha,
+        error: reason,
+        at: managed.updatedAt,
+      });
+    }
+    return managed;
+  });
+}
+
+function importedLightRepairPending(events, headSha) {
+  return events.some((event) => event?.stage === REVIEW_STAGES.quick
+    && event?.result === 'changes'
+    && event?.decision === 'repair'
+    && String(event.headSha || '').toLowerCase() === String(headSha || '').toLowerCase());
+}
+
+function canonicalManagedPullRequestId(value) {
+  const parsed = parseManagedPullRequestId(value);
+  return managedPullRequestId(parsed.repository, parsed.pullRequestNumber);
+}
+
+function currentImportedHead(snapshot, expectedHead) {
+  return snapshot
+    && String(snapshot.state || '').toUpperCase() === 'OPEN'
+    && String(snapshot.headRefOid || '').toLowerCase() === String(expectedHead || '').toLowerCase()
+    ? expectedHead
+    : String(snapshot?.headRefOid || '').toLowerCase() || null;
+}
+
+export function importedStagedReviewRequired(root, managedId, config = loadConfig(root)) {
+  const managed = findManaged(loadPrReviewStore(root), canonicalManagedPullRequestId(managedId));
+  return Boolean(
+    managed?.provenance?.type === 'manual-import'
+      && config.review?.workflow === 'quick-web-chatgpt',
+  );
+}
+
+export function reviewImportedPullRequestNow(root, managedId, {
+  config = loadConfig(root),
+  snapshotReader = managedPrSnapshot,
+  issueReader,
+  lightRunner = defaultImportedLightRunner,
+  conversationUrlOverride = null,
+  now = Date.now(),
+} = {}) {
+  const canonicalId = canonicalManagedPullRequestId(managedId);
+  const store = loadPrReviewStore(root);
+  const managed = findManaged(store, canonicalId);
+  if (!managed?.provenance || managed.provenance.type !== 'manual-import'
+      || config.review?.workflow !== 'quick-web-chatgpt') return null;
+
+  const initial = snapshotReader(root, managed.pullRequestNumber);
+  const expectedHead = String(initial?.headRefOid || managed.currentHeadSha || '').toLowerCase();
+  if (!initial || String(initial.state || '').toUpperCase() !== 'OPEN' || !expectedHead
+      || expectedHead !== String(managed.currentHeadSha || '').toLowerCase()) {
+    throw new Error('Imported staged review requires an open PR whose current head exactly matches the managed head.');
+  }
+  const issue = issueReader
+    ? issueReader(root, managed.issueNumber)
+    : runJson('gh', ['issue', 'view', String(managed.issueNumber), '--json', 'number,url,title,body,comments'], { cwd: root });
+  if (!issue || Number(issue.number) !== Number(managed.issueNumber)) {
+    throw new Error(`Could not load associated issue #${managed.issueNumber} for imported staged review.`);
+  }
+
+  const events = Array.isArray(managed.stagedReviewEvents) ? managed.stagedReviewEvents : [];
+  if (importedLightRepairPending(events, expectedHead)) {
+    throw new Error('Imported Light review requires a new exact PR head after changes were requested.');
+  }
+  const round = nextReviewRound({ events }, REVIEW_STAGES.quick);
+  const expected = {
+    repository: managed.repository,
+    pullRequestNumber: managed.pullRequestNumber,
+    issueNumber: managed.issueNumber,
+    headSha: expectedHead,
+    stage: REVIEW_STAGES.quick,
+    round,
+    promptVersion: REVIEW_WORKFLOW_PROMPT_VERSION,
+  };
+  const args = [
+    'run', '--provider', String(config.models?.reviewer || ''),
+    ...(config.models?.reviewerThinking ? ['--thinking', String(config.models.reviewerThinking)] : []),
+    '--cwd', root,
+    '--title', `Issue #${managed.issueNumber} Imported Light Reviewer`,
+    '--output-schema', REVIEW_WORKFLOW_OUTPUT_SCHEMA,
+    importedLightPrompt({ managed: { ...managed, currentHeadSha: expectedHead }, issue, pr: initial, round, config }),
+  ];
+  const verdict = lightRunner('paseo', args, { cwd: root });
+  if (!verdict || typeof verdict !== 'object') throw new Error('Imported Light reviewer did not return a structured verdict.');
+
+  const latest = snapshotReader(root, managed.pullRequestNumber);
+  const currentHead = currentImportedHead(latest, expectedHead);
+  const event = currentHead === expectedHead
+    ? createHarnessReviewEvent(verdict, expected)
+    : createHarnessReviewEvent({
+      result: 'stale',
+      summary: 'The imported pull-request head changed before the Light verdict could be accepted.',
+      findings: [],
+    }, expected);
+  const decision = reviewStageDecision({ config, state: { events }, stage: REVIEW_STAGES.quick, verdict: event });
+  recordImportedLightEvent(root, canonicalId, event, decision);
+  if (!['quick-passed', 'handoff'].includes(decision.action)) {
+    return {
+      staged: true,
+      lightReview: { event, decision },
+      reviewJob: null,
+      metadata: null,
+      managed: findManaged(loadPrReviewStore(root), canonicalId),
+    };
+  }
+
+  const current = snapshotReader(root, managed.pullRequestNumber);
+  if (currentImportedHead(current, expectedHead) !== expectedHead) {
+    const stale = createHarnessReviewEvent({
+      result: 'stale',
+      summary: 'The imported pull-request head changed before the Full review was queued.',
+      findings: [],
+    }, expected);
+    const staleDecision = reviewStageDecision({ config, state: { events: [...events, event] }, stage: REVIEW_STAGES.quick, verdict: stale });
+    recordImportedLightEvent(root, canonicalId, stale, staleDecision);
+    return {
+      staged: true,
+      lightReview: { event: stale, decision: staleDecision },
+      reviewJob: null,
+      metadata: null,
+      managed: findManaged(loadPrReviewStore(root), canonicalId),
+    };
+  }
+  const queued = queueWebChatGptFullReview(root, canonicalId, {
+    quickOutcome: decision,
+    quickFindings: event.findings,
+    reviewEvents: [...events, event],
+    config,
+    conversationUrlOverride,
+    immediate: true,
+    now,
+  });
+  return {
+    staged: true,
+    lightReview: { event, decision },
+    reviewJob: queued.job,
+    metadata: queued.metadata,
+    managed: findManaged(loadPrReviewStore(root), canonicalId),
+  };
+}
+
+export function reviewManagedNow(root, managedId, options = {}) {
+  const canonicalId = canonicalManagedPullRequestId(managedId);
+  const imported = reviewImportedPullRequestNow(root, canonicalId, options);
+  return imported || enqueueManagedReview(root, canonicalId, options);
 }

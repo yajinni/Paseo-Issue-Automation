@@ -5,7 +5,6 @@ import { browserPaths } from './browser-profile.mjs';
 import { appendControllerLog } from './controller-log.mjs';
 import { acquireLease, releaseLease, transferLease } from './durable-lease.mjs';
 import { claimNextReview, markReviewSubmissionFailed } from './pr-review-queue.mjs';
-import { findManaged, findReviewJob, loadPrReviewStore } from './pr-review-store.mjs';
 import { webChatGptFullReviewMetadata } from './web-chatgpt-full-review.mjs';
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -19,12 +18,6 @@ function safeSchedulerLog(root, input) {
 }
 
 export function reviewWorkerPath(root, jobId) {
-  const store = loadPrReviewStore(root);
-  const job = findReviewJob(store, jobId);
-  const managed = job ? findManaged(store, job.managedPullRequestId) : null;
-  if (managed?.provenance?.type === 'manual-import') {
-    throw new Error('Manual-import review execution is not implemented in this registration foundation; no review worker can be selected.');
-  }
   return webChatGptFullReviewMetadata(root, jobId) ? fullReviewWorkerPath : legacyWorkerPath;
 }
 

@@ -12,7 +12,6 @@ import { dispatchAvailableIssues } from './dispatch-batch.mjs';
 import {
   applyManualReviewResult,
   cancelQueuedReview,
-  enqueueManagedReview,
   moveReviewJob,
   pauseManagedPr,
   retryReviewJob,
@@ -20,7 +19,7 @@ import {
 import { setReviewQueuePaused } from './pr-review-store.mjs';
 import { saveValidatedPrAutomationConfig } from './pr-review-config.mjs';
 import { normalizeChatGptConversationUrl } from './chatgpt-url.mjs';
-import { importManagedPullRequest } from './pr-review-import.mjs';
+import { importManagedPullRequest, reviewManagedNow } from './pr-review-import.mjs';
 
 function argsToObject(args) {
   const result = { _: [] };
@@ -104,9 +103,12 @@ export async function prReviewCommand(root, options, services = {}) {
     issueNumber: options.issue,
     headSha: options.head,
   });
-  if (action === 'review-now') return enqueueManagedReview(root, required(options, 'id'), {
+  if (action === 'review-now') return (services.reviewNow || reviewManagedNow)(root, required(options, 'id'), {
     immediate: true,
     conversationUrlOverride: options.url ? normalizeChatGptConversationUrl(options.url) : null,
+    lightRunner: services.lightRunner,
+    snapshotReader: services.snapshotReader,
+    issueReader: services.issueReader,
   });
   if (action === 'retry') return retryReviewJob(root, required(options, 'job'));
   if (action === 'retry-fix') return retryFixJob(root, required(options, 'job'));

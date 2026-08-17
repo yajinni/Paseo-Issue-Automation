@@ -95,6 +95,7 @@ test('queue metadata routes the existing machine-global serial scheduler to the 
   });
   assert.equal(queued.queued, true);
   assert.equal(queued.metadata.stage, 'full');
+  assert.equal(queued.metadata.headSha, 'abcdef1234567890');
   assert.equal(queued.metadata.stageRound, 1);
   assert.equal(queued.metadata.maxStageRounds, 3);
   assert.equal(webChatGptFullReviewMetadata(root, queued.job.id).quickFindings[0].message, 'Recheck parsing.');

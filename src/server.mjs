@@ -41,7 +41,6 @@ import { retryFixJob } from './fix-jobs.mjs';
 import {
   applyManualReviewResult,
   cancelQueuedReview,
-  enqueueManagedReview,
   moveReviewJob,
   pauseManagedPr,
   retryReviewJob,
@@ -63,7 +62,7 @@ import {
 } from './browser-service.mjs';
 import { loadBrowserConfig, resetBrowserProfile, saveBrowserConfig, uninstallBrowserState } from './browser-profile.mjs';
 import { normalizeChatGptConversationUrl } from './chatgpt-url.mjs';
-import { importManagedPullRequest } from './pr-review-import.mjs';
+import { importManagedPullRequest, reviewManagedNow } from './pr-review-import.mjs';
 import {
   cancelAssociatedIssue,
   markManagedPrManuallyResolved,
@@ -395,7 +394,7 @@ export async function startServer({ cwd = process.cwd(), open = false, initialVi
         issueNumber: body.issueNumber,
         headSha: body.headSha,
       });
-      else if (url.pathname === '/api/pr-reviews/review-now') result = enqueueManagedReview(root, String(body.managedPullRequestId), {
+      else if (url.pathname === '/api/pr-reviews/review-now') result = reviewManagedNow(root, String(body.managedPullRequestId), {
         immediate: true,
         conversationUrlOverride: body.conversationUrlOverride ? normalizeChatGptConversationUrl(body.conversationUrlOverride) : null,
       });
