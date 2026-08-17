@@ -99,7 +99,12 @@ export function controllerProcessIsLiveForRun(root, run = {}, {
 
   const expectedAttempt = positivePid(run.attempt);
   const commandAttempt = args[workerIndex + 3];
-  // Workers launched before the attempt argument was added remain identifiable by root and issue.
-  if (expectedAttempt && commandAttempt && Number(commandAttempt) !== expectedAttempt) return false;
+  if (expectedAttempt) {
+    if (!commandAttempt || Number(commandAttempt) !== expectedAttempt) return false;
+    return true;
+  }
+
+  // A genuinely legacy run has no persisted attempt identity to compare. Root and issue
+  // are the strongest available ownership evidence for that compatibility case.
   return true;
 }

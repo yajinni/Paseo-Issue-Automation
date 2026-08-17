@@ -50,6 +50,17 @@ test('recovery controller workers use the same ownership check', () => {
   assert.equal(live({}, `"C:\\Program Files\\nodejs\\node.exe" "C:\\package\\src\\recovery-controller-worker.mjs" "${root}" "239" "3"`), true);
 });
 
-test('legacy controller command lines remain identifiable without an attempt token', () => {
-  assert.equal(live({}, `"C:\\Program Files\\nodejs\\node.exe" "C:\\package\\src\\controller-worker.mjs" "${root}" "239"`), true);
+test('modern runs fail closed when the controller command has no attempt token', () => {
+  assert.equal(live({}, `"C:\\Program Files\\nodejs\\node.exe" "C:\\package\\src\\controller-worker.mjs" "${root}" "239"`), false);
+});
+
+test('genuinely legacy runs without persisted attempt identity use root and issue compatibility evidence', () => {
+  assert.equal(controllerProcessIsLiveForRun(root, {
+    issueNumber: 239,
+    controllerPid: 54748,
+  }, {
+    platform: 'win32',
+    processAlive: () => true,
+    commandLineReader: () => `"C:\\Program Files\\nodejs\\node.exe" "C:\\package\\src\\controller-worker.mjs" "${root}" "239"`,
+  }), true);
 });

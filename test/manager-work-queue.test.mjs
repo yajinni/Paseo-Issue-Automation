@@ -483,6 +483,17 @@ test('unknown execution metadata stays active for a queued review job', () => {
   assert.equal(item.active, true);
 });
 
+test('unknown execution metadata stays active for an active fix job', () => {
+  const item = managerWorkQueueItem({ issueNumber: 310 }, {}, {
+    managedPullRequests: [{ id: 'managed-310', issueNumber: 310 }],
+    reviewJobs: [],
+    fixJobs: [{ id: 'fix-310', managedPullRequestId: 'managed-310', state: 'fixing' }],
+  });
+
+  assert.equal(item.stage, 'unknown');
+  assert.equal(item.active, true);
+});
+
 test('prior-attempt coder prompts are included in deep diagnostics', () => {
   const item = managerWorkQueueItem({
     issueNumber: 17,
