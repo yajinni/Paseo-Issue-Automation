@@ -98,6 +98,7 @@ function carryFullReviewMetadataToCurrentHeads(root) {
   const store = loadPrReviewStore(root);
   const carried = [];
   for (const managed of store.managedPullRequests) {
+    if (managed.provenance?.type === 'manual-import') continue;
     const current = store.reviewJobs
       .filter((job) => job.managedPullRequestId === managed.id
         && job.headSha === managed.currentHeadSha

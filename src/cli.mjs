@@ -107,6 +107,7 @@ export async function prReviewCommand(root, options, services = {}) {
     immediate: true,
     conversationUrlOverride: options.url ? normalizeChatGptConversationUrl(options.url) : null,
     lightRunner: services.lightRunner,
+    labelSetter: services.labelSetter,
     snapshotReader: services.snapshotReader,
     issueReader: services.issueReader,
   });

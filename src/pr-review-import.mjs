@@ -337,7 +337,7 @@ function currentImportedHead(snapshot, expectedHead) {
     && String(snapshot.state || '').toUpperCase() === 'OPEN'
     && String(snapshot.headRefOid || '').toLowerCase() === String(expectedHead || '').toLowerCase()
     ? expectedHead
-    : String(snapshot?.headRefOid || '').toLowerCase() || null;
+    : null;
 }
 
 export function importedStagedReviewRequired(root, managedId, config = loadConfig(root)) {
@@ -353,6 +353,7 @@ export function reviewImportedPullRequestNow(root, managedId, {
   snapshotReader = managedPrSnapshot,
   issueReader,
   lightRunner = defaultImportedLightRunner,
+  labelSetter = setPrReviewLabels,
   conversationUrlOverride = null,
   now = Date.now(),
 } = {}) {
@@ -410,11 +411,20 @@ export function reviewImportedPullRequestNow(root, managedId, {
       findings: [],
     }, expected);
   const decision = reviewStageDecision({ config, state: { events }, stage: REVIEW_STAGES.quick, verdict: event });
-  recordImportedLightEvent(root, canonicalId, event, decision);
-  if (!['quick-passed', 'handoff'].includes(decision.action)) {
+  const importedDecision = event.result === 'changes' && decision.action === 'handoff'
+    ? { ...decision, action: 'repair', exhausted: true }
+    : decision;
+  recordImportedLightEvent(root, canonicalId, event, importedDecision);
+  if (event.result === 'changes') {
+    labelSetter(root, managed.pullRequestNumber, {
+      add: [PR_REVIEW_LABELS.changesRequested],
+      remove: [PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.failed],
+    });
+  }
+  if (!['quick-passed', 'handoff'].includes(importedDecision.action)) {
     return {
       staged: true,
-      lightReview: { event, decision },
+      lightReview: { event, decision: importedDecision },
       reviewJob: null,
       metadata: null,
       managed: findManaged(loadPrReviewStore(root), canonicalId),

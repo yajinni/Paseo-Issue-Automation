@@ -19,13 +19,13 @@ import { webChatGptFullReviewMetadata } from '../src/web-chatgpt-full-review.mjs
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
 const NEXT_HEAD = 'fedcba9876543210fedcba9876543210fedcba98';
 
-function fixture(t) {
+function fixture(t, { quickMaxRounds = 3 } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-import-staged-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });
   saveConfig(root, {
     baseBranch: 'main',
     models: { reviewer: 'provider/light-model' },
-    review: { workflow: 'quick-web-chatgpt', quickMaxRounds: 3, fullMaxRounds: 3 },
+    review: { workflow: 'quick-web-chatgpt', quickMaxRounds, fullMaxRounds: 3 },
   });
   savePrAutomationConfig(root, {
     enabled: true,
@@ -57,7 +57,7 @@ function fixture(t) {
   return { root, pr, issue, managed: imported.managed };
 }
 
-function reviewNow(root, pr, issue, lightRunner, snapshotReader = () => pr) {
+function reviewNow(root, pr, issue, lightRunner, snapshotReader = () => pr, labelSetter) {
   return prReviewCommand(root, {
     _: ['pr-review', 'review-now'],
     id: 'OWNER/REPO#45',
@@ -65,6 +65,7 @@ function reviewNow(root, pr, issue, lightRunner, snapshotReader = () => pr) {
     snapshotReader,
     issueReader: () => issue,
     lightRunner,
+    labelSetter,
   });
 }
 
@@ -94,13 +95,17 @@ test('fresh imported review runs Light first and queues exact-head Web ChatGPT F
   assert.deepEqual(loadIssueLifecycle(root, 101), []);
 });
 
-test('Light changes hold the imported PR and reject same-head retries', async (t) => {
+test('Light changes hold the imported PR, own labels, and reject same-head retries', async (t) => {
   const { root, pr, issue } = fixture(t);
+  const labelCalls = [];
   const first = await reviewNow(root, pr, issue, () => ({
     result: 'changes',
     summary: 'Repair is required.',
     findings: [{ severity: 'blocking', message: 'Repair the imported head.' }],
-  }));
+  }), undefined, (repositoryRoot, pullRequestNumber, labels) => {
+    labelCalls.push({ repositoryRoot, pullRequestNumber, labels });
+    return { changed: true };
+  });
   assert.equal(first.lightReview.decision.action, 'repair');
   assert.equal(first.reviewJob, null);
   assert.equal(first.metadata, null);
@@ -116,6 +121,46 @@ test('Light changes hold the imported PR and reject same-head retries', async (t
   assert.equal(after.managedPullRequests[0].stagedReviewEvents.length, 1);
   assert.equal(after.reviewJobs.length, 0);
   assert.equal(loadRun(root, 101), null);
+  assert.deepEqual(labelCalls, [{
+    repositoryRoot: root,
+    pullRequestNumber: 45,
+    labels: {
+      add: ['paseo:changes-requested'],
+      remove: ['paseo:review-queued', 'paseo:reviewing', 'paseo:fixing', 'paseo:review-failed'],
+    },
+  }]);
+});
+
+test('exhausted Light changes remain a repair hold instead of handing off on the same head', async (t) => {
+  const { root, pr, issue } = fixture(t, { quickMaxRounds: 1 });
+  const first = await reviewNow(root, pr, issue, () => ({
+    result: 'changes',
+    summary: 'The final Light round still needs repair.',
+    findings: [{ severity: 'blocking', message: 'Repair the imported head.' }],
+  }), undefined, () => ({ changed: true }));
+
+  assert.equal(first.lightReview.decision.action, 'repair');
+  assert.equal(first.lightReview.decision.exhausted, true);
+  assert.equal(first.reviewJob, null);
+  assert.equal(first.metadata, null);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
+  await assert.rejects(
+    () => reviewNow(root, pr, issue, () => ({ result: 'pass', summary: 'Unexpected retry.', findings: [] })),
+    /new exact PR head after changes were requested/,
+  );
+});
+
+test('a PR that closes during Light cannot enter Full review at the unchanged head', async (t) => {
+  const { root, pr, issue } = fixture(t);
+  const result = await reviewNow(root, pr, issue, () => {
+    pr.state = 'CLOSED';
+    return { result: 'pass', summary: 'The PR closed during Light.', findings: [] };
+  });
+
+  assert.equal(result.lightReview.event.result, 'stale');
+  assert.equal(result.reviewJob, null);
+  assert.equal(result.metadata, null);
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
 });
 
 test('a stale Light result and a pre-Light head advance reset to staged Light', async (t) => {
@@ -213,4 +258,35 @@ test('imported Full changes are an external repair hold and own the label effect
     add: ['paseo:changes-requested'],
     remove: ['paseo:reviewing', 'paseo:review-queued', 'paseo:review-failed'],
   }]);
+});
+
+test('an imported Full head advance invalidates H1 and returns to Light before H2 Full metadata', async (t) => {
+  const { root, pr, issue, managed } = fixture(t);
+  const staged = await reviewNow(root, pr, issue, () => ({
+    result: 'pass',
+    summary: 'Light review passed on H1.',
+    findings: [],
+  }));
+  assert.equal(staged.metadata.headSha, HEAD);
+
+  pr.headRefOid = NEXT_HEAD;
+  const reconciled = reconcileManagedPullRequest(root, managed.id, {
+    snapshot: pr,
+    now: 3000,
+    effectRunner: () => [],
+  });
+  const store = loadPrReviewStore(root);
+  const oldJob = store.reviewJobs.find((job) => job.headSha === HEAD);
+  assert.equal(reconciled.stagedReviewQueued, true);
+  assert.equal(store.reviewJobs.some((job) => job.headSha === NEXT_HEAD), false);
+  assert.equal(oldJob.state, 'cancelled');
+  assert.equal(webChatGptFullReviewMetadata(root, store.reviewJobs.find((job) => job.headSha === NEXT_HEAD)?.id), null);
+
+  const fresh = await reviewNow(root, pr, issue, () => ({
+    result: 'pass',
+    summary: 'Light review passed on H2.',
+    findings: [],
+  }));
+  assert.equal(fresh.reviewJob.headSha, NEXT_HEAD);
+  assert.equal(fresh.metadata.headSha, NEXT_HEAD);
 });
