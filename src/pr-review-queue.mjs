@@ -212,6 +212,7 @@ export function nextDueReview(store, now = Date.now()) {
       const managed = findManaged(store, job.managedPullRequestId);
       return Boolean(managed
         && managed.reviewState !== 'paused'
+        && !(managed.provenance?.type === 'manual-import' && managed.reviewState === 'changes_requested')
         && !TERMINAL_PR_STATES.has(managed.reviewState));
     })
     .sort((a, b) => Number(b.priority) - Number(a.priority) || Number(a.queuePosition) - Number(b.queuePosition))[0] || null;

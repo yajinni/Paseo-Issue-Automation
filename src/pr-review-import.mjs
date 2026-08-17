@@ -2,6 +2,7 @@ import { loadConfig } from './state.mjs';
 import { runJson } from './process.mjs';
 import { managedPrSnapshot, PR_REVIEW_LABELS, ensurePrReviewLabels, setPrReviewLabels } from './pr-review-github.mjs';
 import {
+  appendHistory,
   findManaged,
   loadPrReviewStore,
   managedPullRequestId,
@@ -284,17 +285,35 @@ function defaultImportedLightRunner(command, args, runnerOptions) {
   return runJson(command, args, runnerOptions);
 }
 
+function supersedeImportedFullJobs(store, managed, reason, at) {
+  for (const job of store.reviewJobs.filter((candidate) => candidate.managedPullRequestId === managed.id
+    && ['queued', 'submitting', 'awaiting_result'].includes(candidate.state))) {
+    const previous = job.state;
+    job.state = 'superseded';
+    job.completedAt = at;
+    job.updatedAt = at;
+    job.lastError = reason;
+    appendHistory(store, {
+      entityType: 'review_job', entityId: job.id, previousState: previous, newState: 'superseded',
+      reason, actor: 'review-reconciliation', sha: job.headSha, timestamp: at,
+    });
+    if (store.runtime.activeReviewJobId === job.id) store.runtime.activeReviewJobId = null;
+  }
+}
+
 function recordImportedLightEvent(root, managedId, event, decision) {
   return mutatePrReviewStore(root, (store) => {
     const managed = findManaged(store, managedId);
     if (!managed) throw new Error(`Managed PR ${managedId} was not found.`);
+    const at = new Date().toISOString();
     managed.stagedReviewEvents = [...(managed.stagedReviewEvents || []), {
       ...event,
       decision: decision.action,
     }].slice(-100);
-    managed.updatedAt = new Date().toISOString();
+    managed.updatedAt = at;
     if (decision.action === 'stale') {
       const reason = 'The imported PR head changed during the Light review; the next Light review must use the new exact head.';
+      supersedeImportedFullJobs(store, managed, reason, at);
       managed.activeReviewRequestId = null;
       managed.queuePosition = null;
       transitionManaged(store, managed, 'queued', {
@@ -302,10 +321,11 @@ function recordImportedLightEvent(root, managedId, event, decision) {
         actor: 'review-reconciliation',
         sha: event.headSha,
         error: reason,
-        at: managed.updatedAt,
+        at,
       });
     } else if (decision.action === 'repair') {
       const reason = event.summary || 'The imported PR Light review requested changes; no Full review was queued.';
+      supersedeImportedFullJobs(store, managed, reason, at);
       managed.activeReviewRequestId = null;
       managed.queuePosition = null;
       transitionManaged(store, managed, 'changes_requested', {
@@ -313,7 +333,7 @@ function recordImportedLightEvent(root, managedId, event, decision) {
         actor: 'review-reconciliation',
         sha: event.headSha,
         error: reason,
-        at: managed.updatedAt,
+        at,
       });
     }
     return managed;

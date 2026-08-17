@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { prReviewCommand } from '../src/cli.mjs';
 import { importManagedPullRequest } from '../src/pr-review-import.mjs';
+import { nextDueReview } from '../src/pr-review-queue.mjs';
 import { reconcileManagedPullRequest } from '../src/pr-review-reconcile.mjs';
 import { reviewWorkerPath } from '../src/pr-review-scheduler.mjs';
 import {
@@ -129,6 +130,35 @@ test('Light changes hold the imported PR, own labels, and reject same-head retri
       remove: ['paseo:review-queued', 'paseo:reviewing', 'paseo:fixing', 'paseo:review-failed'],
     },
   }]);
+});
+
+test('a Light retry invalidates any queued Full review on changes or stale results', async (t) => {
+  const changed = fixture(t);
+  const passed = await reviewNow(changed.root, changed.pr, changed.issue, () => ({
+    result: 'pass', summary: 'Light review passed.', findings: [],
+  }));
+  const changedRetry = await reviewNow(changed.root, changed.pr, changed.issue, () => ({
+    result: 'changes', summary: 'Repair is required.', findings: [],
+  }), undefined, () => ({ changed: true }));
+  const changedStore = loadPrReviewStore(changed.root);
+  assert.equal(changedRetry.lightReview.decision.action, 'repair');
+  assert.equal(changedStore.reviewJobs[0].id, passed.reviewJob.id);
+  assert.equal(changedStore.reviewJobs[0].state, 'superseded');
+  assert.equal(nextDueReview(changedStore, Date.now()), null);
+  assert.equal(changedStore.managedPullRequests[0].reviewState, 'changes_requested');
+
+  const stale = fixture(t);
+  const stalePassed = await reviewNow(stale.root, stale.pr, stale.issue, () => ({
+    result: 'pass', summary: 'Light review passed.', findings: [],
+  }));
+  const staleRetry = await reviewNow(stale.root, stale.pr, stale.issue, () => {
+    stale.pr.headRefOid = NEXT_HEAD;
+    return { result: 'pass', summary: 'The head changed during Light.', findings: [] };
+  });
+  const staleStore = loadPrReviewStore(stale.root);
+  assert.equal(staleRetry.lightReview.event.result, 'stale');
+  assert.equal(staleStore.reviewJobs.find((job) => job.id === stalePassed.reviewJob.id).state, 'superseded');
+  assert.equal(nextDueReview(staleStore, Date.now()), null);
 });
 
 test('exhausted Light changes remain a repair hold instead of handing off on the same head', async (t) => {
