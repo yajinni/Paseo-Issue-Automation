@@ -73,6 +73,7 @@ export async function executeReviewSubmission(root, jobId, {
     });
     const result = await submitter({ conversationUrl, prompt, reviewRequestId: job.reviewRequestId });
     const saved = markReviewSubmitted(root, job.id, result);
+    if (saved.state === 'superseded' || saved.state === 'cancelled') return saved;
     safeReviewLog(root, {
       action: 'submit-pr-review',
       status: 'success',
@@ -90,11 +91,12 @@ export async function executeReviewSubmission(root, jobId, {
     });
     return saved;
   } catch (error) {
+    const saved = markReviewSubmissionFailed(root, job.id, error, error.diagnostics || {});
+    if (saved.state === 'superseded' || saved.state === 'cancelled') return saved;
     setPrReviewLabels(root, managed.pullRequestNumber, {
       add: [PR_REVIEW_LABELS.failed],
       remove: [PR_REVIEW_LABELS.reviewing],
     });
-    markReviewSubmissionFailed(root, job.id, error, error.diagnostics || {});
     safeReviewLog(root, {
       level: 'error',
       action: 'submit-pr-review',

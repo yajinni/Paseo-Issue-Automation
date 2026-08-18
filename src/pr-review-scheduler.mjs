@@ -5,7 +5,9 @@ import { browserPaths } from './browser-profile.mjs';
 import { appendControllerLog } from './controller-log.mjs';
 import { acquireLease, releaseLease, transferLease } from './durable-lease.mjs';
 import { claimNextReview, markReviewSubmissionFailed } from './pr-review-queue.mjs';
+import { findManaged, findReviewJob, loadPrReviewStore } from './pr-review-store.mjs';
 import { webChatGptFullReviewMetadata } from './web-chatgpt-full-review.mjs';
+import { loadConfig } from './state.mjs';
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const legacyWorkerPath = path.join(sourceDirectory, 'pr-review-worker.mjs');
@@ -18,7 +20,18 @@ function safeSchedulerLog(root, input) {
 }
 
 export function reviewWorkerPath(root, jobId) {
-  return webChatGptFullReviewMetadata(root, jobId) ? fullReviewWorkerPath : legacyWorkerPath;
+  const metadata = webChatGptFullReviewMetadata(root, jobId);
+  const store = loadPrReviewStore(root);
+  const job = findReviewJob(store, jobId);
+  const managed = job ? findManaged(store, job.managedPullRequestId) : null;
+  let quickWebWorkflow = false;
+  try { quickWebWorkflow = loadConfig(root).review?.workflow === 'quick-web-chatgpt'; } catch {}
+  if (quickWebWorkflow && managed?.provenance?.type === 'manual-import'
+      && (!metadata || metadata.stage !== 'full'
+        || String(metadata.headSha || '').toLowerCase() !== String(job.headSha || '').toLowerCase())) {
+    throw new Error(`Imported quick-web review job ${jobId} lacks matching exact-head Full metadata.`);
+  }
+  return metadata ? fullReviewWorkerPath : legacyWorkerPath;
 }
 
 export function tickReviewScheduler(root, { spawnWorker = true, now = Date.now() } = {}) {

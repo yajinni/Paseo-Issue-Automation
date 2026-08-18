@@ -6,15 +6,17 @@ import path from 'node:path';
 import test from 'node:test';
 import { prReviewCommand } from '../src/cli.mjs';
 import { importManagedPullRequest } from '../src/pr-review-import.mjs';
-import { nextDueReview } from '../src/pr-review-queue.mjs';
+import { claimNextReview, nextDueReview } from '../src/pr-review-queue.mjs';
 import { reconcileManagedPullRequest } from '../src/pr-review-reconcile.mjs';
 import { reviewWorkerPath } from '../src/pr-review-scheduler.mjs';
+import { executeWebChatGptFullReviewSubmission } from '../src/web-chatgpt-full-review-worker.mjs';
+import { reconcileManagedPullRequestWithWebFullReview } from '../src/web-chatgpt-full-review-reconcile.mjs';
 import {
   loadPrReviewStore,
   mutatePrReviewStore,
   savePrAutomationConfig,
 } from '../src/pr-review-store.mjs';
-import { loadIssueLifecycle, loadRun, saveConfig } from '../src/state.mjs';
+import { loadIssueLifecycle, loadRun, saveConfig, saveRun, statePaths } from '../src/state.mjs';
 import { webChatGptFullReviewMetadata } from '../src/web-chatgpt-full-review.mjs';
 
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
@@ -159,6 +161,123 @@ test('a Light retry invalidates any queued Full review on changes or stale resul
   assert.equal(staleRetry.lightReview.event.result, 'stale');
   assert.equal(staleStore.reviewJobs.find((job) => job.id === stalePassed.reviewJob.id).state, 'superseded');
   assert.equal(nextDueReview(staleStore, Date.now()), null);
+});
+
+test('Light-to-Full handoff rejects a stored head advance after final live validation', async (t) => {
+  const { root, pr, issue } = fixture(t);
+  let snapshots = 0;
+  const result = await reviewNow(root, pr, issue, () => ({
+    result: 'pass', summary: 'Light review passed.', findings: [],
+  }), () => {
+    snapshots += 1;
+    if (snapshots === 2) {
+      mutatePrReviewStore(root, (store) => {
+        store.managedPullRequests[0].currentHeadSha = NEXT_HEAD;
+      });
+    }
+    return { ...pr, headRefOid: HEAD };
+  });
+
+  const store = loadPrReviewStore(root);
+  assert.equal(result.lightReview.event.result, 'stale');
+  assert.equal(result.reviewJob, null);
+  assert.equal(store.reviewJobs.length, 0);
+  assert.equal(store.managedPullRequests[0].currentHeadSha, NEXT_HEAD);
+  assert.equal(store.managedPullRequests[0].stagedReviewEvents.at(-1).result, 'stale');
+});
+
+test('an imported quick-web job without Full metadata fails closed at scheduler selection', async (t) => {
+  const { root, pr, issue } = fixture(t);
+  const staged = await reviewNow(root, pr, issue, () => ({
+    result: 'pass', summary: 'Light review passed.', findings: [],
+  }));
+  rmSync(path.join(statePaths(root).root, 'web-chatgpt-full-review.json'), { force: true });
+
+  assert.throws(
+    () => reviewWorkerPath(root, staged.reviewJob.id),
+    /lacks matching exact-head Full metadata/,
+  );
+});
+
+test('a superseded imported Full worker cannot resurrect the Light repair hold', async (t) => {
+  const { root, pr, issue } = fixture(t);
+  const staged = await reviewNow(root, pr, issue, () => ({
+    result: 'pass', summary: 'Light review passed.', findings: [],
+  }));
+  claimNextReview(root, { now: Date.now() });
+
+  let release;
+  let started;
+  const submitStarted = new Promise((resolve) => { started = resolve; });
+  const submission = executeWebChatGptFullReviewSubmission(root, staged.reviewJob.id, {
+    snapshotReader: () => pr,
+    labelSetter: () => ({ changed: true }),
+    submitter: () => {
+      started();
+      return new Promise((resolve) => { release = resolve; });
+    },
+  });
+  await submitStarted;
+
+  await reviewNow(root, pr, issue, () => ({
+    result: 'changes', summary: 'Repair is required.', findings: [],
+  }), () => pr, () => ({ changed: true }));
+  release({ conversationUrl: 'https://chatgpt.com/c/imported' });
+  const saved = await submission;
+  const store = loadPrReviewStore(root);
+
+  assert.equal(saved.state, 'superseded');
+  assert.equal(store.reviewJobs[0].state, 'superseded');
+  assert.equal(store.managedPullRequests[0].reviewState, 'changes_requested');
+});
+
+test('imported Full approval is held without controller lifecycle or finalization side effects', async (t) => {
+  const { root, pr, issue, managed } = fixture(t);
+  const staged = await reviewNow(root, pr, issue, () => ({
+    result: 'pass', summary: 'Light review passed.', findings: [],
+  }));
+  mutatePrReviewStore(root, (store) => {
+    const record = store.managedPullRequests[0];
+    const job = store.reviewJobs[0];
+    record.reviewState = 'awaiting_result';
+    record.activeReviewRequestId = job.reviewRequestId;
+    job.state = 'awaiting_result';
+  });
+  saveRun(root, 101, {
+    issueNumber: 101,
+    status: 'agent-running',
+    phase: 'reviewing',
+    branch: 'feature/import-me',
+    prNumber: 45,
+    events: [{ event: 'validation-summary', result: 'PASS', commit: HEAD }],
+    activity: [],
+  });
+  const beforeRun = loadRun(root, 101);
+  const marker = `<!-- paseo-review:v1\n${JSON.stringify({
+    reviewRequestId: staged.reviewJob.reviewRequestId,
+    repository: 'owner/repo',
+    pullRequestNumber: 45,
+    issueNumber: 101,
+    headSha: HEAD,
+    reviewRound: 1,
+    stage: 'full',
+    round: 1,
+    promptVersion: 2,
+    result: 'approved',
+  })}\n-->\nApproved imported PR.`;
+
+  const outcome = reconcileManagedPullRequestWithWebFullReview(root, managed.id, {
+    snapshot: { ...pr, labels: [], comments: [{ id: 2, body: marker }] },
+    effectRunner: () => [],
+  });
+  const after = loadPrReviewStore(root);
+
+  assert.equal(outcome.review.result, 'approved');
+  assert.equal(outcome.review.held, true);
+  assert.deepEqual(outcome.finalization, []);
+  assert.deepEqual(loadRun(root, 101), beforeRun);
+  assert.equal(after.managedPullRequests[0].reviewState, 'awaiting_result');
+  assert.equal(after.reviewJobs[0].state, 'awaiting_result');
 });
 
 test('exhausted Light changes remain a repair hold instead of handing off on the same head', async (t) => {

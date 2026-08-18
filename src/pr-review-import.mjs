@@ -473,10 +473,27 @@ export function reviewImportedPullRequestNow(root, managedId, {
     quickFindings: event.findings,
     reviewEvents: [...events, event],
     config,
+    headSha: expectedHead,
     conversationUrlOverride,
     immediate: true,
     now,
   });
+  if (queued.stale) {
+    const stale = createHarnessReviewEvent({
+      result: 'stale',
+      summary: 'The managed pull-request head changed before the Full review could be queued.',
+      findings: [],
+    }, expected);
+    const staleDecision = reviewStageDecision({ config, state: { events: [...events, event] }, stage: REVIEW_STAGES.quick, verdict: stale });
+    recordImportedLightEvent(root, canonicalId, stale, staleDecision);
+    return {
+      staged: true,
+      lightReview: { event: stale, decision: staleDecision },
+      reviewJob: null,
+      metadata: null,
+      managed: findManaged(loadPrReviewStore(root), canonicalId),
+    };
+  }
   return {
     staged: true,
     lightReview: { event, decision },

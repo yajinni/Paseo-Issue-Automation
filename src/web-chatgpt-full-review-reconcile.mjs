@@ -130,6 +130,7 @@ function finalizeReadyManagedApprovals(root, options = {}) {
   const store = loadPrReviewStore(root);
   const finalized = [];
   for (const managed of store.managedPullRequests) {
+    if (managed.provenance?.type === 'manual-import') continue;
     if (managed.reviewState !== 'ready_to_merge') continue;
     const state = loadRun(root, managed.issueNumber);
     if (!state || state.reviewRuntimeStage === 'full-manual') continue;

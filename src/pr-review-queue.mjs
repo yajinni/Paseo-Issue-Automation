@@ -10,6 +10,7 @@ import {
   nextQueuePosition,
   nowIso,
   TERMINAL_PR_STATES,
+  TERMINAL_REVIEW_JOB_STATES,
   transitionManaged,
 } from './pr-review-store.mjs';
 import { managedPrSnapshot } from './pr-review-github.mjs';
@@ -29,16 +30,21 @@ function queuedReviewJobs(store, managedId) {
 function supersedeOlderJobs(store, managed, headSha, at) {
   for (const job of queuedReviewJobs(store, managed.id)) {
     if (job.headSha === headSha) continue;
-    const previous = job.state;
-    job.state = 'superseded';
-    job.completedAt = at;
-    job.updatedAt = at;
-    appendHistory(store, {
-      entityType: 'review_job', entityId: job.id, previousState: previous, newState: 'superseded',
-      reason: `Superseded by newer PR head ${headSha}.`, actor: 'queue', sha: headSha, timestamp: at,
-    });
-    if (store.runtime.activeReviewJobId === job.id) store.runtime.activeReviewJobId = null;
+    supersedeReviewJob(store, job, `Superseded by newer PR head ${headSha}.`, at, 'queue');
   }
+}
+
+function supersedeReviewJob(store, job, reason, at, actor = 'review-reconciliation') {
+  const previous = job.state;
+  job.state = 'superseded';
+  job.completedAt = at;
+  job.updatedAt = at;
+  job.lastError = reason;
+  appendHistory(store, {
+    entityType: 'review_job', entityId: job.id, previousState: previous, newState: 'superseded',
+    reason, actor, sha: job.headSha, timestamp: at,
+  });
+  if (store.runtime.activeReviewJobId === job.id) store.runtime.activeReviewJobId = null;
 }
 
 export function enqueueReviewInStore(store, managed, {
@@ -239,7 +245,13 @@ export function markReviewSubmitted(root, jobId, result) {
   return mutatePrReviewStore(root, (store) => {
     const job = findReviewJob(store, jobId);
     if (!job) throw new Error(`Review job ${jobId} was not found.`);
+    if (TERMINAL_REVIEW_JOB_STATES.has(job.state)) return clone(job);
+    if (job.state !== 'submitting') throw new Error(`Review job ${jobId} is not in submitting state.`);
     const managed = findManaged(store, job.managedPullRequestId);
+    if (managed && String(managed.currentHeadSha || '').toLowerCase() !== String(job.headSha || '').toLowerCase()) {
+      supersedeReviewJob(store, job, 'The review job no longer owns the managed pull-request head.', nowIso(), 'review-reconciliation');
+      return clone(job);
+    }
     const at = result.submittedAt || nowIso();
     job.state = 'awaiting_result';
     job.submittedAt = at;
@@ -261,7 +273,13 @@ export function markReviewSubmissionFailed(root, jobId, error, diagnostics = {})
   return mutatePrReviewStore(root, (store) => {
     const job = findReviewJob(store, jobId);
     if (!job) throw new Error(`Review job ${jobId} was not found.`);
+    if (TERMINAL_REVIEW_JOB_STATES.has(job.state)) return clone(job);
+    if (job.state !== 'submitting') throw new Error(`Review job ${jobId} is not in submitting state.`);
     const managed = findManaged(store, job.managedPullRequestId);
+    if (managed && String(managed.currentHeadSha || '').toLowerCase() !== String(job.headSha || '').toLowerCase()) {
+      supersedeReviewJob(store, job, 'The failed review job no longer owns the managed pull-request head.', nowIso(), 'review-reconciliation');
+      return clone(job);
+    }
     const at = nowIso();
     const retryable = job.attempts < store.config.browserReview.maxSubmissionAttempts;
     job.state = retryable ? 'queued' : 'failed';
@@ -444,6 +462,9 @@ export function applyManualReviewResult(root, managedId, { result, findings = ''
     });
   }
   if (result !== 'approved') throw new Error('Manual result must be approved or changes_requested.');
+  if (selected.managed.provenance?.type === 'manual-import') {
+    throw new Error('Imported pull-request approvals cannot enter controller finalization.');
+  }
   const gate = evaluateApprovedReviewGate(root, selected.managed, selected.job, selected.pr);
   if (!gate.ok) throw new Error(gate.reason || 'The approved-review completion gate did not pass.');
   finalizeApprovedBrowserReview(root, selected.managed, selected.job, {

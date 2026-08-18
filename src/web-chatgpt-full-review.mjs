@@ -94,6 +94,7 @@ export function queueWebChatGptFullReview(root, managedId, {
   quickFindings = [],
   reviewEvents = [],
   config,
+  headSha = null,
   conversationUrlOverride = null,
   immediate = true,
   now = Date.now(),
@@ -109,17 +110,27 @@ export function queueWebChatGptFullReview(root, managedId, {
   if (stageRound > maxStageRounds) {
     return { queued: false, exhausted: true, reason: 'The configured full-review round limit is exhausted.' };
   }
+  const expectedHead = headSha ? String(headSha).toLowerCase() : null;
   const queued = mutatePrReviewStore(root, (store) => {
     const managed = findManaged(store, managedId);
     if (!managed) throw new Error(`Managed PR ${managedId} was not found.`);
+    const storedHead = String(managed.currentHeadSha || '').toLowerCase();
+    if (expectedHead && storedHead !== expectedHead) {
+      return {
+        queued: false,
+        stale: true,
+        reason: `The managed PR head changed from ${expectedHead} before the Full review could be queued.`,
+      };
+    }
     const job = enqueueReviewInStore(store, managed, {
-      headSha: managed.currentHeadSha,
+      headSha: expectedHead || managed.currentHeadSha,
       immediate,
       conversationUrlOverride,
       now,
     });
     return { queued: true, job: clone(job) };
   });
+  if (!queued.queued) return queued;
   const metadata = recordWebChatGptFullReviewMetadata(root, queued.job.id, {
     headSha: queued.job.headSha,
     stageRound,

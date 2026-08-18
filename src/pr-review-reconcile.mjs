@@ -290,6 +290,14 @@ function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) 
     enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: Date.parse(at) });
     return { result: 'stale', requeued: true, effects: [] };
   }
+  if (managed.provenance?.type === 'manual-import' && resolvedResult.result === 'approved') {
+    return {
+      result: 'approved',
+      held: true,
+      reason: 'Imported Full approval is held until guarded imported finalization exists.',
+      effects: [],
+    };
+  }
   if (resolvedResult.result === 'changes_requested') {
     const fixJob = createFixJobInStore(store, managed, reviewJob, resolvedResult.humanMarkdown, {
       sourceCommentId: resolvedResult.sourceId,
@@ -487,7 +495,8 @@ export function reconcileManagedPullRequest(root, managedId, {
 
   const precomputed = reviewResultForSnapshot(current, currentManaged, pr);
   const mergedSnapshot = Boolean(pr.mergedAt || String(pr.state).toUpperCase() === 'MERGED');
-  if (precomputed.result?.result === 'approved' && precomputed.reviewJob
+  if (currentManaged.provenance?.type !== 'manual-import'
+      && precomputed.result?.result === 'approved' && precomputed.reviewJob
       && currentManaged.currentHeadSha === precomputed.result.headSha) {
     if (mergedSnapshot && exactMergedApproval(precomputed, String(pr.headRefOid || '').toLowerCase())) {
       recordApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
