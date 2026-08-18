@@ -132,9 +132,12 @@ test('real local Git refresh preserves ancestry, advances tracking refs, support
 
   try {
     runGit(tempRoot, ['init', '--bare', '--initial-branch=main', origin]);
-    runGit(repositoryRoot, [
-      'push', origin, 'HEAD:refs/heads/main', 'HEAD:refs/heads/release',
+    const repositoryUrl = runGit(repositoryRoot, ['remote', 'get-url', 'origin']);
+    runGit(tempRoot, [
+      '--git-dir', origin, 'fetch', repositoryUrl,
+      '+refs/heads/main:refs/heads/main',
     ]);
+    runGit(tempRoot, ['--git-dir', origin, 'update-ref', 'refs/heads/release', 'refs/heads/main']);
     runGit(tempRoot, ['clone', origin, worker]);
     configureGit(worker);
 
