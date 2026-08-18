@@ -102,6 +102,14 @@ function hasExactApprovedReview(store, managed, mergedHead) {
 }
 
 function reconcileMergedInStore(store, managed, pr, at, precomputed = {}) {
+  if (managed.provenance?.type === 'manual-import') {
+    return {
+      state: managed.reviewState,
+      held: true,
+      reason: 'Imported PR merge reconciliation is held until guarded imported finalization exists.',
+      effects: [],
+    };
+  }
   const mergedHead = String(pr.headRefOid || managed.currentHeadSha || '').toLowerCase();
   const firstObservation = managed.reviewState !== 'merged';
   if (exactMergedApproval(precomputed, mergedHead)) {

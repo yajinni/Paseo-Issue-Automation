@@ -199,7 +199,7 @@ export function importManagedPullRequest(root, input = {}, options = {}) {
     provenance,
   }, {
     now: options.now,
-    skipQueue: config.review?.workflow === 'quick-web-chatgpt',
+    skipQueue: config.review?.workflow !== 'full-immediate',
     prepare({ store, id, managed, input: registrationInput }) {
       existingAtLock = Boolean(managed);
       if (managed && Number(managed.issueNumber) !== selectedIssue.issueNumber) {
@@ -505,6 +505,12 @@ export function reviewImportedPullRequestNow(root, managedId, {
 
 export function reviewManagedNow(root, managedId, options = {}) {
   const canonicalId = canonicalManagedPullRequestId(managedId);
-  const imported = reviewImportedPullRequestNow(root, canonicalId, options);
-  return imported || enqueueManagedReview(root, canonicalId, options);
+  const config = options.config || loadConfig(root);
+  const imported = reviewImportedPullRequestNow(root, canonicalId, { ...options, config });
+  if (imported) return imported;
+  const managed = findManaged(loadPrReviewStore(root), canonicalId);
+  if (managed?.provenance?.type === 'manual-import' && config.review?.workflow !== 'full-immediate') {
+    throw new Error('Imported pull-request review requires the explicit full-immediate workflow.');
+  }
+  return enqueueManagedReview(root, canonicalId, { ...options, config });
 }

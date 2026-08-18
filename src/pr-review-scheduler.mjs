@@ -24,12 +24,21 @@ export function reviewWorkerPath(root, jobId) {
   const store = loadPrReviewStore(root);
   const job = findReviewJob(store, jobId);
   const managed = job ? findManaged(store, job.managedPullRequestId) : null;
-  let quickWebWorkflow = false;
-  try { quickWebWorkflow = loadConfig(root).review?.workflow === 'quick-web-chatgpt'; } catch {}
-  if (quickWebWorkflow && managed?.provenance?.type === 'manual-import'
-      && (!metadata || metadata.stage !== 'full'
-        || String(metadata.headSha || '').toLowerCase() !== String(job.headSha || '').toLowerCase())) {
-    throw new Error(`Imported quick-web review job ${jobId} lacks matching exact-head Full metadata.`);
+  if (managed?.provenance?.type === 'manual-import') {
+    let workflow;
+    try {
+      workflow = loadConfig(root).review?.workflow;
+    } catch {
+      throw new Error(`Imported review job ${jobId} cannot be selected without valid review workflow configuration.`);
+    }
+    if (!['quick-web-chatgpt', 'full-immediate'].includes(workflow)) {
+      throw new Error(`Imported review job ${jobId} cannot run under the ${workflow || 'unknown'} workflow.`);
+    }
+    if (workflow === 'quick-web-chatgpt'
+        && (!metadata || metadata.stage !== 'full'
+          || String(metadata.headSha || '').toLowerCase() !== String(job.headSha || '').toLowerCase())) {
+      throw new Error(`Imported quick-web review job ${jobId} lacks matching exact-head Full metadata.`);
+    }
   }
   return metadata ? fullReviewWorkerPath : legacyWorkerPath;
 }

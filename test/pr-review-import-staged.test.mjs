@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -22,13 +22,13 @@ import { webChatGptFullReviewMetadata } from '../src/web-chatgpt-full-review.mjs
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
 const NEXT_HEAD = 'fedcba9876543210fedcba9876543210fedcba98';
 
-function fixture(t, { quickMaxRounds = 3 } = {}) {
+function fixture(t, { quickMaxRounds = 3, workflow = 'quick-web-chatgpt' } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'paseo-import-staged-'));
   execFileSync('git', ['init', '--quiet'], { cwd: root });
   saveConfig(root, {
     baseBranch: 'main',
     models: { reviewer: 'provider/light-model' },
-    review: { workflow: 'quick-web-chatgpt', quickMaxRounds, fullMaxRounds: 3 },
+    review: { workflow, quickMaxRounds, fullMaxRounds: 3 },
   });
   savePrAutomationConfig(root, {
     enabled: true,
@@ -278,6 +278,80 @@ test('imported Full approval is held without controller lifecycle or finalizatio
   assert.deepEqual(loadRun(root, 101), beforeRun);
   assert.equal(after.managedPullRequests[0].reviewState, 'awaiting_result');
   assert.equal(after.reviewJobs[0].state, 'awaiting_result');
+});
+
+test('merged imported Full approval stays held without issue closure or merge lifecycle effects', async (t) => {
+  const { root, pr, issue, managed } = fixture(t);
+  const staged = await reviewNow(root, pr, issue, () => ({
+    result: 'pass', summary: 'Light review passed.', findings: [],
+  }));
+  mutatePrReviewStore(root, (store) => {
+    const record = store.managedPullRequests[0];
+    const job = store.reviewJobs[0];
+    record.reviewState = 'awaiting_result';
+    record.activeReviewRequestId = job.reviewRequestId;
+    job.state = 'awaiting_result';
+  });
+  saveRun(root, 101, {
+    issueNumber: 101,
+    status: 'agent-running',
+    phase: 'reviewing',
+    branch: 'feature/import-me',
+    prNumber: 45,
+    events: [{ event: 'validation-summary', result: 'PASS', commit: HEAD }],
+    activity: [],
+  });
+  const beforeRun = loadRun(root, 101);
+  const marker = `<!-- paseo-review:v1\n${JSON.stringify({
+    reviewRequestId: staged.reviewJob.reviewRequestId,
+    repository: 'owner/repo',
+    pullRequestNumber: 45,
+    issueNumber: 101,
+    headSha: HEAD,
+    reviewRound: 1,
+    stage: 'full',
+    round: 1,
+    promptVersion: 2,
+    result: 'approved',
+  })}\n-->\nApproved imported PR.`;
+
+  const outcome = reconcileManagedPullRequestWithWebFullReview(root, managed.id, {
+    snapshot: {
+      ...pr,
+      state: 'MERGED',
+      mergedAt: '2026-08-18T03:00:00Z',
+      labels: [],
+      comments: [{ id: 3, body: marker }],
+    },
+    effectRunner: () => [],
+  });
+  const after = loadPrReviewStore(root);
+
+  assert.equal(outcome.held, true);
+  assert.deepEqual(outcome.finalization, []);
+  assert.deepEqual(loadRun(root, 101), beforeRun);
+  assert.equal(after.managedPullRequests[0].reviewState, 'awaiting_result');
+  assert.equal(after.reviewJobs[0].state, 'awaiting_result');
+});
+
+test('imported quick-manual review fails closed without creating a legacy job', async (t) => {
+  const { root, pr, issue } = fixture(t, { workflow: 'quick-manual' });
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
+  await assert.rejects(
+    () => reviewNow(root, pr, issue, () => ({ result: 'pass', summary: 'Unexpected review.', findings: [] })),
+    /explicit full-immediate workflow/,
+  );
+  assert.equal(loadPrReviewStore(root).reviewJobs.length, 0);
+});
+
+test('imported review worker selection fails closed when workflow configuration is invalid', (t) => {
+  const { root } = fixture(t, { workflow: 'full-immediate' });
+  const job = loadPrReviewStore(root).reviewJobs[0];
+  writeFileSync(statePaths(root).config, '{ invalid config');
+  assert.throws(
+    () => reviewWorkerPath(root, job.id),
+    /cannot be selected without valid review workflow configuration/,
+  );
 });
 
 test('exhausted Light changes remain a repair hold instead of handing off on the same head', async (t) => {
