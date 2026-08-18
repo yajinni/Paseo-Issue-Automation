@@ -69,11 +69,22 @@ export function fetchDependencyPr(root, reference, { jsonRunner = runJson } = {}
 
 export function refreshBase(root, baseBranch, { runner = run } = {}) {
   const remoteRef = `refs/remotes/origin/${baseBranch}`;
-  const result = runner('git', ['fetch', '--prune', 'origin', `${baseBranch}:${remoteRef}`], {
+  const fetchRef = `+refs/heads/${baseBranch}:${remoteRef}`;
+  const result = runner('git', ['fetch', 'origin', fetchRef], {
     cwd: root,
     allowFailure: true,
   });
-  return { ok: result.ok, remoteRef, detail: result.stderr || result.stdout || null };
+  if (!result.ok) return { ok: false, remoteRef, detail: result.stderr || result.stdout || null };
+
+  const verified = runner('git', ['show-ref', '--verify', '--quiet', remoteRef], {
+    cwd: root,
+    allowFailure: true,
+  });
+  return {
+    ok: verified.ok,
+    remoteRef,
+    detail: verified.ok ? (result.stderr || result.stdout || null) : (verified.stderr || verified.stdout || null),
+  };
 }
 
 export function commitIsInBase(root, commit, remoteRef, { runner = run } = {}) {
