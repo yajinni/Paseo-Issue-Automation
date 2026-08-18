@@ -138,7 +138,7 @@ test('real local Git refresh preserves ancestry, advances tracking refs, support
       '+refs/heads/main:refs/heads/main',
     ]);
     runGit(tempRoot, ['--git-dir', origin, 'update-ref', 'refs/heads/release', 'refs/heads/main']);
-    runGit(tempRoot, ['clone', origin, worker]);
+    runGit(tempRoot, ['clone', '--no-hardlinks', origin, worker]);
     configureGit(worker);
 
     const initialMainSha = runGit(worker, ['rev-parse', 'refs/remotes/origin/main']);
