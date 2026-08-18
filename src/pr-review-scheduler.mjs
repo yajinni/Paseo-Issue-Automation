@@ -7,6 +7,7 @@ import { acquireLease, releaseLease, transferLease } from './durable-lease.mjs';
 import { claimNextReview, markReviewSubmissionFailed } from './pr-review-queue.mjs';
 import { findManaged, findReviewJob, loadPrReviewStore } from './pr-review-store.mjs';
 import { webChatGptFullReviewMetadata } from './web-chatgpt-full-review.mjs';
+import { loadConfig } from './state.mjs';
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const legacyWorkerPath = path.join(sourceDirectory, 'pr-review-worker.mjs');
@@ -19,13 +20,27 @@ function safeSchedulerLog(root, input) {
 }
 
 export function reviewWorkerPath(root, jobId) {
+  const metadata = webChatGptFullReviewMetadata(root, jobId);
   const store = loadPrReviewStore(root);
   const job = findReviewJob(store, jobId);
   const managed = job ? findManaged(store, job.managedPullRequestId) : null;
   if (managed?.provenance?.type === 'manual-import') {
-    throw new Error('Manual-import review execution is not implemented in this registration foundation; no review worker can be selected.');
+    let workflow;
+    try {
+      workflow = loadConfig(root).review?.workflow;
+    } catch {
+      throw new Error(`Imported review job ${jobId} cannot be selected without valid review workflow configuration.`);
+    }
+    if (!['quick-web-chatgpt', 'full-immediate'].includes(workflow)) {
+      throw new Error(`Imported review job ${jobId} cannot run under the ${workflow || 'unknown'} workflow.`);
+    }
+    if (workflow === 'quick-web-chatgpt'
+        && (!metadata || metadata.stage !== 'full'
+          || String(metadata.headSha || '').toLowerCase() !== String(job.headSha || '').toLowerCase())) {
+      throw new Error(`Imported quick-web review job ${jobId} lacks matching exact-head Full metadata.`);
+    }
   }
-  return webChatGptFullReviewMetadata(root, jobId) ? fullReviewWorkerPath : legacyWorkerPath;
+  return metadata ? fullReviewWorkerPath : legacyWorkerPath;
 }
 
 export function tickReviewScheduler(root, { spawnWorker = true, now = Date.now() } = {}) {

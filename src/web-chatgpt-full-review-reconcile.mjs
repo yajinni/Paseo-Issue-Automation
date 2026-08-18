@@ -98,6 +98,7 @@ function carryFullReviewMetadataToCurrentHeads(root) {
   const store = loadPrReviewStore(root);
   const carried = [];
   for (const managed of store.managedPullRequests) {
+    if (managed.provenance?.type === 'manual-import') continue;
     const current = store.reviewJobs
       .filter((job) => job.managedPullRequestId === managed.id
         && job.headSha === managed.currentHeadSha
@@ -113,6 +114,7 @@ function carryFullReviewMetadataToCurrentHeads(root) {
     const nextRound = Number(prior.metadata.stageRound) + 1;
     if (nextRound > Number(prior.metadata.maxStageRounds)) continue;
     const metadata = recordWebChatGptFullReviewMetadata(root, current.id, {
+      headSha: current.headSha,
       stageRound: nextRound,
       maxStageRounds: prior.metadata.maxStageRounds,
       quickFindings: prior.metadata.quickFindings,
@@ -128,6 +130,7 @@ function finalizeReadyManagedApprovals(root, options = {}) {
   const store = loadPrReviewStore(root);
   const finalized = [];
   for (const managed of store.managedPullRequests) {
+    if (managed.provenance?.type === 'manual-import') continue;
     if (managed.reviewState !== 'ready_to_merge') continue;
     const state = loadRun(root, managed.issueNumber);
     if (!state || state.reviewRuntimeStage === 'full-manual') continue;

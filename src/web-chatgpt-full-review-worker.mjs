@@ -5,7 +5,7 @@ import { submitReviewPrompt } from './browser-service.mjs';
 import { expiredProfileSession } from './chatgpt-profile-readiness.mjs';
 import { appendControllerLog } from './controller-log.mjs';
 import { releaseLease, startLeaseHeartbeat } from './durable-lease.mjs';
-import { PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
+import { managedPrSnapshot, PR_REVIEW_LABELS, setPrReviewLabels } from './pr-review-github.mjs';
 import { markReviewSubmitted, markReviewSubmissionFailed } from './pr-review-queue.mjs';
 import { findManaged, findReviewJob, loadPrReviewStore, mutatePrReviewStore } from './pr-review-store.mjs';
 import {
@@ -30,6 +30,8 @@ export function resolveFullReviewConversationUrl(store, managed, job) {
 
 export async function executeWebChatGptFullReviewSubmission(root, jobId, {
   submitter = submitReviewPrompt,
+  snapshotReader = managedPrSnapshot,
+  labelSetter = setPrReviewLabels,
 } = {}) {
   const store = loadPrReviewStore(root);
   const job = findReviewJob(store, jobId);
@@ -40,6 +42,14 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
   if (managed.currentHeadSha !== job.headSha) throw new Error('The PR head changed before Web ChatGPT full-review submission began.');
   const metadata = webChatGptFullReviewMetadata(root, job.id);
   if (!metadata) throw new Error('Web ChatGPT full-review metadata is missing for the claimed review job.');
+  if (metadata.headSha && String(metadata.headSha).toLowerCase() !== String(job.headSha).toLowerCase()) {
+    throw new Error('Web ChatGPT full-review metadata does not match the claimed exact PR head.');
+  }
+  const current = snapshotReader(root, managed.pullRequestNumber);
+  if (!current || String(current.state || '').toUpperCase() !== 'OPEN'
+      || String(current.headRefOid || '').toLowerCase() !== String(job.headSha || '').toLowerCase()) {
+    throw new Error('The open PR head changed before Web ChatGPT full-review submission.');
+  }
   const conversationUrl = resolveFullReviewConversationUrl(store, managed, job);
   if (!conversationUrl) throw new Error('No ChatGPT conversation is configured for this PR or project.');
   const prompt = renderWebChatGptFullReviewPrompt({ managed, job, metadata });
@@ -58,12 +68,18 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
     },
   });
   try {
-    setPrReviewLabels(root, managed.pullRequestNumber, {
+    labelSetter(root, managed.pullRequestNumber, {
       add: [PR_REVIEW_LABELS.reviewing],
       remove: [PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.failed],
     });
+    const latest = snapshotReader(root, managed.pullRequestNumber);
+    if (!latest || String(latest.state || '').toUpperCase() !== 'OPEN'
+        || String(latest.headRefOid || '').toLowerCase() !== String(job.headSha || '').toLowerCase()) {
+      throw new Error('The open PR head changed immediately before Web ChatGPT full-review submission.');
+    }
     const result = await submitter({ conversationUrl, prompt, reviewRequestId: job.reviewRequestId });
     const saved = markReviewSubmitted(root, job.id, result);
+    if (saved.state === 'superseded' || saved.state === 'cancelled') return saved;
     safeLog(root, {
       action: 'submit-web-chatgpt-full-review',
       status: 'success',
@@ -75,9 +91,10 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
     const expired = expiredProfileSession(error);
     const diagnostics = error.diagnostics || {};
     const saved = markReviewSubmissionFailed(root, job.id, error, diagnostics);
+    if (saved.state === 'superseded' || saved.state === 'cancelled') return saved;
     if (expired) {
       mutatePrReviewStore(root, (next) => pauseWebReviewsForExpiredProfile(next, { reason: expired.message }));
-      setPrReviewLabels(root, managed.pullRequestNumber, {
+      labelSetter(root, managed.pullRequestNumber, {
         add: [PR_REVIEW_LABELS.queued],
         remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.failed],
       });
@@ -95,7 +112,7 @@ export async function executeWebChatGptFullReviewSubmission(root, jobId, {
       });
       return { ...saved, profileSignInRequired: true, queuePaused: true };
     }
-    setPrReviewLabels(root, managed.pullRequestNumber, {
+    labelSetter(root, managed.pullRequestNumber, {
       add: [PR_REVIEW_LABELS.failed],
       remove: [PR_REVIEW_LABELS.reviewing],
     });

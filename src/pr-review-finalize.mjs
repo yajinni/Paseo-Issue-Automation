@@ -173,6 +173,7 @@ export function recordApprovedBrowserReview(root, managed, reviewJob, {
   findings = 'Browser Reviewer approved this exact validated commit.',
 } = {}) {
   const state = loadRun(root, managed.issueNumber);
+  if (managed.provenance?.type === 'manual-import') return state;
   if (!state) throw new Error(`No automation state exists for issue #${managed.issueNumber}.`);
   if (importedFinalizationEvidence(reviewJob)) return state;
   const existing = (state.events || []).some((event) => event.event === 'review'
@@ -204,7 +205,7 @@ export function finalizeApprovedBrowserReview(root, managed, reviewJob, {
   pr = null,
   gate = null,
 } = {}) {
-  if (importedFinalizationEvidence(reviewJob)) {
+  if (managed.provenance?.type === 'manual-import' || importedFinalizationEvidence(reviewJob)) {
     return {
       mode: 'managed-finalization',
       unchanged: true,

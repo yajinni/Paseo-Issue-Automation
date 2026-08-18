@@ -35,7 +35,7 @@ The repository selector must match the configured checkout. Registration fails c
 
 The repository-scoped API is `POST /api/repositories/{repository-selector}/pr-reviews/import` with `{ "pullRequestNumber": PR, "issueNumber": N, "headSha": "FULL_HEAD_SHA" }`. The repository-local API is `POST /api/pr-reviews/import` with `id: "OWNER/REPOSITORY#PR"` and the same optional fields.
 
-Successful imports are idempotent by canonical repository and pull-request identity and persist `manual-import` provenance containing the exact PR, issue, base, branch, and head. This registration foundation intentionally does not execute imported reviews: `pr-review review-now` fails closed with an incomplete-capability error and creates no review job or legacy worker selection. Controller-created managed PR registration and review behavior are unchanged.
+Successful imports are idempotent by canonical repository and pull-request identity and persist `manual-import` provenance containing the exact PR, issue, base, branch, and head. Under the explicitly selected `quick-web-chatgpt` workflow, `pr-review review-now` runs an import-aware Light review first. A Light repair holds the imported PR until its exact head advances; a passing Light review creates exact-head Web ChatGPT Full metadata and selects the Full worker. Stale and pre-Light head advances reset to staged Light without creating a legacy review job or issue/coder/controller/workspace state. Imported finalization remains fail-closed until its guarded lifecycle capability is enabled. Controller-created managed PR registration and review behavior are unchanged.
 
 ## Persistent state
 

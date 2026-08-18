@@ -477,7 +477,8 @@ export function prepareManagedFinalizationEvidence(root) {
   const store = loadPrReviewStore(root);
   const prepared = [];
   for (const managed of store.managedPullRequests) {
-    if (['merged', 'closed_unmerged'].includes(managed.reviewState)) continue;
+    if (managed.provenance?.type === 'manual-import'
+        || ['merged', 'closed_unmerged'].includes(managed.reviewState)) continue;
     const state = loadRun(root, managed.issueNumber);
     if (!state) continue;
     const head = normalizedHead(managed.currentHeadSha);

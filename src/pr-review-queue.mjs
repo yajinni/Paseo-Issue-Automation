@@ -10,6 +10,7 @@ import {
   nextQueuePosition,
   nowIso,
   TERMINAL_PR_STATES,
+  TERMINAL_REVIEW_JOB_STATES,
   transitionManaged,
 } from './pr-review-store.mjs';
 import { managedPrSnapshot } from './pr-review-github.mjs';
@@ -29,16 +30,21 @@ function queuedReviewJobs(store, managedId) {
 function supersedeOlderJobs(store, managed, headSha, at) {
   for (const job of queuedReviewJobs(store, managed.id)) {
     if (job.headSha === headSha) continue;
-    const previous = job.state;
-    job.state = 'superseded';
-    job.completedAt = at;
-    job.updatedAt = at;
-    appendHistory(store, {
-      entityType: 'review_job', entityId: job.id, previousState: previous, newState: 'superseded',
-      reason: `Superseded by newer PR head ${headSha}.`, actor: 'queue', sha: headSha, timestamp: at,
-    });
-    if (store.runtime.activeReviewJobId === job.id) store.runtime.activeReviewJobId = null;
+    supersedeReviewJob(store, job, `Superseded by newer PR head ${headSha}.`, at, 'queue');
   }
+}
+
+function supersedeReviewJob(store, job, reason, at, actor = 'review-reconciliation') {
+  const previous = job.state;
+  job.state = 'superseded';
+  job.completedAt = at;
+  job.updatedAt = at;
+  job.lastError = reason;
+  appendHistory(store, {
+    entityType: 'review_job', entityId: job.id, previousState: previous, newState: 'superseded',
+    reason, actor, sha: job.headSha, timestamp: at,
+  });
+  if (store.runtime.activeReviewJobId === job.id) store.runtime.activeReviewJobId = null;
 }
 
 export function enqueueReviewInStore(store, managed, {
@@ -48,9 +54,6 @@ export function enqueueReviewInStore(store, managed, {
   conversationUrlOverride = null,
   now = Date.now(),
 } = {}) {
-  if (managed.provenance?.type === 'manual-import') {
-    throw new Error('Manual-import review execution is not implemented in this registration foundation; review-now cannot enqueue an imported PR review.');
-  }
   if (TERMINAL_PR_STATES.has(managed.reviewState)) throw new Error(`Managed PR ${managed.id} is terminal and cannot be queued.`);
   const sha = validSha(headSha);
   const at = nowIso(now);
@@ -115,6 +118,7 @@ export function enqueueReviewInStore(store, managed, {
   };
   store.reviewJobs.push(job);
   managed.currentHeadSha = sha;
+  managed.lastValidatedReviewSha = null;
   managed.queuePosition = job.queuePosition;
   managed.activeReviewRequestId = job.reviewRequestId;
   transitionManaged(store, managed, 'queued', { reason: `Review queued for ${sha}.`, actor: 'queue', sha, at });
@@ -146,11 +150,13 @@ export function registerManagedPullRequest(root, input, options = {}) {
         worktreePath: registrationInput.worktreePath || null,
         workspaceId: registrationInput.workspaceId || null,
         coderAgentId: registrationInput.coderAgentId || null,
-        currentHeadSha: validSha(registrationInput.currentHeadSha),
-        lastSubmittedReviewSha: null,
-        lastCompletedReviewSha: null,
-        reviewRound: Math.max(1, Number(registrationInput.reviewRound) || 1),
-        reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
+         currentHeadSha: validSha(registrationInput.currentHeadSha),
+         lastSubmittedReviewSha: null,
+         lastCompletedReviewSha: null,
+         lastValidatedReviewSha: null,
+         reviewRound: Math.max(1, Number(registrationInput.reviewRound) || 1),
+         reviewPromptVersion: store.config.browserReview.reviewPromptVersion,
+         stagedReviewEvents: [],
          reviewState: options.skipQueue
            ? 'paused'
            : store.config.reviewQueue?.paused === false && store.config.browserReview.enabled ? 'queued' : 'paused',
@@ -176,12 +182,15 @@ export function registerManagedPullRequest(root, input, options = {}) {
         sha: managed.currentHeadSha, timestamp: at,
       });
     } else {
+      const previousHeadSha = String(managed.currentHeadSha || '').toLowerCase();
+      const nextHeadSha = validSha(registrationInput.currentHeadSha);
       Object.assign(managed, {
         issueNumber: Number(registrationInput.issueNumber), issueUrl: registrationInput.issueUrl || managed.issueUrl,
         pullRequestUrl: String(registrationInput.pullRequestUrl || managed.pullRequestUrl), branchName: String(registrationInput.branchName || managed.branchName),
         worktreePath: registrationInput.worktreePath || managed.worktreePath, workspaceId: registrationInput.workspaceId || managed.workspaceId,
-        coderAgentId: registrationInput.coderAgentId || managed.coderAgentId, currentHeadSha: validSha(registrationInput.currentHeadSha), updatedAt: at, lastActivityAt: at,
+        coderAgentId: registrationInput.coderAgentId || managed.coderAgentId, currentHeadSha: nextHeadSha, updatedAt: at, lastActivityAt: at,
       });
+      if (nextHeadSha !== previousHeadSha) managed.lastValidatedReviewSha = null;
       if (registrationInput.baseBranch) managed.baseBranch = String(registrationInput.baseBranch);
       if (registrationInput.provenance) managed.provenance = clone(registrationInput.provenance);
     }
@@ -208,8 +217,8 @@ export function nextDueReview(store, now = Date.now()) {
       if (job.state !== 'queued' || Date.parse(job.dueAt) > now) return false;
       const managed = findManaged(store, job.managedPullRequestId);
       return Boolean(managed
-        && managed.provenance?.type !== 'manual-import'
         && managed.reviewState !== 'paused'
+        && !(managed.provenance?.type === 'manual-import' && managed.reviewState === 'changes_requested')
         && !TERMINAL_PR_STATES.has(managed.reviewState));
     })
     .sort((a, b) => Number(b.priority) - Number(a.priority) || Number(a.queuePosition) - Number(b.queuePosition))[0] || null;
@@ -236,7 +245,13 @@ export function markReviewSubmitted(root, jobId, result) {
   return mutatePrReviewStore(root, (store) => {
     const job = findReviewJob(store, jobId);
     if (!job) throw new Error(`Review job ${jobId} was not found.`);
+    if (TERMINAL_REVIEW_JOB_STATES.has(job.state)) return clone(job);
+    if (job.state !== 'submitting') throw new Error(`Review job ${jobId} is not in submitting state.`);
     const managed = findManaged(store, job.managedPullRequestId);
+    if (managed && String(managed.currentHeadSha || '').toLowerCase() !== String(job.headSha || '').toLowerCase()) {
+      supersedeReviewJob(store, job, 'The review job no longer owns the managed pull-request head.', nowIso(), 'review-reconciliation');
+      return clone(job);
+    }
     const at = result.submittedAt || nowIso();
     job.state = 'awaiting_result';
     job.submittedAt = at;
@@ -258,7 +273,13 @@ export function markReviewSubmissionFailed(root, jobId, error, diagnostics = {})
   return mutatePrReviewStore(root, (store) => {
     const job = findReviewJob(store, jobId);
     if (!job) throw new Error(`Review job ${jobId} was not found.`);
+    if (TERMINAL_REVIEW_JOB_STATES.has(job.state)) return clone(job);
+    if (job.state !== 'submitting') throw new Error(`Review job ${jobId} is not in submitting state.`);
     const managed = findManaged(store, job.managedPullRequestId);
+    if (managed && String(managed.currentHeadSha || '').toLowerCase() !== String(job.headSha || '').toLowerCase()) {
+      supersedeReviewJob(store, job, 'The failed review job no longer owns the managed pull-request head.', nowIso(), 'review-reconciliation');
+      return clone(job);
+    }
     const at = nowIso();
     const retryable = job.attempts < store.config.browserReview.maxSubmissionAttempts;
     job.state = retryable ? 'queued' : 'failed';
@@ -284,6 +305,10 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
   const existing = store.fixJobs.find((job) => job.reviewRequestId === reviewJob.reviewRequestId);
   if (existing) return existing;
   const at = nowIso(now);
+  const imported = managed.provenance?.type === 'manual-import';
+  const repairReason = imported
+    ? 'Imported PR findings are recorded for external same-PR repair; Paseo will not create coder, workspace, or controller state.'
+    : 'Validated review findings created a coding fix job.';
   const job = {
     id: `fix-${randomUUID()}`,
     managedPullRequestId: managed.id,
@@ -297,7 +322,7 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
     branchName: managed.branchName,
     reviewedHeadSha: reviewJob.headSha,
     findings: String(findings || ''),
-    state: 'queued',
+    state: imported ? 'paused' : 'queued',
     priority: managed.priority || 0,
     attempts: 0,
     workerLease: null,
@@ -318,8 +343,18 @@ export function createFixJobInStore(store, managed, reviewJob, findings, {
   managed.lastCompletedReviewSha = reviewJob.headSha;
   managed.lastReviewCommentId = sourceCommentId;
   managed.lastProcessedReviewRequestId = reviewJob.reviewRequestId;
-  transitionManaged(store, managed, 'fix_queued', { reason: 'Validated review findings created a coding fix job.', actor: 'reconciliation', sha: reviewJob.headSha, at });
-  appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: null, newState: 'queued', reason: 'Fix job created from matching review result.', actor: 'reconciliation', sha: reviewJob.headSha, timestamp: at });
+  if (imported) {
+    managed.activeReviewRequestId = null;
+    managed.queuePosition = null;
+  }
+  transitionManaged(store, managed, imported ? 'changes_requested' : 'fix_queued', {
+    reason: repairReason,
+    actor: 'reconciliation',
+    sha: reviewJob.headSha,
+    error: imported ? repairReason : undefined,
+    at,
+  });
+  appendHistory(store, { entityType: 'fix_job', entityId: job.id, previousState: null, newState: job.state, reason: imported ? repairReason : 'Fix job created from matching review result.', actor: 'reconciliation', sha: reviewJob.headSha, timestamp: at });
   return job;
 }
 
@@ -427,6 +462,9 @@ export function applyManualReviewResult(root, managedId, { result, findings = ''
     });
   }
   if (result !== 'approved') throw new Error('Manual result must be approved or changes_requested.');
+  if (selected.managed.provenance?.type === 'manual-import') {
+    throw new Error('Imported pull-request approvals cannot enter controller finalization.');
+  }
   const gate = evaluateApprovedReviewGate(root, selected.managed, selected.job, selected.pr);
   if (!gate.ok) throw new Error(gate.reason || 'The approved-review completion gate did not pass.');
   finalizeApprovedBrowserReview(root, selected.managed, selected.job, {

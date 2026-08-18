@@ -25,12 +25,9 @@ import {
 } from './pr-review-github.mjs';
 import { markIssueMerged } from './issue-merge-state.mjs';
 import { matchingReviewResult } from './review-result.mjs';
+import { loadConfig } from './state.mjs';
 
 const FINALIZATION_REQUEST_PREFIX = 'approved-finalization:';
-
-function labelNames(pr) {
-  return new Set((pr?.labels || []).map((label) => typeof label === 'string' ? label : label.name));
-}
 
 function activeReviewForManaged(store, managed) {
   if (managed.activeReviewRequestId) {
@@ -105,6 +102,14 @@ function hasExactApprovedReview(store, managed, mergedHead) {
 }
 
 function reconcileMergedInStore(store, managed, pr, at, precomputed = {}) {
+  if (managed.provenance?.type === 'manual-import') {
+    return {
+      state: managed.reviewState,
+      held: true,
+      reason: 'Imported PR merge reconciliation is held until guarded imported finalization exists.',
+      effects: [],
+    };
+  }
   const mergedHead = String(pr.headRefOid || managed.currentHeadSha || '').toLowerCase();
   const firstObservation = managed.reviewState !== 'merged';
   if (exactMergedApproval(precomputed, mergedHead)) {
@@ -166,7 +171,24 @@ function importedFinalizationEvidence(managed) {
   return String(managed.lastProcessedReviewRequestId || '').startsWith(FINALIZATION_REQUEST_PREFIX);
 }
 
-function reconcileHeadChange(store, managed, pr, at) {
+function importedLightRepairPending(managed, headSha) {
+  return managed.provenance?.type === 'manual-import'
+    && managed.reviewState === 'changes_requested'
+    && (managed.stagedReviewEvents || []).some((event) => event?.stage === 'quick'
+      && event?.result === 'changes'
+      && event?.decision === 'repair'
+      && String(event.headSha || '').toLowerCase() === String(headSha || '').toLowerCase());
+}
+
+function importedStagedLightReset(root, managed) {
+  if (managed.provenance?.type !== 'manual-import') return false;
+  let config;
+  try { config = loadConfig(root); } catch { return false; }
+  if (config.review?.workflow !== 'quick-web-chatgpt') return false;
+  return true;
+}
+
+function reconcileHeadChange(root, store, managed, pr, at) {
   const newSha = String(pr.headRefOid || '').toLowerCase();
   if (!newSha || newSha === managed.currentHeadSha) return null;
   const previousSha = managed.currentHeadSha;
@@ -198,6 +220,29 @@ function reconcileHeadChange(store, managed, pr, at) {
         pullRequestNumber: managed.pullRequestNumber,
         add: [PR_REVIEW_LABELS.failed],
         remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.queued, PR_REVIEW_LABELS.changesRequested],
+      }],
+    };
+  }
+
+  if (importedLightRepairPending(managed, previousSha) || importedStagedLightReset(root, managed)) {
+    const reason = `Imported PR head advanced from ${previousSha} to ${newSha}; prior staged review state is invalidated and a fresh Light review is required.`;
+    terminateManagedJobs(store, managed, reason, at);
+    managed.activeReviewRequestId = null;
+    managed.queuePosition = null;
+    transitionManaged(store, managed, 'queued', {
+      reason,
+      actor: 'reconciliation',
+      sha: newSha,
+      at,
+    });
+    return {
+      stagedReviewQueued: true,
+      headSha: newSha,
+      effects: [{
+        type: 'set-review-labels',
+        pullRequestNumber: managed.pullRequestNumber,
+        add: [PR_REVIEW_LABELS.queued],
+        remove: [PR_REVIEW_LABELS.reviewing, PR_REVIEW_LABELS.changesRequested, PR_REVIEW_LABELS.fixing, PR_REVIEW_LABELS.failed],
       }],
     };
   }
@@ -253,8 +298,15 @@ function reconcileReviewResultInStore(store, managed, pr, at, precomputed = {}) 
     enqueueReviewInStore(store, managed, { headSha: managed.currentHeadSha, now: Date.parse(at) });
     return { result: 'stale', requeued: true, effects: [] };
   }
+  if (managed.provenance?.type === 'manual-import' && resolvedResult.result === 'approved') {
+    return {
+      result: 'approved',
+      held: true,
+      reason: 'Imported Full approval is held until guarded imported finalization exists.',
+      effects: [],
+    };
+  }
   if (resolvedResult.result === 'changes_requested') {
-    if (!labelNames(pr).has(PR_REVIEW_LABELS.changesRequested)) return null;
     const fixJob = createFixJobInStore(store, managed, reviewJob, resolvedResult.humanMarkdown, {
       sourceCommentId: resolvedResult.sourceId,
       reviewResult: 'changes_requested',
@@ -443,13 +495,16 @@ export function reconcileManagedPullRequest(root, managedId, {
   const current = loadPrReviewStore(root);
   const currentManaged = findManaged(current, managedId);
   if (!currentManaged) throw new Error(`Managed PR ${managedId} was not found.`);
-  if (currentManaged.reviewState === 'paused') return { state: 'paused', skipped: true };
+  if (currentManaged.reviewState === 'paused' && !importedStagedLightReset(root, currentManaged)) {
+    return { state: 'paused', skipped: true };
+  }
   const pr = snapshot || managedPrSnapshot(root, currentManaged.pullRequestNumber);
   if (!pr) throw new Error(`Could not reconcile PR #${currentManaged.pullRequestNumber}.`);
 
   const precomputed = reviewResultForSnapshot(current, currentManaged, pr);
   const mergedSnapshot = Boolean(pr.mergedAt || String(pr.state).toUpperCase() === 'MERGED');
-  if (precomputed.result?.result === 'approved' && precomputed.reviewJob
+  if (currentManaged.provenance?.type !== 'manual-import'
+      && precomputed.result?.result === 'approved' && precomputed.reviewJob
       && currentManaged.currentHeadSha === precomputed.result.headSha) {
     if (mergedSnapshot && exactMergedApproval(precomputed, String(pr.headRefOid || '').toLowerCase())) {
       recordApprovedBrowserReview(root, currentManaged, precomputed.reviewJob, {
@@ -482,11 +537,12 @@ export function reconcileManagedPullRequest(root, managedId, {
     if (String(pr.state).toUpperCase() === 'CLOSED') {
       return reconcileClosedUnmergedInStore(store, managed, at);
     }
-    const headJob = reconcileHeadChange(store, managed, pr, at);
+    const headJob = reconcileHeadChange(root, store, managed, pr, at);
     const review = reconcileReviewResultInStore(store, managed, pr, at, precomputed);
     return {
       state: managed.reviewState,
       headChanged: Boolean(headJob),
+      stagedReviewQueued: Boolean(headJob?.stagedReviewQueued),
       review,
       effects: [...(headJob?.effects || []), ...(review?.effects || [])],
     };
@@ -498,7 +554,7 @@ export function reconcileManagedPullRequest(root, managedId, {
 export function reconcileManagedPullRequests(root, options = {}) {
   const store = loadPrReviewStore(root);
   const records = store.managedPullRequests.filter((managed) => {
-    if (managed.reviewState === 'paused') return false;
+    if (managed.reviewState === 'paused' && !importedStagedLightReset(root, managed)) return false;
     const pendingMergedCompletion = managed.reviewState === 'merged'
       && (managed.issueClosurePending || managed.lifecycleCompletionPending || !managed.issueLifecycleLabelsClearedAt);
     return !TERMINAL_PR_STATES.has(managed.reviewState) || pendingMergedCompletion;
